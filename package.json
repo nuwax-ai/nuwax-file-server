@@ -1,0 +1,93 @@
+{
+  "name": "nuwax-file-server",
+  "displayName": "nuwax-file-server",
+  "version": "1.2.0",
+  "description": "跨平台的文件服务部署工具，支持 start/stop/restart 命令行操作",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "nuwax-file-server": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "scripts": {
+    "start": "nodemon src/server.js",
+    "dev": "nodemon scripts/start-dev.js",
+    "test": "nodemon scripts/start-test.js",
+    "prod": "node scripts/start-prod.js",
+    "test:run": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
+    "test:watch": "jest --watch",
+    "test:unit": "jest --testPathPattern=tests/unit",
+    "test:integration": "jest --testPathPattern=tests/integration",
+    "start:test": "nodemon scripts/start-test.js",
+    "pnpm:check:dev": "NODE_ENV=development node scripts/pnpm-check-wrapper.js",
+    "pnpm:check:prod": "NODE_ENV=production node scripts/pnpm-check-wrapper.js",
+    "pnpm:check:test": "NODE_ENV=test node scripts/pnpm-check-wrapper.js",
+    "pnpm:prune": "pnpm store prune",
+    "pnpm:prune:manual": "node scripts/pnpm-prune-manual.js",
+    "pnpm:status": "pnpm store status",
+    "cli:start": "node src/cli.js start",
+    "cli:stop": "node src/cli.js stop",
+    "cli:restart": "node src/cli.js restart",
+    "cli:status": "node src/cli.js status",
+    "cli:start:dev": "node src/cli.js start --env development",
+    "cli:start:prod": "node src/cli.js start --env production",
+    "cli:start:test": "node src/cli.js start --env test",
+    "build": "node scripts/build.js",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "",
+  "license": "ISC",
+  "keywords": [
+    "file-server",
+    "deployer",
+    "cli",
+    "cross-platform",
+    "nuwax"
+  ],
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "bugs": {
+    "url": ""
+  },
+  "homepage": "",
+  "dependencies": {
+    "archiver": "^5.3.2",
+    "commander": "^12.0.0",
+    "concurrently": "^9.2.1",
+    "cross-spawn": "^7.0.6",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "fs-extra": "^11.2.0",
+    "iconv-lite": "^0.7.0",
+    "isbinaryfile": "^5.0.6",
+    "json-bigint": "^1.0.0",
+    "mime-types": "^3.0.1",
+    "multer": "^2.0.2",
+    "node-cron": "^3.0.3",
+    "pm2": "^6.0.11",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.0",
+    "tree-kill": "^1.2.2",
+    "uuid": "^13.0.0",
+    "yauzl": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "esbuild": "^0.24.2",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.10",
+    "supertest": "^6.3.4"
+  }
+}
