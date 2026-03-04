@@ -53,7 +53,8 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
       if (sub.length === 0) {
         // 空目录，返回目录信息
         const referencePath = basePath || targetDir;
-        const relativePath = path.relative(referencePath, fullPath);
+        // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
+        const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
         files.push({
           name: relativePath,
           isDir: true,
@@ -65,7 +66,8 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
       try {
         const stats = await fs.promises.stat(fullPath);
         const referencePath = basePath || targetDir;
-        const relativePath = path.relative(referencePath, fullPath);
+        // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
+        const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
 
         const binary = isBinaryFile(fullPath);
         const isLink = entry.isSymbolicLink();
