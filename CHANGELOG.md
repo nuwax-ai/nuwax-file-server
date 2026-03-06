@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-03-06
+
+### Added
+
+- **性能耗时日志**
+  - 所有关键 API 接口（项目初始化、更新、目录/文件列表）添加 INFO 级别耗时日志，包含 `elapsedMs` 数值字段
+  - 中间步骤（备份、解压、文件写入、清理等）添加 DEBUG 级别耗时日志
+  - 错误路径统一添加 `elapsedMs` 字段，便于排查超时和异常耗时问题
+
+### Changed
+
+- **日志级别优化**
+  - 中间步骤日志（备份、解压、文件写入等"开始"类日志）从 INFO 降级为 DEBUG，减少生产环境日志噪音
+  - 通过 `LOG_LEVEL` 环境变量控制日志输出级别（error > warn > info > debug）
+
+- **日志格式统一**
+  - 所有耗时字段统一使用 `elapsedMs`（数值类型，单位毫秒），便于日志聚合和监控系统解析
+  - 移除冗余的重复日志输出
+
+### Fixed
+
+- **downloadAllFiles 耗时统计修正**
+  - 将耗时记录从压缩准备阶段移至 `archive.on("end")` 事件，准确反映实际压缩完成时间
+
 ## [1.2.0] - 2026-02-06
 
 ### Added

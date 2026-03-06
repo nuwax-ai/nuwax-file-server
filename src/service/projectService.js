@@ -27,6 +27,7 @@ import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
  * @returns {Promise<Object>} 创建结果
  */
 async function createProject(projectId) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -55,6 +56,8 @@ async function createProject(projectId) {
     );
     const templateDir = path.join(initDir, config.INIT_PROJECT_NAME);
 
+    log(projectId, "DEBUG", "开始检查模板目录", { templateDir, templateZipPath });
+
     // 如果模板目录不存在，则尝试从zip解压
     if (!fs.existsSync(templateDir)) {
       if (!fs.existsSync(templateZipPath)) {
@@ -81,6 +84,7 @@ async function createProject(projectId) {
     }
 
     // 将模板内容复制到项目目录（不包含顶层 react-vite 目录）
+    log(projectId, "DEBUG", "开始复制模板内容到项目目录", { templateDir, projectPath });
     const entries = await fs.promises.readdir(templateDir, {
       withFileTypes: true,
     });
@@ -97,10 +101,11 @@ async function createProject(projectId) {
       }
     }
 
-    log(projectId, "INFO", `项目 ${projectId} 初始化成功`, { projectId });
-
     // 为项目创建 .npmrc 配置文件
+    log(projectId, "DEBUG", "开始创建 .npmrc 配置文件", { projectPath });
     await createPnpmNpmrc(projectPath, projectId);
+
+    log(projectId, "INFO", `项目 ${projectId} 初始化成功`, { projectId, elapsedMs: Date.now() - startTime });
 
     return {
       success: true,
@@ -110,6 +115,7 @@ async function createProject(projectId) {
   } catch (error) {
     log(projectId, "ERROR", `项目 ${projectId} 初始化失败: ${error.message}`, {
       projectId,
+      elapsedMs: Date.now() - startTime,
     });
     throw new SystemError(`项目 ${projectId} 初始化失败: ${error.message}`, {
       projectId,
@@ -241,6 +247,7 @@ async function uploadProject(
   pid,
   basePath
 ) {
+  const startTime = Date.now();
   // 项目源文件所在目录
   const projectSourceDir = config.PROJECT_SOURCE_DIR;
   const projectPath = path.join(projectSourceDir, projectId);
@@ -322,22 +329,24 @@ async function uploadProject(
     log(projectId, "INFO", `项目目录创建成功: ${projectPath}`, { projectId });
 
     // 解压压缩包到项目目录
-    log(projectId, "INFO", "开始解压压缩包", { projectId });
+    log(projectId, "DEBUG", "开始解压压缩包", { projectId, zipFilePath });
     await extractZip(zipFilePath, projectPath);
-    log(projectId, "INFO", "压缩包解压完成", { projectId });
+    log(projectId, "DEBUG", "压缩包解压完成", { projectId });
 
     // 检查并移除顶层文件夹
-    log(projectId, "INFO", "检查并处理顶层文件夹", { projectId });
+    log(projectId, "DEBUG", "检查并处理顶层文件夹", { projectId });
     await removeTopLevelFolder(projectPath);
 
     // 检查并删除 node_modules 文件夹
-    log(projectId, "INFO", "检查并删除 node_modules 文件夹", { projectId });
+    log(projectId, "DEBUG", "检查并删除 node_modules 文件夹", { projectId });
     await removeNodeModules(projectPath);
 
     // 为项目创建 .npmrc 配置文件
+    log(projectId, "DEBUG", "开始创建 .npmrc 配置文件", { projectId });
     await createPnpmNpmrc(projectPath, projectId);
 
     // 不需要启动dev,前端会调用启动
+    log(projectId, "INFO", `项目 ${projectId} 上传成功`, { projectId, codeVersion, elapsedMs: Date.now() - startTime });
     return {
       success: true,
       message: `项目 ${projectId} 上传成功`,
@@ -345,7 +354,7 @@ async function uploadProject(
       codeVersion: codeVersion,
     };
   } catch (error) {
-    log(projectId, "ERROR", `上传项目失败: ${error.message}`, { projectId });
+    log(projectId, "ERROR", `上传项目失败: ${error.message}`, { projectId, elapsedMs: Date.now() - startTime });
 
     // 上传失败时清理项目目录
     try {
@@ -410,6 +419,7 @@ async function backupProjectOfVersion(projectId, codeVersion) {
   const outZipPath = path.join(backupDir, zipName);
 
   // 进行备份
+  log(projectId, "DEBUG", "开始备份项目为zip", { projectId, versionNum, outZipPath });
   return await backupProjectToZip(projectId, projectPath, outZipPath);
 }
 
@@ -485,6 +495,7 @@ async function handleFileUpload(projectId, codeVersion, file) {
  * @returns {Promise<Object>} 删除结果
  */
 async function deleteProject(projectId, pid, req) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -580,12 +591,14 @@ async function deleteProject(projectId, pid, req) {
 
     log(logId, "INFO", `[delete-project] 项目删除完成: ${projectId}`, {
       projectId,
+      elapsedMs: Date.now() - startTime,
     });
     return result;
   } catch (error) {
     log(logId, "ERROR", `[delete-project] 删除项目失败: ${error.message}`, {
       projectId,
       originalError: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     // 如果错误不是自定义的错误类型，包装为系统错误
@@ -609,6 +622,7 @@ async function deleteProject(projectId, pid, req) {
  * @returns {Promise<{success:boolean, projectId:string, zipPath:string}>}
  */
 async function exportProject(projectId, codeVersion, exportType, configParam) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -678,13 +692,19 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
     }
 
     // 执行导出（不管有没有现成的zip包，都直接打zip包）
+    log(projectId, "DEBUG", "开始执行导出打包", { projectId, codeVersion });
     const outZipPath = await backupProjectOfVersion(projectId, codeVersion);
     log(projectId, "INFO", `项目已导出: ${outZipPath}`, {
       projectId,
       zipPath: outZipPath,
+      elapsedMs: Date.now() - startTime,
     });
     return { success: true, projectId, zipPath: outZipPath };
   } catch (e) {
+    log(projectId, "ERROR", `导出项目失败: ${e?.message}`, {
+      projectId,
+      elapsedMs: Date.now() - startTime,
+    });
     if (!e.isOperational) {
       throw new SystemError("导出项目失败", {
         projectId,
@@ -717,6 +737,7 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
  * 备份当前项目为指定版本zip
  */
 async function backupCurrentVersion(projectId, codeVersion) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -731,9 +752,14 @@ async function backupCurrentVersion(projectId, codeVersion) {
     log(projectId, "INFO", `当前版本已备份: ${zipPath}`, {
       projectId,
       zipPath,
+      elapsedMs: Date.now() - startTime,
     });
     return { success: true, projectId, zipPath };
   } catch (e) {
+    log(projectId, "ERROR", `备份当前版本失败: ${e?.message}`, {
+      projectId,
+      elapsedMs: Date.now() - startTime,
+    });
     if (!e.isOperational) {
       throw new SystemError("备份当前版本失败", {
         projectId,

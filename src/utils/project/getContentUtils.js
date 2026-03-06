@@ -171,12 +171,15 @@ async function traverseDirectory(targetDir, basePath, projectId, proxyPath) {
  * @returns {Object} 包含文件列表的结果对象
  */
 async function getProjectContent(projectPath, command, proxyPath) {
+  const startTime = Date.now();
   const projectId = path.basename(projectPath);
 
   try {
     log(projectId, "INFO", "开始获取项目内容", { projectPath, command });
 
+    log(projectId, "DEBUG", "开始遍历项目目录", { projectPath });
     const files = await traverseDirectory(projectPath, null, projectId, proxyPath);
+    log(projectId, "DEBUG", "项目目录遍历完成", { projectPath, fileCount: files.length });
 
     // 根据 command 参数过滤 cpage_config.json
     let filteredFiles = files;
@@ -185,6 +188,7 @@ async function getProjectContent(projectPath, command, proxyPath) {
     }
 
     // 获取框架信息
+    log(projectId, "DEBUG", "开始检测框架信息", { projectPath });
     const frameworkInfo = getFrameworkInfo(projectPath);
 
     const result = {
@@ -200,6 +204,7 @@ async function getProjectContent(projectPath, command, proxyPath) {
         projectPath,
         fileCount: filteredFiles.length,
         command,
+        elapsedMs: Date.now() - startTime,
       }
     );
 
@@ -208,6 +213,7 @@ async function getProjectContent(projectPath, command, proxyPath) {
     log(projectId, "ERROR", `获取项目内容失败: ${error.message}`, {
       projectPath,
       originalError: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     throw new SystemError(`获取项目内容失败: ${error.message}`, {
@@ -225,6 +231,7 @@ async function getProjectContent(projectPath, command, proxyPath) {
  * @returns {Object} 包含文件列表的结果对象
  */
 async function getProjectContentByVersion(projectId, codeVersion, command, proxyPath) {
+  const startTime = Date.now();
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
     throw new ValidationError("代码版本必须是数字", { field: "codeVersion" });
@@ -263,15 +270,16 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
     });
 
     // 解压备份文件到临时目录
+    log(projectId, "DEBUG", "开始解压版本备份文件", { projectId, backupZipPath, tempExtractDir });
     await extractZip(backupZipPath, tempExtractDir);
-
-    log(projectId, "INFO", `版本 ${versionNum} 备份文件解压完成`, {
+    log(projectId, "DEBUG", `版本 ${versionNum} 备份文件解压完成`, {
       projectId,
       codeVersion: versionNum,
       tempExtractDir,
     });
 
     // 获取项目内容 - 使用统一的遍历函数，传入解压目录作为基准路径
+    log(projectId, "DEBUG", "开始遍历版本目录", { projectId, tempExtractDir });
     const files = await traverseDirectory(
       tempExtractDir,
       tempExtractDir,
@@ -292,6 +300,7 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
       codeVersion: versionNum,
       fileCount: result.files ? result.files.length : 0,
       command,
+      elapsedMs: Date.now() - startTime,
     });
 
     return result;

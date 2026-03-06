@@ -43,6 +43,7 @@ async function copyDirectoryFiltered(srcDir, destDir) {
  * @returns {Promise<string>} 生成的zip文件路径
  */
 async function backupProjectToZip(projectId, projectPath, outZipPath) {
+  const startTime = Date.now();
   const tempBase = path.join(config.UPLOAD_PROJECT_DIR, projectId);
   if (!fs.existsSync(tempBase)) {
     fs.mkdirSync(tempBase, { recursive: true });
@@ -51,7 +52,9 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
   await fs.promises.mkdir(tempDir, { recursive: true });
 
   try {
+    log(projectId, "DEBUG", "开始复制项目文件到临时目录", { projectPath, tempDir });
     await copyDirectoryFiltered(projectPath, tempDir);
+    log(projectId, "DEBUG", "项目文件复制完成，开始压缩", { tempDir, outZipPath });
 
     // 使用 archiver 进行压缩，避免依赖系统 zip
     await fs.promises.mkdir(path.dirname(outZipPath), { recursive: true });
@@ -109,6 +112,7 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
     log(projectId, "INFO", `项目已备份: ${outZipPath}`, {
       projectId,
       outZipPath,
+      elapsedMs: Date.now() - startTime,
     });
 
     return outZipPath;
@@ -130,11 +134,13 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
  * @param {string} zipPath zip备份文件路径
  */
 async function restoreProjectFromZip(projectId, projectPath, zipPath) {
+  const startTime = Date.now();
   // 获取排除列表（与备份时使用的规则一致）
   const excludeDirNames = new Set(config.TRAVERSE_EXCLUDE_DIRS || []);
   const excludeFileNames = new Set(config.BACKUP_TRAVERSE_EXCLUDE_FILES || []);
   
   // 清空目录内容，但保留被排除的目录和文件
+  log(projectId, "DEBUG", "开始清空项目目录（保留排除项）", { projectPath });
   const entries = await fs.promises.readdir(projectPath, {
     withFileTypes: true,
   });
@@ -160,6 +166,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
   }
 
   // 使用 yauzl 解压 zip 到项目目录，避免依赖系统 unzip
+  log(projectId, "DEBUG", "开始从 zip 恢复项目文件", { zipPath, projectPath });
   await new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (openErr, zipFile) => {
       if (openErr || !zipFile) {
@@ -291,6 +298,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
     projectId,
     projectPath,
     zipPath,
+    elapsedMs: Date.now() - startTime,
   });
 }
 

@@ -120,6 +120,7 @@ async function moveDirectory(srcDir, destDir) {
  * @param {Object|null} file multer 文件对象（zip），可以为空
  */
 async function createWorkspace(userId, cId, file) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -221,6 +222,7 @@ async function createWorkspace(userId, cId, file) {
       claudeDir,
       skillsDir: null,
       agentsDir: null,
+      elapsedMs: Date.now() - startTime,
     });
 
     return {
@@ -242,7 +244,7 @@ async function createWorkspace(userId, cId, file) {
     });
   }
 
-  log(logId, "INFO", "开始处理上传的 zip 文件", {
+  log(logId, "DEBUG", "开始处理上传的 zip 文件", {
     userId,
     cId,
     workspaceRoot,
@@ -259,7 +261,9 @@ async function createWorkspace(userId, cId, file) {
       await fs.promises.mkdir(tmpRoot, { recursive: true });
     }
     await fs.promises.mkdir(extractRoot, { recursive: true });
+    log(logId, "DEBUG", "开始解压 zip 文件", { extractRoot });
     await extractZip(file.path, extractRoot);
+    log(logId, "DEBUG", "zip 文件解压完成", { extractRoot });
 
     // 查找压缩包中的 skills 和 agents 目录
     const skillsDir = await findDir(extractRoot, "skills");
@@ -330,6 +334,13 @@ async function createWorkspace(userId, cId, file) {
       ? `工作空间创建完成，${updatedDirs.join(" 和 ")} 已更新`
       : "工作空间创建完成（zip 中未找到 skills 和 agents）";
 
+    log(logId, "INFO", message, {
+      userId,
+      cId,
+      updatedDirs,
+      elapsedMs: Date.now() - startTime,
+    });
+
     return {
       message,
       workspaceRoot,
@@ -339,6 +350,7 @@ async function createWorkspace(userId, cId, file) {
       userId,
       cId,
       error: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     if (
@@ -388,6 +400,7 @@ async function createWorkspace(userId, cId, file) {
  * @param {Object} file multer 文件对象（zip）
  */
 async function pushSkillsToWorkspace(userId, cId, file) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -443,7 +456,9 @@ async function pushSkillsToWorkspace(userId, cId, file) {
     }
 
     await fs.promises.mkdir(extractRoot, { recursive: true });
+    log(logId, "DEBUG", "开始解压 skill zip 文件", { extractRoot });
     await extractZip(file.path, extractRoot);
+    log(logId, "DEBUG", "skill zip 文件解压完成", { extractRoot });
 
     // 查找压缩包中的 skills 目录，遍历其下具体 skill 子目录
     const skillsDir = await findDir(extractRoot, "skills");
@@ -504,6 +519,13 @@ async function pushSkillsToWorkspace(userId, cId, file) {
         ? `已推送 ${updatedSkills.length} 个 skill: ${updatedSkills.join(", ")}`
         : "zip 中未找到有效 skill 目录";
 
+    log(logId, "INFO", message, {
+      userId,
+      cId,
+      updatedSkills,
+      elapsedMs: Date.now() - startTime,
+    });
+
     return {
       message,
       workspaceRoot,
@@ -514,6 +536,7 @@ async function pushSkillsToWorkspace(userId, cId, file) {
       userId,
       cId,
       error: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     if (

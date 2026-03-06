@@ -90,6 +90,7 @@ function replaceContentDirectly(existingContent, newContentStr) {
  * @returns {Object} 更新结果
  */
 async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -164,6 +165,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
     }
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
+    log(projectId, "DEBUG", "开始备份项目", { projectId, backupZipPath });
     await backupProjectToZip(projectId, projectPath, backupZipPath);
     log(projectId, "INFO", "项目已备份", {
       projectId,
@@ -172,6 +174,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 
     // 2) 处理文件操作
     try {
+      log(projectId, "DEBUG", "开始处理文件操作", { projectId, filesCount: files.length });
       for (const fileOp of files) {
         const operation = fileOp.operation.toLowerCase();
         // 使用 name 作为文件路径
@@ -309,6 +312,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
       }
 
       // 3) 清理空目录
+      log(projectId, "DEBUG", "开始清理空目录", { projectId });
       try {
         await removeEmptyDirectories(
           projectPath,
@@ -324,6 +328,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
       log(projectId, "INFO", "部分文件更新成功", {
         projectId,
         filesCount: files.length,
+        elapsedMs: Date.now() - startTime,
       });
 
       return {
@@ -336,6 +341,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
       log(projectId, "ERROR", "处理文件操作失败", {
         projectId,
         error: e && e.message,
+        elapsedMs: Date.now() - startTime,
       });
       throw e;
     }
@@ -352,6 +358,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 }
 
 async function allFilesUpdate(projectId, codeVersion, files, req) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -380,10 +387,12 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
     }
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
+    log(projectId, "DEBUG", "开始备份项目", { projectId, backupZipPath });
     await backupProjectToZip(projectId, projectPath, backupZipPath);
 
     // 2) 写入文件
     try {
+      log(projectId, "DEBUG", "开始写入文件", { projectId, filesCount: files.length });
       for (const file of files) {
         if (!file || typeof file.name !== "string") continue;
         const targetPath = path.join(projectPath, file.name);
@@ -458,12 +467,14 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
       log(projectId, "ERROR", "写入文件失败", {
         projectId,
         error: e && e.message,
+        elapsedMs: Date.now() - startTime,
       });
       throw e;
     }
 
     // 3) 清理缺失文件与空目录
     try {
+      log(projectId, "DEBUG", "开始清理缺失文件与空目录", { projectId });
       const keepSet = new Set(
         files
           .filter((f) => f && typeof f.name === "string")
@@ -482,6 +493,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
       log(projectId, "ERROR", "清理缺失文件失败，开始回滚", {
         projectId,
         error: e && e.message,
+        elapsedMs: Date.now() - startTime,
       });
       throw e;
     }
@@ -489,6 +501,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
     log(projectId, "INFO", "文件提交成功", {
       projectId,
       filesCount: files.length,
+      elapsedMs: Date.now() - startTime,
     });
     return {
       success: true,
@@ -519,6 +532,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
  * @returns {Object} 上传结果
  */
 async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -565,6 +579,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
     }
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
+    log(projectId, "DEBUG", "开始备份项目", { projectId, backupZipPath });
     await backupProjectToZip(projectId, projectPath, backupZipPath);
     log(projectId, "INFO", `项目已备份: ${backupZipPath}`, {
       projectId,
@@ -574,6 +589,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
     // 2) 写入文件
     try {
       // 确保目标目录存在
+      log(projectId, "DEBUG", "开始写入上传文件", { projectId, filePath: normalizedPath });
       await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
 
       // 写入文件内容，统一使用buffer（multer memoryStorage对所有文件类型都提供buffer）
@@ -600,6 +616,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
         filePath: normalizedPath,
         targetPath: resolvedTargetPath,
         fileSize: file.buffer ? file.buffer.length : 0,
+        elapsedMs: Date.now() - startTime,
       });
 
       // 判断是否需要重启开发服务器
@@ -649,6 +666,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
         projectId,
         filePath: normalizedPath,
         error: e && e.message,
+        elapsedMs: Date.now() - startTime,
       });
       throw e;
     }
@@ -674,6 +692,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
  * @returns {Object} 回滚结果
  */
 async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
+  const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("项目ID不能为空", { field: "projectId" });
   }
@@ -747,12 +766,14 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
     }
 
     // 2) 从指定版本恢复项目
+    log(projectId, "DEBUG", "开始从备份恢复项目", { projectId, rollbackToNum, rollbackZipPath });
     await restoreProjectFromZip(projectId, projectPath, rollbackZipPath);
     log(projectId, "INFO", "项目回滚成功", {
       projectId,
       newVersion: versionNum,
       toVersion: rollbackToNum,
       rollbackZipPath,
+      elapsedMs: Date.now() - startTime,
     });
 
     return {
@@ -766,6 +787,7 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
       projectId,
       rollbackTo: rollbackToNum,
       error: restoreErr && restoreErr.message,
+      elapsedMs: Date.now() - startTime,
     });
     
     // 如果恢复失败，尝试从当前版本备份恢复（如果存在）

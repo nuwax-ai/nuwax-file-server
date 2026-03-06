@@ -120,6 +120,7 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
  * @returns {Promise<{files: Array}>}
  */
 async function getFileList(userId, cId, proxyPath) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
@@ -144,7 +145,7 @@ async function getFileList(userId, cId, proxyPath) {
     return { files: [] };
   }
 
-  log(logId, "INFO", "开始获取用户文件列表", {
+  log(logId, "DEBUG", "开始获取用户文件列表", {
     targetDir,
     userId: normalizedUserId,
     cId: normalizedCId,
@@ -158,6 +159,7 @@ async function getFileList(userId, cId, proxyPath) {
       targetDir,
       userId: normalizedUserId,
       cId: normalizedCId,
+      elapsedMs: Date.now() - startTime,
     });
 
     return { files };
@@ -167,6 +169,7 @@ async function getFileList(userId, cId, proxyPath) {
       userId: normalizedUserId,
       cId: normalizedCId,
       error: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     throw new SystemError(`获取文件列表失败: ${error.message}`, {
@@ -184,6 +187,7 @@ async function getFileList(userId, cId, proxyPath) {
  * @returns {Promise<Object>} 更新结果
  */
 async function updateFiles(userId, cId, files) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
@@ -245,7 +249,7 @@ async function updateFiles(userId, cId, files) {
     }
   }
 
-  log(logId, "INFO", "开始更新用户文件", {
+  log(logId, "DEBUG", "开始更新用户文件", {
     userId: normalizedUserId,
     cId: normalizedCId,
     filesCount: files.length,
@@ -454,6 +458,7 @@ async function updateFiles(userId, cId, files) {
       userId: normalizedUserId,
       cId: normalizedCId,
       filesCount: files.length,
+      elapsedMs: Date.now() - startTime,
     });
 
     return {
@@ -468,6 +473,7 @@ async function updateFiles(userId, cId, files) {
       userId: normalizedUserId,
       cId: normalizedCId,
       error: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     throw new SystemError(`用户文件更新失败: ${error.message}`, {
@@ -487,6 +493,7 @@ async function updateFiles(userId, cId, files) {
  * @returns {Promise<Object>} 上传结果
  */
 async function uploadFile(userId, cId, file, filePath) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
@@ -558,6 +565,7 @@ async function uploadFile(userId, cId, file, filePath) {
         : file.contents
         ? file.contents.length
         : 0,
+      elapsedMs: Date.now() - startTime,
     });
 
     return {
@@ -575,6 +583,7 @@ async function uploadFile(userId, cId, file, filePath) {
       cId: normalizedCId,
       filePath: normalizedPath,
       error: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     throw new SystemError(`文件上传失败: ${error.message}`, {
@@ -599,6 +608,7 @@ async function uploadFile(userId, cId, file, filePath) {
  * @returns {Promise<Object>} 批量上传结果
  */
 async function uploadFiles(userId, cId, files, filePaths) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -620,7 +630,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
     );
   }
 
-  log(logId, "INFO", "开始批量上传文件", {
+  log(logId, "DEBUG", "开始批量上传文件", {
     userId,
     cId,
     filesCount: files.length,
@@ -693,6 +703,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
       totalCount: files.length,
       successCount,
       failCount,
+      elapsedMs: Date.now() - startTime,
     });
 
     return {
@@ -708,6 +719,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
       userId,
       cId,
       error: error.message,
+      elapsedMs: Date.now() - startTime,
     });
 
     throw new SystemError(`批量上传文件失败: ${error.message}`, {
@@ -734,6 +746,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
  * @returns {Promise<{ archive: import("archiver").Archiver, zipFileName: string }>}
  */
 async function downloadAllFiles(userId, cId) {
+  const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
@@ -798,7 +811,7 @@ async function downloadAllFiles(userId, cId) {
 
   const zipFileName = `${normalizedUserId}_${normalizedCId}.zip`;
 
-  log(logId, "INFO", "开始创建工作目录压缩包", {
+  log(logId, "DEBUG", "开始创建工作目录压缩包", {
     targetDir,
     zipFileName,
   });
@@ -881,6 +894,15 @@ async function downloadAllFiles(userId, cId) {
   archive.on("error", (err) => {
     log(logId, "ERROR", "创建压缩包失败", {
       message: err.message,
+      elapsedMs: Date.now() - startTime,
+    });
+  });
+
+  archive.on("end", () => {
+    log(logId, "INFO", "工作目录压缩包创建完成", {
+      targetDir,
+      zipFileName,
+      elapsedMs: Date.now() - startTime,
     });
   });
 
