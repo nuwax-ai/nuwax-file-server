@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-03-06
+
+### Changed
+
+- **发布与包管理**
+  - 移除 `packageManager` 与 `preinstall` 的 pnpm 强约束，支持使用 npm 安装与发布
+  - `prepublishOnly` 改为 `npm run build`，便于 npm 发布流程
+
 ## [1.2.2] - 2026-03-06
 
 ### Added
