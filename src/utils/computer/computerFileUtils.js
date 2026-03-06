@@ -72,10 +72,14 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
         const binary = isBinaryFile(fullPath);
         const isLink = entry.isSymbolicLink();
         
-        // 生成文件代理URL
+        // 生成文件代理URL，对路径段进行编码以支持空格、中文等特殊字符
         let fileProxyUrl = null;
         if (proxyPath) {
-          fileProxyUrl = `${proxyPath}/${relativePath}`;
+          const encodedPath = relativePath
+            .split("/")
+            .map((seg) => encodeURIComponent(seg))
+            .join("/");
+          fileProxyUrl = `${proxyPath}/${encodedPath}`;
         }
         
         const fileInfo = {
