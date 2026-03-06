@@ -14,14 +14,12 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@9.15.4",
   "os": [
     "darwin",
     "linux",
     "win32"
   ],
   "scripts": {
-    "preinstall": "npx only-allow pnpm",
     "start": "nodemon src/server.js",
     "dev": "nodemon scripts/start-dev.js",
     "test": "nodemon scripts/start-test.js",
@@ -45,7 +43,7 @@
     "cli:start:prod": "node src/cli.js start --env production",
     "cli:start:test": "node src/cli.js start --env test",
     "build": "node scripts/build.js",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "npm run build"
   },
   "author": "",
   "license": "ISC",
