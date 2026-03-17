@@ -100,7 +100,8 @@ app.use("/api/page/static/:projectId", (req, res, next) => {
   return res.sendFile(
     fullPath,
     {
-      dotfiles: "ignore",
+      // dotfiles: "ignore",
+      dotfiles: "allow",
       headers: corsHeaders,
     },
     (err) => {
@@ -164,7 +165,8 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
   return res.sendFile(
     fullPath,
     {
-      dotfiles: "ignore",
+      // dotfiles: "ignore",
+      dotfiles: "allow",
       headers: corsHeaders,
     },
     (err) => {
