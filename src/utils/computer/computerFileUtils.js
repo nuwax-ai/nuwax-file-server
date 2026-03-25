@@ -5,27 +5,6 @@ import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { ValidationError, SystemError } from "../error/errorHandler.js";
 
-function isBinaryFile(filePath) {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    if (buffer.includes(0)) return true;
-    const text = buffer.toString("utf-8");
-    for (let i = 0; i < text.length; i++) {
-      const code = text.charCodeAt(i);
-      if (code < 32 && code !== 9 && code !== 10 && code !== 13) return true;
-    }
-    return false;
-  } catch (error) {
-    log("system", "WARN", `检测二进制文件失败: ${filePath}`, { error: error.message });
-    return false;
-  }
-}
-
-function isImageFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  return [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".avif"].includes(ext);
-}
-
 async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
   const files = [];
   const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
@@ -64,14 +43,12 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
       }
     } else {
       try {
-        const stats = await fs.promises.stat(fullPath);
         const referencePath = basePath || targetDir;
         // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
         const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
 
-        const binary = isBinaryFile(fullPath);
         const isLink = entry.isSymbolicLink();
-        
+
         // 生成文件代理URL，对路径段进行编码以支持空格、中文等特殊字符
         let fileProxyUrl = null;
         if (proxyPath) {
@@ -81,27 +58,13 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
             .join("/");
           fileProxyUrl = `${proxyPath}/${encodedPath}`;
         }
-        
+
         const fileInfo = {
           name: relativePath,
           isDir: false,
-          binary,
-          //sizeExceeded: stats.size > config.MAX_INLINE_FILE_SIZE_BYTES,
-          //contents: "",
           fileProxyUrl: fileProxyUrl,
           isLink: isLink,
         };
-
-        // if (!fileInfo.sizeExceeded) {
-        //   if (binary) {
-        //     if (isImageFile(fullPath)) {
-        //       const buffer = fs.readFileSync(fullPath);
-        //       fileInfo.contents = buffer.toString("base64");
-        //     }
-        //   } else {
-        //     fileInfo.contents = fs.readFileSync(fullPath, "utf-8");
-        //   }
-        // }
 
         files.push(fileInfo);
       } catch (error) {
