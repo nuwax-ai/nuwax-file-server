@@ -29,7 +29,7 @@ import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
 async function createProject(projectId) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
 
   //项目源文件所在目录
@@ -38,7 +38,7 @@ async function createProject(projectId) {
 
   // 检查目录是否已存在
   if (fs.existsSync(projectPath)) {
-    throw new BusinessError(`项目目录 ${projectId} 已存在`, {
+    throw new BusinessError(`Project directory ${projectId} already exists`, {
       projectId,
       projectPath,
     });
@@ -47,7 +47,7 @@ async function createProject(projectId) {
   try {
     // 创建项目目录
     fs.mkdirSync(projectPath, { recursive: true });
-    log(projectId, "INFO", `项目目录创建成功: ${projectPath}`, { projectId });
+    log(projectId, "INFO", `Project directory created successfully: ${projectPath}`, { projectId });
     // 准备模板路径
     const initDir = config.INIT_PROJECT_DIR;
     const templateZipPath = path.join(
@@ -56,35 +56,35 @@ async function createProject(projectId) {
     );
     const templateDir = path.join(initDir, config.INIT_PROJECT_NAME);
 
-    log(projectId, "DEBUG", "开始检查模板目录", { templateDir, templateZipPath });
+    log(projectId, "DEBUG", "Start checking template directory", { templateDir, templateZipPath });
 
     // 如果模板目录不存在，则尝试从zip解压
     if (!fs.existsSync(templateDir)) {
       if (!fs.existsSync(templateZipPath)) {
-        log(projectId, "ERROR", `初始化模板不存在: ${templateZipPath}`, {
+        log(projectId, "ERROR", `Initialization template does not exist: ${templateZipPath}`, {
           projectId,
           templateZipPath,
         });
-        throw new ResourceError("初始化模板不存在", {});
+        throw new ResourceError("Initialization template does not exist", {});
       }
       log(
         projectId,
         "INFO",
-        `模板目录不存在，开始解压模板: ${templateZipPath}`,
+        `Template directory does not exist, starting to unzip template: ${templateZipPath}`,
         {
           projectId,
           templateZipPath,
         }
       );
       await extractZip(templateZipPath, templateDir);
-      log(projectId, "INFO", "模板解压完成", { projectId });
+      log(projectId, "INFO", "Template unzip completed", { projectId });
       if (!fs.existsSync(templateDir)) {
-        throw new SystemError("模板解压后目录仍不存在", {});
+        throw new SystemError("Template unzip directory still does not exist", {});
       }
     }
 
     // 将模板内容复制到项目目录（不包含顶层 react-vite 目录）
-    log(projectId, "DEBUG", "开始复制模板内容到项目目录", { templateDir, projectPath });
+    log(projectId, "DEBUG", "Start copying template content to project directory", { templateDir, projectPath });
     const entries = await fs.promises.readdir(templateDir, {
       withFileTypes: true,
     });
@@ -102,22 +102,22 @@ async function createProject(projectId) {
     }
 
     // 为项目创建 .npmrc 配置文件
-    log(projectId, "DEBUG", "开始创建 .npmrc 配置文件", { projectPath });
+    log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectPath });
     await createPnpmNpmrc(projectPath, projectId);
 
-    log(projectId, "INFO", `项目 ${projectId} 初始化成功`, { projectId, elapsedMs: Date.now() - startTime });
+    log(projectId, "INFO", `Project ${projectId} initialized successfully`, { projectId, elapsedMs: Date.now() - startTime });
 
     return {
       success: true,
-      message: `项目 ${projectId} 创建成功`,
+      message: `Project ${projectId} created successfully`,
       projectPath: projectPath,
     };
   } catch (error) {
-    log(projectId, "ERROR", `项目 ${projectId} 初始化失败: ${error.message}`, {
+    log(projectId, "ERROR", `Project ${projectId} initialization failed: ${error.message}`, {
       projectId,
       elapsedMs: Date.now() - startTime,
     });
-    throw new SystemError(`项目 ${projectId} 初始化失败: ${error.message}`, {
+    throw new SystemError(`Project ${projectId} initialization failed: ${error.message}`, {
       projectId,
       projectPath,
       originalError: error.message,
@@ -183,30 +183,30 @@ async function removeTopLevelFolder(projectPath) {
  */
 async function cleanupProjectDirectory(projectId) {
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
 
   if (fs.existsSync(projectPath)) {
     try {
-      log(projectId, "INFO", `开始清理项目目录: ${projectPath}`, { projectId });
+      log(projectId, "INFO", `Start cleaning project directory: ${projectPath}`, { projectId });
       await fs.promises.rm(projectPath, { recursive: true, force: true });
-      log(projectId, "INFO", `项目目录清理完成: ${projectPath}`, { projectId });
+      log(projectId, "INFO", `Project directory cleaned up: ${projectPath}`, { projectId });
     } catch (error) {
-      log(projectId, "ERROR", `清理项目目录失败: ${error.message}`, {
+      log(projectId, "ERROR", `Failed to clean project directory: ${error.message}`, {
         projectId,
         projectPath,
         originalError: error.message,
       });
-      throw new SystemError(`清理项目目录失败: ${error.message}`, {
+      throw new SystemError(`Failed to clean project directory: ${error.message}`, {
         projectId,
         projectPath,
         originalError: error.message,
       });
     }
   } else {
-    log(projectId, "INFO", `项目目录不存在，无需清理: ${projectPath}`, {
+    log(projectId, "INFO", `Project directory does not exist, no need to clean: ${projectPath}`, {
       projectId,
     });
   }
@@ -229,7 +229,7 @@ function isDirectoryEmpty(dirPath) {
     return filteredEntries.length === 0;
   } catch (error) {
     const projectId = path.basename(dirPath);
-    log(projectId, "ERROR", `检查目录是否为空失败: ${error.message}`, {
+    log(projectId, "ERROR", `Failed to check if directory is empty: ${error.message}`, {
       dirPath,
     });
     return true; // 出错时默认认为为空
@@ -258,7 +258,7 @@ async function uploadProject(
 
     if (!isEmpty) {
       // 目录非空，需要备份当前项目
-      log(projectId, "INFO", `项目目录非空，开始备份当前版本`, { projectId });
+      log(projectId, "INFO", `Project directory is not empty, starting to backup current version`, { projectId });
 
       // 检查是否已存在 codeVersion-1 的备份
       const prevVersion = parseInt(codeVersion) - 1;
@@ -272,20 +272,20 @@ async function uploadProject(
         // 备份当前项目
         try {
           await backupProjectOfVersion(projectId, prevVersion);
-          log(projectId, "INFO", `当前版本已备份: ${backupZipPath}`, {
+          log(projectId, "INFO", `Current version backed up: ${backupZipPath}`, {
             projectId,
           });
         } catch (backupError) {
-          log(projectId, "ERROR", `备份当前版本失败: ${backupError.message}`, {
+          log(projectId, "ERROR", `Failed to backup current version: ${backupError.message}`, {
             projectId,
           });
-          throw new SystemError(`备份当前版本失败: ${backupError.message}`, {
+          throw new SystemError(`Failed to backup current version: ${backupError.message}`, {
             projectId,
             originalError: backupError.message,
           });
         }
       } else {
-        log(projectId, "INFO", `备份文件已存在，跳过备份: ${backupZipPath}`, {
+        log(projectId, "INFO", `Backup file already exists, skipping backup: ${backupZipPath}`, {
           projectId,
         });
       }
@@ -293,17 +293,17 @@ async function uploadProject(
       // 停止旧版本的dev服务器
       if (pid && !isNaN(Number(pid))) {
         const pidNum = Number(pid);
-        log(projectId, "INFO", `正在停止旧版本dev服务器，PID: ${pidNum}`, {
+        log(projectId, "INFO", `Stopping old version dev server, PID: ${pidNum}`, {
           projectId,
         });
         try {
           await stopDevServer(req, projectId, pidNum, { strict: true });
-          log(projectId, "INFO", `旧版本dev服务器已停止`, { projectId });
+          log(projectId, "INFO", `Old version dev server stopped`, { projectId });
         } catch (stopError) {
           log(
             projectId,
             "WARN",
-            `停止旧版本dev服务器失败: ${stopError.message}`,
+            `Failed to stop old version dev server: ${stopError.message}`,
             {
               projectId,
               pid: pidNum,
@@ -315,53 +315,53 @@ async function uploadProject(
 
       // 清空项目目录
       if (fs.existsSync(projectPath)) {
-        log(projectId, "INFO", `正在清空项目目录: ${projectPath}`, {
+        log(projectId, "INFO", `Cleaning project directory: ${projectPath}`, {
           projectId,
         });
         await fs.promises.rm(projectPath, { recursive: true, force: true });
       }
     } else {
-      log(projectId, "INFO", `项目目录为空，直接部署新项目`, { projectId });
+      log(projectId, "INFO", `Project directory is empty, directly deploying new project`, { projectId });
     }
 
     // 创建项目目录
     fs.mkdirSync(projectPath, { recursive: true });
-    log(projectId, "INFO", `项目目录创建成功: ${projectPath}`, { projectId });
+    log(projectId, "INFO", `Project directory created successfully: ${projectPath}`, { projectId });
 
     // 解压压缩包到项目目录
-    log(projectId, "DEBUG", "开始解压压缩包", { projectId, zipFilePath });
+    log(projectId, "DEBUG", "Start extracting zip file to project directory", { projectId, zipFilePath });
     await extractZip(zipFilePath, projectPath);
-    log(projectId, "DEBUG", "压缩包解压完成", { projectId });
+    log(projectId, "DEBUG", "Zip file extracted successfully", { projectId });
 
     // 检查并移除顶层文件夹
-    log(projectId, "DEBUG", "检查并处理顶层文件夹", { projectId });
+    log(projectId, "DEBUG", "Check and remove top level folder", { projectId });
     await removeTopLevelFolder(projectPath);
 
     // 检查并删除 node_modules 文件夹
-    log(projectId, "DEBUG", "检查并删除 node_modules 文件夹", { projectId });
+    log(projectId, "DEBUG", "Check and remove node_modules folder", { projectId });
     await removeNodeModules(projectPath);
 
     // 为项目创建 .npmrc 配置文件
-    log(projectId, "DEBUG", "开始创建 .npmrc 配置文件", { projectId });
+    log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectId });
     await createPnpmNpmrc(projectPath, projectId);
 
     // 不需要启动dev,前端会调用启动
-    log(projectId, "INFO", `项目 ${projectId} 上传成功`, { projectId, codeVersion, elapsedMs: Date.now() - startTime });
+    log(projectId, "INFO", `Project ${projectId} uploaded successfully`, { projectId, codeVersion, elapsedMs: Date.now() - startTime });
     return {
       success: true,
-      message: `项目 ${projectId} 上传成功`,
+      message: `Project ${projectId} uploaded successfully`,
       projectId: projectId,
       codeVersion: codeVersion,
     };
   } catch (error) {
-    log(projectId, "ERROR", `上传项目失败: ${error.message}`, { projectId, elapsedMs: Date.now() - startTime });
+    log(projectId, "ERROR", `Failed to upload project: ${error.message}`, { projectId, elapsedMs: Date.now() - startTime });
 
     // 上传失败时清理项目目录
     try {
       await cleanupProjectDirectory(projectId);
-      log(projectId, "INFO", "上传失败，项目目录已清理", { projectId });
+      log(projectId, "INFO", "Failed to upload project, project directory cleaned up", { projectId });
     } catch (cleanupError) {
-      log(projectId, "ERROR", `清理项目目录失败: ${cleanupError.message}`, {
+      log(projectId, "ERROR", `Failed to clean project directory: ${cleanupError.message}`, {
         projectId,
         originalError: cleanupError.message,
       });
@@ -370,7 +370,7 @@ async function uploadProject(
 
     // 如果错误不是自定义的错误类型，包装为系统错误
     if (!error.isOperational) {
-      throw new SystemError(`上传项目失败: ${error.message}`, {
+      throw new SystemError(`Failed to upload project: ${error.message}`, {
         projectId,
         projectPath,
         zipFilePath,
@@ -390,23 +390,23 @@ async function uploadProject(
  */
 async function backupProjectOfVersion(projectId, codeVersion) {
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   if (codeVersion === undefined || codeVersion === null) {
-    throw new ValidationError("codeVersion不能为空", {
+    throw new ValidationError("codeVersion cannot be empty", {
       field: "codeVersion",
     });
   }
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("codeVersion必须是数字", {
+    throw new ValidationError("codeVersion must be a number", {
       field: "codeVersion",
     });
   }
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
   if (!fs.existsSync(projectPath)) {
-    throw new ResourceError("项目不存在", { projectId });
+    throw new ResourceError("Project does not exist", { projectId });
   }
 
   // 构建zip文件路径
@@ -419,7 +419,7 @@ async function backupProjectOfVersion(projectId, codeVersion) {
   const outZipPath = path.join(backupDir, zipName);
 
   // 进行备份
-  log(projectId, "DEBUG", "开始备份项目为zip", { projectId, versionNum, outZipPath });
+  log(projectId, "DEBUG", "Start backing up project to zip", { projectId, versionNum, outZipPath });
   return await backupProjectToZip(projectId, projectPath, outZipPath);
 }
 
@@ -432,13 +432,13 @@ async function backupProjectOfVersion(projectId, codeVersion) {
  */
 async function handleFileUpload(projectId, codeVersion, file) {
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   if (!codeVersion) {
-    throw new ValidationError("代码版本不能为空", { field: "codeVersion" });
+    throw new ValidationError("codeVersion cannot be empty", { field: "codeVersion" });
   }
   if (!file) {
-    throw new ValidationError("请上传压缩包文件", { field: "zipFile" });
+    throw new ValidationError("Please upload a zip file", { field: "zipFile" });
   }
 
   // 创建项目目录
@@ -456,14 +456,14 @@ async function handleFileUpload(projectId, codeVersion, file) {
 
   try {
     fs.renameSync(tempFilePath, projectFilePath);
-    log(projectId, "INFO", "文件保存成功", {
+    log(projectId, "INFO", "File saved successfully", {
       projectId,
       codeVersion,
       filePath: projectFilePath,
     });
     return { success: true, filePath: projectFilePath };
   } catch (moveErr) {
-    log(projectId, "ERROR", "移动文件失败", {
+    log(projectId, "ERROR", "Failed to move file", {
       projectId,
       codeVersion,
       error: moveErr.message,
@@ -474,13 +474,13 @@ async function handleFileUpload(projectId, codeVersion, file) {
       try {
         fs.unlinkSync(tempFilePath);
       } catch (cleanupErr) {
-        log(projectId, "ERROR", "清理临时文件失败", {
+        log(projectId, "ERROR", "Failed to clean temporary file", {
           projectId,
           error: cleanupErr.message,
         });
       }
     }
-    throw new SystemError("文件保存失败", {
+    throw new SystemError("Failed to save file", {
       projectId,
       codeVersion,
       originalError: moveErr.message,
@@ -497,7 +497,7 @@ async function handleFileUpload(projectId, codeVersion, file) {
 async function deleteProject(projectId, pid, req) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
 
   // 使用特殊的日志标识符，避免日志输出到项目目录
@@ -510,7 +510,7 @@ async function deleteProject(projectId, pid, req) {
       log(
         logId,
         "INFO",
-        `[delete-project] 正在停止开发服务器，PID: ${pidNum}`,
+        `[delete-project] Stopping development server, PID: ${pidNum}`,
         {
           projectId,
           pid: pidNum,
@@ -519,12 +519,12 @@ async function deleteProject(projectId, pid, req) {
 
       try {
         await stopDevServer(req, projectId, pidNum, { strict: true });
-        log(logId, "INFO", `[delete-project] 开发服务器已停止`, { projectId });
+        log(logId, "INFO", `[delete-project] Development server stopped`, { projectId });
       } catch (stopError) {
         log(
           logId,
           "WARN",
-          `[delete-project] 停止开发服务器失败: ${stopError.message}`,
+          `[delete-project] Failed to stop development server: ${stopError.message}`,
           {
             projectId,
             pid: pidNum,
@@ -550,12 +550,12 @@ async function deleteProject(projectId, pid, req) {
         try {
           await fs.promises.rm(dirPath, { recursive: true, force: true });
           deletedDirs.push(dirPath);
-          log(logId, "INFO", `[delete-project] 目录删除成功: ${dirPath}`, {
+          log(logId, "INFO", `[delete-project] Directory deleted successfully: ${dirPath}`, {
             projectId,
           });
         } catch (error) {
           failedDirs.push({ path: dirPath, error: error.message });
-          log(logId, "ERROR", `[delete-project] 目录删除失败: ${dirPath}`, {
+          log(logId, "ERROR", `[delete-project] Directory deleted failed: ${dirPath}`, {
             projectId,
             error: error.message,
           });
@@ -564,7 +564,7 @@ async function deleteProject(projectId, pid, req) {
         log(
           logId,
           "INFO",
-          `[delete-project] 目录不存在，跳过删除: ${dirPath}`,
+          `[delete-project] Directory does not exist, skipping deletion: ${dirPath}`,
           {
             projectId,
           }
@@ -575,27 +575,27 @@ async function deleteProject(projectId, pid, req) {
     // 3. 返回删除结果
     const result = {
       success: true,
-      message: `项目 ${projectId} 删除完成`,
+      message: `Project ${projectId} deleted successfully`,
       projectId,
       deletedDirectories: deletedDirs,
       failedDirectories: failedDirs,
     };
 
     if (failedDirs.length > 0) {
-      result.message += `，但有 ${failedDirs.length} 个目录删除失败`;
-      log(logId, "WARN", "[delete-project] 部分目录删除失败", {
+      result.message += `, but ${failedDirs.length} directories deleted failed`;
+      log(logId, "WARN", "[delete-project] Some directories deleted failed", {
         projectId,
         failedDirs,
       });
     }
 
-    log(logId, "INFO", `[delete-project] 项目删除完成: ${projectId}`, {
+    log(logId, "INFO", `[delete-project] Project deleted successfully: ${projectId}`, {
       projectId,
       elapsedMs: Date.now() - startTime,
     });
     return result;
   } catch (error) {
-    log(logId, "ERROR", `[delete-project] 删除项目失败: ${error.message}`, {
+    log(logId, "ERROR", `[delete-project] Failed to delete project: ${error.message}`, {
       projectId,
       originalError: error.message,
       elapsedMs: Date.now() - startTime,
@@ -603,7 +603,7 @@ async function deleteProject(projectId, pid, req) {
 
     // 如果错误不是自定义的错误类型，包装为系统错误
     if (!error.isOperational) {
-      throw new SystemError(`删除项目失败: ${error.message}`, {
+      throw new SystemError(`Failed to delete project: ${error.message}`, {
         projectId,
         originalError: error.message,
       });
@@ -624,23 +624,23 @@ async function deleteProject(projectId, pid, req) {
 async function exportProject(projectId, codeVersion, exportType, configParam) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   if (codeVersion === undefined || codeVersion === null) {
-    throw new ValidationError("codeVersion不能为空", {
+    throw new ValidationError("codeVersion cannot be empty", {
       field: "codeVersion",
     });
   }
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("codeVersion必须是数字", {
+    throw new ValidationError("codeVersion must be a number", {
       field: "codeVersion",
     });
   }
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
   if (!fs.existsSync(projectPath)) {
-    throw new ResourceError("项目不存在", { projectId });
+    throw new ResourceError("Project does not exist", { projectId });
   }
 
   const backupDir = path.join(config.UPLOAD_PROJECT_DIR, projectId);
@@ -650,13 +650,13 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
   // 如果导出类型不是LATEST，直接查找现成的zip包返回
   if (exportType !== "LATEST") {
     if (fs.existsSync(zipPath)) {
-      log(projectId, "INFO", `使用已存在的导出文件: ${zipPath}`, {
+      log(projectId, "INFO", `Using existing export file: ${zipPath}`, {
         projectId,
         zipPath,
       });
       return { success: true, projectId, zipPath };
     } else {
-      throw new ResourceError(`指定版本的zip包不存在: ${zipPath}`, {
+      throw new ResourceError(`Specified version zip file does not exist: ${zipPath}`, {
         projectId,
         zipPath,
       });
@@ -674,16 +674,16 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
         const configJson = JSON.stringify(configParam, null, 2);
         await fs.promises.writeFile(configFilePath, configJson, "utf8");
         configFileCreated = true;
-        log(projectId, "INFO", `已创建配置文件: ${configFilePath}`, {
+        log(projectId, "INFO", `Configuration file created successfully: ${configFilePath}`, {
           projectId,
           configFilePath,
         });
       } catch (configErr) {
-        log(projectId, "ERROR", `创建配置文件失败: ${configErr.message}`, {
+        log(projectId, "ERROR", `Failed to create configuration file: ${configErr.message}`, {
           projectId,
           error: configErr.message,
         });
-        throw new FileError("创建配置文件失败", {
+        throw new FileError("Failed to create configuration file", {
           projectId,
           configFilePath,
           originalError: configErr.message,
@@ -692,21 +692,21 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
     }
 
     // 执行导出（不管有没有现成的zip包，都直接打zip包）
-    log(projectId, "DEBUG", "开始执行导出打包", { projectId, codeVersion });
+    log(projectId, "DEBUG", "Start executing export and packaging", { projectId, codeVersion });
     const outZipPath = await backupProjectOfVersion(projectId, codeVersion);
-    log(projectId, "INFO", `项目已导出: ${outZipPath}`, {
+    log(projectId, "INFO", `Project exported successfully: ${outZipPath}`, {
       projectId,
       zipPath: outZipPath,
       elapsedMs: Date.now() - startTime,
     });
     return { success: true, projectId, zipPath: outZipPath };
   } catch (e) {
-    log(projectId, "ERROR", `导出项目失败: ${e?.message}`, {
+    log(projectId, "ERROR", `Failed to export project: ${e?.message}`, {
       projectId,
       elapsedMs: Date.now() - startTime,
     });
     if (!e.isOperational) {
-      throw new SystemError("导出项目失败", {
+      throw new SystemError("Failed to export project", {
         projectId,
         originalError:
           e && e.message ? sanitizeSensitivePaths(e.message) : e && e.message,
@@ -718,12 +718,12 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
     if (configFileCreated && fs.existsSync(configFilePath)) {
       try {
         await fs.promises.unlink(configFilePath);
-        log(projectId, "INFO", `已删除临时配置文件: ${configFilePath}`, {
+        log(projectId, "INFO", `Temporary configuration file deleted successfully: ${configFilePath}`, {
           projectId,
           configFilePath,
         });
       } catch (deleteErr) {
-        log(projectId, "WARN", `删除临时配置文件失败: ${deleteErr.message}`, {
+        log(projectId, "WARN", `Failed to delete temporary configuration file: ${deleteErr.message}`, {
           projectId,
           error: deleteErr.message,
         });
@@ -739,29 +739,29 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
 async function backupCurrentVersion(projectId, codeVersion) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   if (codeVersion === undefined || codeVersion === null) {
-    throw new ValidationError("codeVersion不能为空", {
+    throw new ValidationError("codeVersion cannot be empty", {
       field: "codeVersion",
     });
   }
 
   try {
     const zipPath = await backupProjectOfVersion(projectId, codeVersion);
-    log(projectId, "INFO", `当前版本已备份: ${zipPath}`, {
+    log(projectId, "INFO", `Current version backed up successfully: ${zipPath}`, {
       projectId,
       zipPath,
       elapsedMs: Date.now() - startTime,
     });
     return { success: true, projectId, zipPath };
   } catch (e) {
-    log(projectId, "ERROR", `备份当前版本失败: ${e?.message}`, {
+    log(projectId, "ERROR", `Failed to backup current version: ${e?.message}`, {
       projectId,
       elapsedMs: Date.now() - startTime,
     });
     if (!e.isOperational) {
-      throw new SystemError("备份当前版本失败", {
+      throw new SystemError("Failed to backup current version", {
         projectId,
         originalError:
           e && e.message ? sanitizeSensitivePaths(e.message) : e && e.message,

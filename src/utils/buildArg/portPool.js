@@ -40,7 +40,7 @@ class PortPool {
       this.availablePorts.add(port);
     }
     const reservedRangeCount = this.reservedRangeEnd - this.reservedRangeStart + 1;
-    log("SYSTEM", "INFO", "端口池初始化完成", { 
+    log("SYSTEM", "INFO", "Port pool initialized", { 
       portRange: `${this.portRangeStart}-${this.portRangeEnd}`,
       totalPorts: this.availablePorts.size,
       reservedCount: reservedRangeCount
@@ -56,13 +56,13 @@ class PortPool {
     // 如果该项目已经分配过端口，直接返回
     if (this.allocatedPorts.has(projectId)) {
       const existingPort = this.allocatedPorts.get(projectId);
-      log(projectId, "INFO", "项目已有分配端口，复用", { port: existingPort });
+      log(projectId, "INFO", "Project already has allocated port, reuse", { port: existingPort });
       return existingPort;
     }
 
     // 从可用池中取出一个端口
     if (this.availablePorts.size === 0) {
-      throw new Error(`端口池耗尽：范围 ${this.portRangeStart}-${this.portRangeEnd} 内无可用端口`);
+      throw new Error(`Port pool exhausted: no available ports in range ${this.portRangeStart}-${this.portRangeEnd}`);
     }
 
     // Set 的迭代器第一个值即为要分配的端口（Set 保持插入顺序）
@@ -74,7 +74,7 @@ class PortPool {
     // 记录分配
     this.allocatedPorts.set(projectId, port);
     
-    log(projectId, "INFO", "端口池分配端口", { 
+    log(projectId, "INFO", "Port pool allocated port", { 
       port, 
       totalAllocated: this.allocatedPorts.size,
       remainingAvailable: this.availablePorts.size
@@ -96,7 +96,7 @@ class PortPool {
       // 归还到可用池
       this.availablePorts.add(port);
       
-      log(projectId, "INFO", "端口池释放端口", { 
+      log(projectId, "INFO", "Port pool released port", { 
         port, 
         totalAllocated: this.allocatedPorts.size,
         remainingAvailable: this.availablePorts.size
@@ -139,7 +139,7 @@ class PortPool {
     }
     this.allocatedPorts.clear();
     
-    log("SYSTEM", "INFO", "端口池已清空并重置", {
+    log("SYSTEM", "INFO", "Port pool cleared and reset", {
       availablePorts: this.availablePorts.size,
       allocatedPorts: this.allocatedPorts.size
     });

@@ -181,7 +181,7 @@ app.use(
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpecs, {
     customCss: ".swagger-ui .topbar { display: none }",
-    customSiteTitle: "nuwax-file-server API 文档",
+    customSiteTitle: "nuwax-file-server API Documentation",
   })
 );
 
@@ -209,7 +209,7 @@ const server = app.listen(config.PORT, async () => {
   try {
     startScheduler();
   } catch (error) {
-    log("default", "ERROR", `pnpm prune 定时任务启动失败: ${error.message}`);
+    log("default", "ERROR", `pnpm prune scheduled task failed to start: ${error.message}`);
   }
 });
 
@@ -221,7 +221,7 @@ server.headersTimeout = 620000; // 略大于 keepAliveTimeout
 
 // 优雅退出处理
 const gracefulShutdown = (signal) => {
-  log("default", "INFO", `收到 ${signal} 信号，准备优雅退出...`);
+  log("default", "INFO", `Received ${signal} signal, preparing graceful exit...`);
   
   // 停止定时任务
   stopScheduler();
@@ -229,20 +229,20 @@ const gracefulShutdown = (signal) => {
   // 清理日志缓存管理器（清理定时器）
   try {
     logCacheManager.destroy();
-    log("default", "INFO", "日志缓存管理器已清理");
+    log("default", "INFO", "Log cache manager cleared");
   } catch (error) {
-    log("default", "ERROR", `清理日志缓存管理器失败: ${error.message}`);
+    log("default", "ERROR", `Failed to clear log cache manager: ${error.message}`);
   }
   
   // 关闭服务器
   server.close(() => {
-    log("default", "INFO", "服务器已关闭");
+    log("default", "INFO", "Server closed");
     process.exit(0);
   });
 
   // 如果 30 秒后还未退出，强制退出
   setTimeout(() => {
-    log("default", "ERROR", "强制退出（超时）");
+    log("default", "ERROR", "Force exit (timeout)");
     process.exit(1);
   }, 30000);
 };

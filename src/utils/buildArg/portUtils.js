@@ -276,7 +276,7 @@ function getPortsRecursively(pid, visitedPids = new Set(), projectId = "default"
 // 通过进程ID查询该进程及其子进程监听的端口，返回端口和进程ID的映射
 function getPortsAndPidsByPid(pid, projectId = "default") {
   try {
-    log(projectId, "DEBUG", `检查进程是否存在`, { pid });
+    log(projectId, "DEBUG", `Check if process exists`, { pid });
     
     // 首先检查进程是否存在
     const checkCmd = `ps -p ${pid} -o pid=`;
@@ -286,10 +286,10 @@ function getPortsAndPidsByPid(pid, projectId = "default") {
         timeout: 2000, // 2秒超时
         killSignal: "SIGKILL"
       });
-      log(projectId, "DEBUG", `进程存在，开始递归查询端口`, { pid });
+      log(projectId, "DEBUG", `Process exists, start recursive query ports`, { pid });
     } catch (e) {
       // 进程不存在
-      log(projectId, "DEBUG", `进程不存在`, { pid });
+      log(projectId, "DEBUG", `Process does not exist`, { pid });
       return new Map();
     }
 
@@ -297,7 +297,7 @@ function getPortsAndPidsByPid(pid, projectId = "default") {
     return getPortsRecursively(pid, new Set(), projectId);
   } catch (e) {
     const errMsg = e && e.message ? e.message : String(e);
-    log(projectId, "ERROR", `getPortsAndPidsByPid异常`, { pid, error: errMsg });
+    log(projectId, "ERROR", `getPortsAndPidsByPid exception`, { pid, error: errMsg });
     return new Map();
   }
 }
@@ -310,7 +310,7 @@ function getPortsBySinglePid(pid, projectId = "default") {
   const portsFromSs = tryGetPortsUsingSs(pid, projectId);
   if (portsFromSs.length > 0) {
     const duration = Date.now() - startTime;
-    log(projectId, "INFO", `使用ss查询到端口`, {
+    log(projectId, "INFO", `Using ss to query ports`, {
       pid,
       ports: portsFromSs,
       duration: `${duration}ms`,
@@ -323,7 +323,7 @@ function getPortsBySinglePid(pid, projectId = "default") {
   const portsFromNetstat = tryGetPortsUsingNetstat(pid, projectId);
   if (portsFromNetstat.length > 0) {
     const duration = Date.now() - startTime;
-    log(projectId, "INFO", `使用netstat查询到端口`, {
+    log(projectId, "INFO", `Using netstat to query ports`, {
       pid,
       ports: portsFromNetstat,
       duration: `${duration}ms`,
@@ -339,14 +339,14 @@ function getPortsBySinglePid(pid, projectId = "default") {
   const duration = Date.now() - startTime;
   
   if (portsFromLsof.length > 0) {
-    log(projectId, "INFO", `使用lsof查询到端口`, {
+    log(projectId, "INFO", `Using lsof to query ports`, {
       pid,
       ports: portsFromLsof,
       duration: `${duration}ms`,
       method: "lsof"
     });
   } else {
-    log(projectId, "INFO", `未查询到端口`, {
+    log(projectId, "INFO", `No ports found`, {
       pid,
       duration: `${duration}ms`,
       methods: "ss->netstat->lsof"
@@ -361,7 +361,7 @@ function getPortsBySinglePid(pid, projectId = "default") {
 function tryGetPortsUsingSs(pid, projectId = "default") {
   const startTime = Date.now();
   try {
-    log(projectId, "DEBUG", `尝试使用ss命令查询端口`, { pid });
+    log(projectId, "DEBUG", `Try using ss command to query ports`, { pid });
     
     // ss -ltnp 显示监听的 TCP 端口及进程信息
     // 输出格式: State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
@@ -390,12 +390,12 @@ function tryGetPortsUsingSs(pid, projectId = "default") {
     }
 
     const duration = Date.now() - startTime;
-    log(projectId, "DEBUG", `ss命令执行完成`, { pid, portsCount: ports.length, duration: `${duration}ms` });
+    log(projectId, "DEBUG", `ss command executed successfully`, { pid, portsCount: ports.length, duration: `${duration}ms` });
     return ports;
   } catch (e) {
     const duration = Date.now() - startTime;
     const errMsg = e && e.message ? e.message : String(e);
-    log(projectId, "DEBUG", `ss命令执行失败`, { pid, error: errMsg, duration: `${duration}ms` });
+    log(projectId, "DEBUG", `ss command execution failed`, { pid, error: errMsg, duration: `${duration}ms` });
     return [];
   }
 }
@@ -408,17 +408,17 @@ function tryGetPortsUsingNetstat(pid, projectId = "default") {
     
     // 根据操作系统选择不同的 netstat 命令
     if (process.platform === "linux") {
-      log(projectId, "DEBUG", `尝试使用netstat命令查询端口`, { pid });
+      log(projectId, "DEBUG", `Try using netstat command to query ports`, { pid });
       // Linux: netstat -ltnp
       cmd = `netstat -ltnp 2>/dev/null | grep "${pid}/"`;
     } else if (process.platform === "darwin") {
       // macOS: netstat 不支持 -p，需要先用 netstat 获取端口，再验证进程
       // 这里直接跳过，让 lsof 处理 macOS 的情况
-      log(projectId, "DEBUG", `macOS系统跳过netstat`, { pid });
+      log(projectId, "DEBUG", `macOS system skip netstat`, { pid });
       return [];
     } else {
       // 其他系统暂不支持
-      log(projectId, "DEBUG", `${process.platform}系统不支持netstat`, { pid });
+      log(projectId, "DEBUG", `${process.platform} system does not support netstat`, { pid });
       return [];
     }
 
@@ -446,12 +446,12 @@ function tryGetPortsUsingNetstat(pid, projectId = "default") {
     }
 
     const duration = Date.now() - startTime;
-    log(projectId, "DEBUG", `netstat命令执行完成`, { pid, portsCount: ports.length, duration: `${duration}ms` });
+    log(projectId, "DEBUG", `netstat command executed successfully`, { pid, portsCount: ports.length, duration: `${duration}ms` });
     return ports;
   } catch (e) {
     const duration = Date.now() - startTime;
     const errMsg = e && e.message ? e.message : String(e);
-    log(projectId, "DEBUG", `netstat命令执行失败`, { pid, error: errMsg, duration: `${duration}ms` });
+    log(projectId, "DEBUG", `netstat command execution failed`, { pid, error: errMsg, duration: `${duration}ms` });
     return [];
   }
 }
@@ -460,7 +460,7 @@ function tryGetPortsUsingNetstat(pid, projectId = "default") {
 function tryGetPortsUsingLsof(pid, projectId = "default") {
   const startTime = Date.now();
   try {
-    log(projectId, "DEBUG", `尝试使用lsof命令查询端口`, { pid });
+    log(projectId, "DEBUG", `Try using lsof command to query ports`, { pid });
     
     const cmd = `lsof -Pan -p ${pid} -iTCP -sTCP:LISTEN -n`;
     const buf = execSync(cmd, { 
@@ -474,7 +474,7 @@ function tryGetPortsUsingLsof(pid, projectId = "default") {
     // 跳过标题行
     if (lines.length <= 1) {
       const duration = Date.now() - startTime;
-      log(projectId, "DEBUG", `lsof命令未找到监听端口`, { pid, duration: `${duration}ms` });
+      log(projectId, "DEBUG", `lsof command did not find listening ports`, { pid, duration: `${duration}ms` });
       return [];
     }
 
@@ -497,12 +497,12 @@ function tryGetPortsUsingLsof(pid, projectId = "default") {
     }
 
     const duration = Date.now() - startTime;
-    log(projectId, "DEBUG", `lsof命令执行完成`, { pid, portsCount: ports.length, duration: `${duration}ms` });
+    log(projectId, "DEBUG", `lsof command executed successfully`, { pid, portsCount: ports.length, duration: `${duration}ms` });
     return ports;
   } catch (e) {
     const duration = Date.now() - startTime;
     const errMsg = e && e.message ? e.message : String(e);
-    log(projectId, "DEBUG", `lsof命令执行失败`, { pid, error: errMsg, duration: `${duration}ms` });
+    log(projectId, "DEBUG", `lsof command execution failed`, { pid, error: errMsg, duration: `${duration}ms` });
     return [];
   }
 }
@@ -535,7 +535,7 @@ function waitPortFromPid(pid, timeoutMs = 10000, intervalMs = 500, projectId = "
     let attempts = 0;
     const maxAttempts = Math.ceil(timeoutMs / intervalMs);
 
-    log(projectId, "INFO", `开始等待监听端口`, {
+    log(projectId, "INFO", `Start waiting for listening port`, {
       pid,
       timeoutMs,
       intervalMs,
@@ -546,18 +546,18 @@ function waitPortFromPid(pid, timeoutMs = 10000, intervalMs = 500, projectId = "
       if (resolved) return;
       attempts++;
 
-      log(projectId, "INFO", `查询监听端口 (第${attempts}/${maxAttempts}次)`, {
+      log(projectId, "INFO", `Query listening port (第${attempts}/${maxAttempts}次)`, {
         pid,
         attempts
       });
 
       try {
-        log(projectId, "DEBUG", `开始调用getPortsAndPidsByPid`, { pid });
+        log(projectId, "DEBUG", `Start calling getPortsAndPidsByPid`, { pid });
         const queryStartTime = Date.now();
         const portPidMap = getPortsAndPidsByPid(pid, projectId);
         const queryDuration = Date.now() - queryStartTime;
         
-        log(projectId, "DEBUG", `getPortsAndPidsByPid调用完成`, { 
+        log(projectId, "DEBUG", `getPortsAndPidsByPid called successfully`, { 
           pid, 
           mapSize: portPidMap.size,
           duration: `${queryDuration}ms`
@@ -571,7 +571,7 @@ function waitPortFromPid(pid, timeoutMs = 10000, intervalMs = 500, projectId = "
           )[0];
           const actualPid = portPidMap.get(firstPort);
           
-          log(projectId, "INFO", `成功检测到监听端口`, {
+          log(projectId, "INFO", `Successfully detected listening port`, {
             pid,
             actualPid,
             port: firstPort,
@@ -583,10 +583,10 @@ function waitPortFromPid(pid, timeoutMs = 10000, intervalMs = 500, projectId = "
           return;
         }
         
-        log(projectId, "DEBUG", `本次查询未找到监听端口`, { pid, attempts });
+        log(projectId, "DEBUG", `No listening port found in this query`, { pid, attempts });
       } catch (e) {
         const errMsg = e && e.message ? e.message : String(e);
-        log(projectId, "ERROR", `查询端口时发生异常`, { 
+        log(projectId, "ERROR", `Exception occurred when querying ports`, { 
           pid, 
           attempts,
           error: errMsg,
@@ -613,7 +613,7 @@ function waitPortFromPid(pid, timeoutMs = 10000, intervalMs = 500, projectId = "
       resolved = true;
       clearInterval(interval);
       
-      log(projectId, "WARN", `等待监听端口超时`, {
+      log(projectId, "WARN", `Waiting for listening port timeout`, {
         pid,
         timeoutMs,
         attempts

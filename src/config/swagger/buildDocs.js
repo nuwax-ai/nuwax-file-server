@@ -2,14 +2,14 @@
  * @swagger
  * tags:
  *   name: Build
- *   description: 构建和开发服务器管理相关接口
+ *   description: Build and dev server management APIs
  */
 
 /**
  * @swagger
  * /api/build/start-dev:
  *   get:
- *     summary: 启动开发服务器
+ *     summary: Start the dev server
  *     tags: [Build]
  *     parameters:
  *       - in: query
@@ -17,15 +17,15 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *       - in: query
  *         name: basePath
  *         schema:
  *           type: string
- *         description: 基础路径(仅Vite项目)
+ *         description: Base path (Vite projects only)
  *     responses:
  *       200:
- *         description: 启动成功
+ *         description: Dev server started
  *         content:
  *           application/json:
  *             schema:
@@ -42,7 +42,7 @@
  *                 port:
  *                   type: number
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:
@@ -53,7 +53,7 @@
  * @swagger
  * /api/build/build:
  *   get:
- *     summary: 构建项目
+ *     summary: Build the project
  *     tags: [Build]
  *     parameters:
  *       - in: query
@@ -61,15 +61,15 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *       - in: query
  *         name: basePath
  *         schema:
  *           type: string
- *         description: 基础路径(仅Vite项目)
+ *         description: Base path (Vite projects only)
  *     responses:
  *       200:
- *         description: 构建成功
+ *         description: Build successful
  *         content:
  *           application/json:
  *             schema:
@@ -82,7 +82,7 @@
  *                 projectId:
  *                   type: string
  *       400:
- *         description: 参数错误或并发已满
+ *         description: Invalid parameters or max concurrency reached
  *         content:
  *           application/json:
  *             schema:
@@ -93,7 +93,7 @@
  * @swagger
  * /api/build/stop-dev:
  *   get:
- *     summary: 停止开发服务器
+ *     summary: Stop the dev server
  *     tags: [Build]
  *     parameters:
  *       - in: query
@@ -101,16 +101,16 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *       - in: query
  *         name: pid
  *         required: true
  *         schema:
  *           type: number
- *         description: 进程ID
+ *         description: Process ID
  *     responses:
  *       200:
- *         description: 停止成功
+ *         description: Dev server stopped
  *         content:
  *           application/json:
  *             schema:
@@ -130,7 +130,7 @@
  * @swagger
  * /api/build/restart-dev:
  *   get:
- *     summary: 重启开发服务器
+ *     summary: Restart the dev server
  *     tags: [Build]
  *     parameters:
  *       - in: query
@@ -138,31 +138,31 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *       - in: query
  *         name: pid
  *         schema:
  *           type: number
- *         description: 进程ID(可选)
+ *         description: Process ID (optional)
  *       - in: query
  *         name: basePath
  *         schema:
  *           type: string
- *         description: 基础路径(仅Vite项目)
+ *         description: Base path (Vite projects only)
  *     responses:
  *       200:
- *         description: 重启成功
+ *         description: Dev server restarted
  */
 
 /**
  * @swagger
  * /api/build/list-dev:
  *   get:
- *     summary: 列出运行中的开发服务器
+ *     summary: List running dev servers
  *     tags: [Build]
  *     responses:
  *       200:
- *         description: 成功获取列表
+ *         description: List retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -189,7 +189,7 @@
  * @swagger
  * /api/build/parse-build-error:
  *   post:
- *     summary: 解析构建错误信息
+ *     summary: Parse build error output
  *     tags: [Build]
  *     requestBody:
  *       required: true
@@ -207,7 +207,7 @@
  *                 type: string
  *     responses:
  *       200:
- *         description: 解析成功
+ *         description: Parsed successfully
  *         content:
  *           application/json:
  *             schema:

@@ -10,23 +10,23 @@ import { executePruneManually } from "../src/scheduler/pnpmPruneScheduler.js";
 
 async function main() {
   console.log("====================================");
-  console.log("手动执行 pnpm store prune");
+  console.log("Manually execute pnpm store prune");
   console.log("====================================");
   console.log("");
 
   try {
     await executePruneManually();
     console.log("");
-    console.log("✅ 执行完成");
+    console.log("✅ Execution completed");
     process.exit(0);
   } catch (error) {
     console.error("");
-    console.error("❌ 执行失败:", error.message);
+    console.error("❌ Execution failed:", error.message);
     process.exit(1);
   }
 }
 
-// 如果直接运行此脚本
+// If running this script directly
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").replace(/^.*[\/\\]/, ""))) {
   main();
 }

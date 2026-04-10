@@ -53,19 +53,19 @@ async function removeNodeModules(projectPath, projectId = null) {
   const logId = projectId || path.basename(projectPath);
 
   if (fs.existsSync(nodeModulesPath)) {
-    log(logId, "INFO", "发现 node_modules 文件夹，正在删除", {
+    log(logId, "INFO", "Found node_modules folder, deleting", {
       projectPath,
       nodeModulesPath,
     });
 
     try {
       await fs.promises.rm(nodeModulesPath, { recursive: true, force: true });
-      log(logId, "INFO", "node_modules 文件夹删除成功", {
+      log(logId, "INFO", "node_modules folder deleted successfully", {
         projectPath,
         nodeModulesPath,
       });
     } catch (error) {
-      log(logId, "WARN", `删除 node_modules 文件夹失败: ${error.message}`, {
+      log(logId, "WARN", `Failed to delete node_modules folder: ${error.message}`, {
         projectPath,
         nodeModulesPath,
         error: error.message,
@@ -80,19 +80,19 @@ async function removeNodeModules(projectPath, projectId = null) {
     const lockFilePath = path.join(projectPath, lockFile);
 
     if (fs.existsSync(lockFilePath)) {
-      log(logId, "INFO", `发现 ${lockFile} 文件，正在删除`, {
+      log(logId, "INFO", `Found ${lockFile} file, deleting`, {
         projectPath,
         lockFilePath,
       });
 
       try {
         await fs.promises.unlink(lockFilePath);
-        log(logId, "INFO", `${lockFile} 文件删除成功`, {
+        log(logId, "INFO", `${lockFile} file deleted successfully`, {
           projectPath,
           lockFilePath,
         });
       } catch (error) {
-        log(logId, "WARN", `删除 ${lockFile} 文件失败: ${error.message}`, {
+        log(logId, "WARN", `Failed to delete ${lockFile} file: ${error.message}`, {
           projectPath,
           lockFilePath,
           error: error.message,
@@ -129,18 +129,18 @@ function installDependencies(req, projectId, projectPath, options = {}) {
       const startTime = Date.now();
       
       // 写入开始安装的日志（safeWrite 会自动添加时间戳）
-      const startMessage = `开始安装依赖\n命令: pnpm install --prefer-offline\n`;
-      safeWrite(outStream, startMessage, "主日志");
-      safeWrite(tempOutStream, startMessage, "临时日志");
+      const startMessage = `Start installing dependencies\nCommand: pnpm install --prefer-offline\n`;
+      safeWrite(outStream, startMessage, "Main log");
+      safeWrite(tempOutStream, startMessage, "Temp log");
       
       // 心跳定时器：每5秒输出一次，让用户知道还在进行中
       let heartbeatCount = 0;
       const heartbeatInterval = setInterval(() => {
         heartbeatCount++;
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const heartbeatMsg = `正在安装依赖... (已用时 ${elapsed}秒)\n`;
-        safeWrite(outStream, heartbeatMsg, "主日志");
-        safeWrite(tempOutStream, heartbeatMsg, "临时日志");
+        const heartbeatMsg = `Installing dependencies... (Elapsed time: ${elapsed} seconds)\n`;
+        safeWrite(outStream, heartbeatMsg, "Main log");
+        safeWrite(tempOutStream, heartbeatMsg, "Temp log");
       }, 5000); // 每5秒
 
       // 使用 spawn 获取实时输出
@@ -159,8 +159,8 @@ function installDependencies(req, projectId, projectPath, options = {}) {
         child.stdout.on("data", (data) => {
           const dataStr = data.toString();
           stdout += dataStr;
-          safeWrite(outStream, dataStr, "主日志");
-          safeWrite(tempOutStream, dataStr, "临时日志");
+          safeWrite(outStream, dataStr, "Main log");
+          safeWrite(tempOutStream, dataStr, "Temp log");
         });
       }
 
@@ -168,8 +168,8 @@ function installDependencies(req, projectId, projectPath, options = {}) {
         child.stderr.on("data", (data) => {
           const dataStr = data.toString();
           stderr += dataStr;
-          safeWrite(outStream, dataStr, "主日志");
-          safeWrite(tempOutStream, dataStr, "临时日志");
+          safeWrite(outStream, dataStr, "Main log");
+          safeWrite(tempOutStream, dataStr, "Temp log");
         });
       }
 
@@ -181,36 +181,36 @@ function installDependencies(req, projectId, projectPath, options = {}) {
         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
         
         if (code !== 0) {
-          const errorMessage = `依赖安装失败 (耗时 ${totalTime}秒)\n退出码: ${code}, 信号: ${signal}\n${stderr || '无错误信息'}\n`;
-          safeWrite(outStream, errorMessage, "主日志");
-          safeWrite(tempOutStream, errorMessage, "临时日志");
+          const errorMessage = `Dependency installation failed (Elapsed time: ${totalTime} seconds)\nExit code: ${code}, Signal: ${signal}\n${stderr || 'No error information'}\n`;
+          safeWrite(outStream, errorMessage, "Main log");
+          safeWrite(tempOutStream, errorMessage, "Temp log");
           return reject(
-            new Error(`依赖安装失败: 退出码 ${code}, 信号 ${signal}\n${stderr}`)
+            new Error(`Dependency installation failed: Exit code ${code}, Signal ${signal}\n${stderr}`)
           );
         }
 
         // 即使退出码为0，也检查stderr中是否有错误信息
         if (stderr && stderr.includes("Error") && !stderr.includes("warning")) {
-          const warnMessage = `依赖安装过程中出现警告: ${stderr}\n`;
-          safeWrite(outStream, warnMessage, "主日志");
-          safeWrite(tempOutStream, warnMessage, "临时日志");
+          const warnMessage = `Warning occurred during dependency installation: ${stderr}\n`;
+          safeWrite(outStream, warnMessage, "Main log");
+          safeWrite(tempOutStream, warnMessage, "Temp log");
         }
 
         // 成功完成，输出摘要
-        const successMessage = `✓ 依赖安装成功 (耗时 ${totalTime}秒)\n`;
-        safeWrite(outStream, successMessage, "主日志");
-        safeWrite(tempOutStream, successMessage, "临时日志");
+        const successMessage = `✓ Dependency installation successful (Elapsed time: ${totalTime} seconds)\n`;
+        safeWrite(outStream, successMessage, "Main log");
+        safeWrite(tempOutStream, successMessage, "Temp log");
         
         // 记录摘要信息（包括 stdout 和 stderr 的内容）
         if (stdout || stderr) {
-          const summaryMessage = `安装详情:\n${stdout || '(无标准输出)'}${stderr ? '\n警告信息:\n' + stderr : ''}\n`;
-          safeWrite(outStream, summaryMessage, "主日志");
-          safeWrite(tempOutStream, summaryMessage, "临时日志");
+          const summaryMessage = `Installation details:\n${stdout || '(No standard output)'}${stderr ? '\nWarning information:\n' + stderr : ''}\n`;
+          safeWrite(outStream, summaryMessage, "Main log");
+          safeWrite(tempOutStream, summaryMessage, "Temp log");
         } else {
           // 静默模式下可能没有输出，主动说明
-          const noOutputMsg = `(静默模式：无详细输出，依赖已成功从 store 链接到 node_modules)\n`;
-          safeWrite(outStream, noOutputMsg, "主日志");
-          safeWrite(tempOutStream, noOutputMsg, "临时日志");
+          const noOutputMsg = `(Silent mode: No detailed output, dependency successfully linked from store to node_modules)\n`;
+          safeWrite(outStream, noOutputMsg, "Main log");
+          safeWrite(tempOutStream, noOutputMsg, "Temp log");
         }
         
         resolve(stdout);
@@ -221,10 +221,10 @@ function installDependencies(req, projectId, projectPath, options = {}) {
         clearInterval(heartbeatInterval);
         
         const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-        const errorMessage = `依赖安装进程错误 (耗时 ${totalTime}秒): ${error.message}\n`;
-        safeWrite(outStream, errorMessage, "主日志");
-        safeWrite(tempOutStream, errorMessage, "临时日志");
-        reject(new Error(`依赖安装失败: ${error.message}`));
+        const errorMessage = `Dependency installation process error (Elapsed time: ${totalTime} seconds): ${error.message}\n`;
+        safeWrite(outStream, errorMessage, "Main log");
+        safeWrite(tempOutStream, errorMessage, "Temp log");
+        reject(new Error(`Dependency installation failed: ${error.message}`));
       });
     });
   }
@@ -234,7 +234,7 @@ function installDependencies(req, projectId, projectPath, options = {}) {
     // 优化 pnpm install 命令，提升性能
     const command = `cd ${projectPath} && pnpm install --prefer-offline --reporter=silent --loglevel=error`;
 
-    log(projectId, "INFO", "开始执行依赖安装命令", {
+    log(projectId, "INFO", "Start executing dependency installation command", {
       command,
       projectPath,
     });
@@ -247,7 +247,7 @@ function installDependencies(req, projectId, projectPath, options = {}) {
       },
       (error, stdout, stderr) => {
       if (error) {
-        log(projectId, "ERROR", "依赖安装失败", {
+        log(projectId, "ERROR", "Dependency installation failed", {
           error: error.message,
           code: error.code,
           stderr: stderr || error.message,
@@ -255,20 +255,20 @@ function installDependencies(req, projectId, projectPath, options = {}) {
         });
         return reject(
           new Error(
-            `依赖安装失败: ${error.message}\n${stderr || error.message}`
+            `Dependency installation failed: ${error.message}\n${stderr || error.message}`
           )
         );
       }
 
       // 即使退出码为0，也检查stderr中是否有错误信息
       if (stderr && stderr.includes("Error") && !stderr.includes("warning")) {
-        log(projectId, "WARN", "依赖安装过程中出现警告或错误", {
+        log(projectId, "WARN", "Warning or error occurred during dependency installation", {
           stderr,
         });
         // 可以选择继续执行或拒绝
       }
 
-      log(projectId, "INFO", "依赖安装完成", {
+      log(projectId, "INFO", "Dependency installation completed", {
         stdout: stdout.substring(0, 500), // 只记录前500个字符
       });
       resolve(stdout);

@@ -82,7 +82,7 @@ function readPidFile() {
   } catch (err) {
     // 文件不存在或解析失败
     if (err.code !== 'ENOENT') {
-      console.error(`读取 PID 文件失败: ${err.message}`);
+      console.error(`Read PID file failed: ${err.message}`);
     }
     return null;
   }
@@ -111,9 +111,9 @@ function writePidFile(pidInfo) {
     // 写入文件
     fs.writeFileSync(pidPath, JSON.stringify(pidInfo, null, 2));
     
-    console.debug(`PID 文件已写入: ${pidPath}`);
+    console.debug(`PID file written: ${pidPath}`);
   } catch (err) {
-    console.error(`写入 PID 文件失败: ${err.message}`);
+    console.error(`Write PID file failed: ${err.message}`);
     throw err;
   }
 }
@@ -129,10 +129,10 @@ function deletePidFile() {
     
     if (fs.existsSync(pidPath)) {
       fs.removeSync(pidPath);
-      console.debug(`PID 文件已删除: ${pidPath}`);
+      console.debug(`PID file deleted: ${pidPath}`);
     }
   } catch (err) {
-    console.error(`删除 PID 文件失败: ${err.message}`);
+    console.error(`Delete PID file failed: ${err.message}`);
   }
 }
 
@@ -183,7 +183,7 @@ async function stopProcess(pid, force = false) {
   return new Promise((resolve) => {
     // 如果进程不存在，直接返回成功
     if (!isProcessRunning(pid)) {
-      console.debug(`进程 ${pid} 不存在，视为已停止`);
+      console.debug(`Process ${pid} does not exist, already stopped`);
       resolve(true);
       return;
     }
@@ -191,7 +191,7 @@ async function stopProcess(pid, force = false) {
     const signal = force ? 'SIGKILL' : 'SIGTERM';
     const killMethod = isWindows() ? 'taskkill' : 'tree-kill';
     
-    console.debug(`使用 ${killMethod} 停止进程 ${pid} (信号: ${signal})`);
+    console.debug(`Use ${killMethod} to stop process ${pid} (signal: ${signal})`);
     
     if (isWindows()) {
       // Windows: 使用 taskkill 命令
@@ -213,16 +213,16 @@ async function stopProcess(pid, force = false) {
       });
       
       child.on('error', (err) => {
-        console.error(`停止进程失败: ${err.message}`);
+        console.error(`Stop process failed: ${err.message}`);
         resolve(false);
       });
       
       child.on('close', (code) => {
         if (code === 0) {
-          console.debug(`进程 ${pid} 已停止`);
+          console.debug(`Process ${pid} stopped`);
           resolve(true);
         } else {
-          console.warn(`taskkill 退出码: ${code}, 输出: ${output}`);
+          console.warn(`taskkill exit code: ${code}, output: ${output}`);
           
           // 如果非强制模式，尝试强制停止
           if (!force) {
@@ -238,14 +238,14 @@ async function stopProcess(pid, force = false) {
         if (err) {
           if (err.code === 'ESRCH') {
             // 进程不存在
-            console.debug(`进程 ${pid} 不存在`);
+            console.debug(`Process ${pid} does not exist`);
             resolve(true);
           } else {
-            console.error(`停止进程失败: ${err.message}`);
+            console.error(`Stop process failed: ${err.message}`);
             resolve(false);
           }
         } else {
-          console.debug(`进程 ${pid} 已停止`);
+          console.debug(`Process ${pid} stopped`);
           resolve(true);
         }
       });
@@ -268,7 +268,7 @@ async function waitForProcessStop(pid, timeout = SERVICE_CONFIG.defaultStopTimeo
   while (isProcessRunning(pid)) {
     // 检查是否超时
     if (Date.now() - startTime > timeout) {
-      console.warn(`等待进程 ${pid} 停止超时 (${timeout}ms)`);
+      console.warn(`Wait for process ${pid} to stop timeout (${timeout}ms)`);
       return false;
     }
     
@@ -279,7 +279,7 @@ async function waitForProcessStop(pid, timeout = SERVICE_CONFIG.defaultStopTimeo
   }
   
   const elapsed = Date.now() - startTime;
-  console.debug(`进程 ${pid} 已在 ${elapsed}ms 后停止`);
+  console.debug(`Process ${pid} stopped after ${elapsed}ms`);
   return true;
 }
 
@@ -300,7 +300,7 @@ async function waitForProcessStop(pid, timeout = SERVICE_CONFIG.defaultStopTimeo
 async function startService(options = {}) {
   const { env, port, config } = options;
   
-  console.log(`启动服务 ${SERVICE_CONFIG.name}...`);
+  console.log(`Start service ${SERVICE_CONFIG.name}...`);
   
   // 检查服务是否已在运行
   const existingPidInfo = readPidFile();
@@ -308,7 +308,7 @@ async function startService(options = {}) {
     return {
       success: false,
       pid: existingPidInfo.pid,
-      message: `服务已在运行中 (PID: ${existingPidInfo.pid})`,
+      message: `Service is already running (PID: ${existingPidInfo.pid})`,
     };
   }
   
@@ -317,17 +317,17 @@ async function startService(options = {}) {
   
   if (env) {
     envVars.NODE_ENV = env;
-    console.log(`环境: ${env}`);
+    console.log(`Environment: ${env}`);
   }
   
   if (port) {
     envVars.PORT = port;
-    console.log(`端口: ${port}`);
+    console.log(`Port: ${port}`);
   }
   
   if (config) {
     envVars.CONFIG_FILE = config;
-    console.log(`配置文件: ${config}`);
+    console.log(`Configuration file: ${config}`);
   }
   
   // 构建启动参数
@@ -352,7 +352,7 @@ async function startService(options = {}) {
   });
   
   child.on('error', (err) => {
-    console.error(`启动服务失败: ${err.message}`);
+    console.error(`Start service failed: ${err.message}`);
   });
   
   // 等待服务启动
@@ -363,7 +363,7 @@ async function startService(options = {}) {
     return {
       success: false,
       pid: null,
-      message: '服务启动失败',
+      message: 'Service start failed',
     };
   }
   
@@ -382,13 +382,13 @@ async function startService(options = {}) {
   // 解除子进程关联，使其独立运行
   child.unref();
   
-  console.log(`服务已启动 (PID: ${child.pid})`);
-  console.log(`运行地址: http://localhost:${pidInfo.port}`);
+  console.log(`Service started (PID: ${child.pid})`);
+  console.log(`Service address: http://localhost:${pidInfo.port}`);
   
   return {
     success: true,
     pid: child.pid,
-    message: '服务启动成功',
+    message: 'Service started successfully',
   };
 }
 
@@ -407,7 +407,7 @@ async function startService(options = {}) {
 async function stopService(options = {}) {
   const { force = false, timeout = SERVICE_CONFIG.defaultStopTimeout } = options;
   
-  console.log(`停止服务 ${SERVICE_CONFIG.name}...`);
+  console.log(`Stop service ${SERVICE_CONFIG.name}...`);
   
   // 读取 PID 文件
   const pidInfo = readPidFile();
@@ -415,18 +415,18 @@ async function stopService(options = {}) {
   if (!pidInfo) {
     return {
       success: false,
-      message: '未找到运行中的服务',
+      message: 'Service not found',
     };
   }
   
   // 检查进程是否正在运行
   if (!isProcessRunning(pidInfo.pid)) {
-    console.log('服务进程已停止，清理 PID 文件...');
+    console.log('Service process has stopped, clean PID file...');
     deletePidFile();
     
     return {
       success: true,
-      message: '服务已停止（进程已退出）',
+      message: 'Service has stopped (process has exited)',
     };
   }
   
@@ -436,7 +436,7 @@ async function stopService(options = {}) {
   if (!stopped) {
     return {
       success: false,
-      message: '停止服务失败',
+      message: 'Stop service failed',
     };
   }
   
@@ -449,12 +449,12 @@ async function stopService(options = {}) {
   if (exited) {
     return {
       success: true,
-      message: '服务已停止',
+      message: 'Service has stopped',
     };
   } else {
     return {
       success: false,
-      message: '服务停止超时',
+      message: 'Service stop timeout',
     };
   }
 }
@@ -468,14 +468,14 @@ async function stopService(options = {}) {
  * @returns {Promise<Object>} 重启结果
  */
 async function restartService(options = {}) {
-  console.log(`重启服务 ${SERVICE_CONFIG.name}...`);
+  console.log(`Restart service ${SERVICE_CONFIG.name}...`);
   
   // 先停止服务
   const stopResult = await stopService(options);
   
   // 如果停止失败但服务可能未运行，继续尝试启动
-  if (!stopResult.success && stopResult.message !== '未找到运行中的服务') {
-    console.warn(`停止服务失败: ${stopResult.message}`);
+  if (!stopResult.success && stopResult.message !== 'Service not found') {
+    console.warn(`Stop service failed: ${stopResult.message}`);
   }
   
   // 等待一段时间
@@ -488,13 +488,13 @@ async function restartService(options = {}) {
     return {
       success: true,
       pid: startResult.pid,
-      message: '服务已重启',
+      message: 'Service has restarted',
     };
   } else {
     return {
       success: false,
       pid: null,
-      message: `重启失败: ${startResult.message}`,
+      message: `Restart failed: ${startResult.message}`,
     };
   }
 }
@@ -514,7 +514,7 @@ function getServiceStatus() {
     return {
       running: false,
       pidInfo: null,
-      message: '服务未运行',
+      message: 'Service not running',
     };
   }
   
@@ -524,13 +524,13 @@ function getServiceStatus() {
     return {
       running: true,
       pidInfo: pidInfo,
-      message: '服务运行中',
+      message: 'Service running',
     };
   } else {
     return {
       running: false,
       pidInfo: pidInfo,
-      message: '服务进程不存在',
+      message: 'Service process does not exist',
     };
   }
 }
@@ -548,7 +548,7 @@ function formatUptime(startedAt) {
     
     // 检查日期是否有效
     if (isNaN(start.getTime())) {
-      return '未知';
+      return 'unknown';
     }
     
     const uptime = Math.floor((now - start) / 1000);
@@ -558,14 +558,14 @@ function formatUptime(startedAt) {
     const seconds = uptime % 60;
     
     if (hours > 0) {
-      return `${hours}小时 ${minutes}分 ${seconds}秒`;
+      return `${hours} hours ${minutes} minutes ${seconds} seconds`;
     } else if (minutes > 0) {
-      return `${minutes}分 ${seconds}秒`;
+      return `${minutes} minutes ${seconds} seconds`;
     } else {
-      return `${seconds}秒`;
+      return `${seconds} seconds`;
     }
   } catch (err) {
-    return '未知';
+    return 'unknown';
   }
 }
 
@@ -590,18 +590,18 @@ export {
 // 如果直接运行此文件，显示服务状态
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").replace(/^.*[\/\\]/, ""))) {
   const status = getServiceStatus();
-  console.log(`\n${SERVICE_CONFIG.name} 服务状态:\n`);
-  console.log(`  运行状态: ${status.running ? '运行中' : '已停止'}`);
+  console.log(`\n${SERVICE_CONFIG.name} Service status:\n`);
+  console.log(`  Running status: ${status.running ? 'Running' : 'Stopped'}`);
   if (status.pidInfo) {
-    console.log(`  进程 ID: ${status.pidInfo.pid}`);
-    console.log(`  环境: ${status.pidInfo.env || '未知'}`);
-    console.log(`  端口: ${status.pidInfo.port || '未知'}`);
-    console.log(`  版本: ${status.pidInfo.version || '未知'}`);
-    console.log(`  平台: ${status.pidInfo.platform || '未知'}`);
-    console.log(`  启动时间: ${status.pidInfo.startedAt || '未知'}`);
-    console.log(`  运行时间: ${formatUptime(status.pidInfo.startedAt)}`);
+    console.log(`  Process ID: ${status.pidInfo.pid}`);
+    console.log(`  Environment: ${status.pidInfo.env || 'Unknown'}`);
+    console.log(`  Port: ${status.pidInfo.port || 'Unknown'}`);
+    console.log(`  Version: ${status.pidInfo.version || 'Unknown'}`);
+    console.log(`  Platform: ${status.pidInfo.platform || 'Unknown'}`);
+    console.log(`  Started at: ${status.pidInfo.startedAt || 'Unknown'}`);
+    console.log(`  Uptime: ${formatUptime(status.pidInfo.startedAt)}`);
   }
-  console.log(`  PID 文件: ${getPidFilePath()}`);
+  console.log(`  PID file: ${getPidFilePath()}`);
   console.log('');
   process.exit(status.running ? 0 : 1);
 }

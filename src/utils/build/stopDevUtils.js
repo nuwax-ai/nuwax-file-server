@@ -76,7 +76,7 @@ function findPidsByProjectId(projectId) {
 async function stopDevServerByPid(req, projectId, pid, options = {}) {
   const { strict = true, waitForStop = false } = options;
 
-  log(projectId, "INFO", "开始停止开发服务器", {
+  log(projectId, "INFO", "Start stopping development server", {
     projectId,
     pid,
     strict,
@@ -92,20 +92,20 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
     const pidNum = Number(pid);
     if (Number.isFinite(pidNum)) {
       pidToKill = pidNum;
-      log(projectId, "INFO", "使用传入的pid停止开发服务器", {
+      log(projectId, "INFO", "Stop development server using incoming pid", {
         projectId,
         pid: pidToKill,
         requestId: req.requestId,
       });
     } else {
-      log(projectId, "WARN", "传入的pid无效", {
+      log(projectId, "WARN", "Incoming pid is invalid", {
         projectId,
         invalidPid: pid,
         requestId: req.requestId,
       });
 
       if (strict) {
-        throw new ValidationError("进程ID无效", { field: "pid", value: pid });
+        throw new ValidationError("Process ID is invalid", { field: "pid", value: pid });
       }
     }
   }
@@ -115,31 +115,31 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
     existingProcess = getRunningProcess(projectId);
     if (existingProcess) {
       pidToKill = existingProcess.pid;
-      log(projectId, "INFO", "从运行表中获取pid停止开发服务器", {
+      log(projectId, "INFO", "Get pid to stop development server from running table", {
         projectId,
         pid: pidToKill,
         requestId: req.requestId,
       });
     } else {
-      log(projectId, "INFO", "未找到需要停止的开发服务器进程", {
+      log(projectId, "INFO", "No development server process found to stop", {
         projectId,
         requestId: req.requestId,
       });
 
       if (strict) {
-        throw new ProcessError("未找到运行中的开发服务器进程", { projectId });
+        throw new ProcessError("No running development server process found", { projectId });
       }
 
       // 即使未找到进程，也尝试释放端口（可能进程已意外退出）
       portPool.release(String(projectId));
-      log(projectId, "INFO", "端口已释放（进程未运行）", {
+      log(projectId, "INFO", "Port released (process not running)", {
         projectId,
         requestId: req.requestId,
       });
 
       return {
         success: true,
-        message: "未找到运行中的进程",
+        message: "No running process found",
         projectId,
         pid: null,
       };
@@ -150,20 +150,20 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
   const killed = await killProcess(projectId, pidToKill);
 
   if (killed) {
-    log(projectId, "INFO", "开发服务器已停止", {
+    log(projectId, "INFO", "Development server stopped", {
       projectId,
       pid: pidToKill,
       requestId: req.requestId,
     });
   } else {
-    log(projectId, "WARN", "停止开发服务器失败", {
+    log(projectId, "WARN", "Failed to stop development server", {
       projectId,
       pid: pidToKill,
       requestId: req.requestId,
     });
 
     if (strict) {
-      throw new ProcessError("停止进程失败", { projectId, pid: pidToKill });
+      throw new ProcessError("Failed to stop process", { projectId, pid: pidToKill });
     }
   }
 
@@ -175,7 +175,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
     );
 
     if (!stopped) {
-      log(projectId, "WARN", "进程停止超时", {
+      log(projectId, "WARN", "Process stop timeout", {
         projectId,
         pid: pidToKill,
         attempts,
@@ -183,14 +183,14 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
       });
 
       if (strict) {
-        throw new ProcessError("进程停止超时", {
+        throw new ProcessError("Process stop timeout", {
           projectId,
           pid: pidToKill,
           attempts,
         });
       }
     } else {
-      log(projectId, "INFO", "进程已确认停止", {
+      log(projectId, "INFO", "Process confirmed stopped", {
         projectId,
         pid: pidToKill,
         attempts,
@@ -216,7 +216,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
             fs.unlinkSync(tempFilePath);
             deletedCount++;
           } catch (err) {
-            log(projectId, "WARN", "删除临时日志文件失败", {
+            log(projectId, "WARN", "Failed to delete temporary log file", {
               projectId,
               tempFile,
               error: err.message,
@@ -225,7 +225,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
           }
         }
 
-        log(projectId, "INFO", "临时日志文件清理完成", {
+        log(projectId, "INFO", "Temporary log file cleanup completed", {
           projectId,
           deletedCount,
           totalTempFiles: tempFiles.length,
@@ -234,7 +234,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
       }
     }
   } catch (err) {
-    log(projectId, "WARN", "清理临时日志文件时出错", {
+    log(projectId, "WARN", "Error cleaning temporary log files", {
       projectId,
       error: err.message,
       requestId: req.requestId,
@@ -245,13 +245,13 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
   try {
     if (logCacheManager.isEnabled()) {
       logCacheManager.delete(projectId);
-      log(projectId, "INFO", "日志缓存已清理", {
+      log(projectId, "INFO", "Log cache cleaned", {
         projectId,
         requestId: req.requestId,
       });
     }
   } catch (err) {
-    log(projectId, "WARN", "清理日志缓存时出错", {
+    log(projectId, "WARN", "Error cleaning log cache", {
       projectId,
       error: err.message,
       requestId: req.requestId,
@@ -261,7 +261,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
   // 6. 停止成功后释放端口
   if (killed) {
     portPool.release(String(projectId));
-    log(projectId, "INFO", "端口已释放", {
+    log(projectId, "INFO", "Port released", {
       projectId,
       requestId: req.requestId,
     });
@@ -269,7 +269,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
 
   return {
     success: true,
-    message: killed ? "已停止" : "停止失败但继续执行",
+    message: killed ? "Stopped" : "Failed to stop but continue execution",
     projectId,
     pid: pidToKill,
   };
@@ -278,7 +278,7 @@ async function stopDevServerByPid(req, projectId, pid, options = {}) {
 async function stopDevServerByProjectId(req, projectId, options = {}) {
   const { strict = true, waitForStop = false } = options;
 
-  log(projectId, "INFO", "开始停止开发服务器(按projectId全量停止)", {
+  log(projectId, "INFO", "Start stopping development server(stop all by projectId)", {
     projectId,
     strict,
     waitForStop,
@@ -290,7 +290,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
   const candidates = uniquePids.map((pid) => ({ pid }));
 
   if (!candidates || candidates.length === 0) {
-    log(projectId, "INFO", "未找到需要停止的开发服务器进程", {
+    log(projectId, "INFO", "No development server process found to stop", {
       projectId,
       requestId: req.requestId,
     });
@@ -301,14 +301,14 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
 
     // 即使未找到进程，也尝试释放端口（可能进程已意外退出）
     portPool.release(String(projectId));
-    log(projectId, "INFO", "端口已释放（进程未运行）", {
+    log(projectId, "INFO", "Port released (process not running)", {
       projectId,
       requestId: req.requestId,
     });
 
     return {
       success: true,
-      message: "未找到运行中的进程",
+      message: "No running process found",
       projectId,
       pid: null,
     };
@@ -322,7 +322,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
 
     if (waitForStop && killed) {
       const { stopped, attempts } = await waitForProcessStop(projectId, thePid);
-      log(projectId, stopped ? "INFO" : "WARN", stopped ? "进程已确认停止" : "进程停止超时", {
+      log(projectId, stopped ? "INFO" : "WARN", stopped ? "Process confirmed stopped" : "Process stop timeout", {
         projectId,
         pid: thePid,
         attempts,
@@ -330,14 +330,14 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
       });
 
       if (!stopped && strict) {
-        throw new ProcessError("进程停止超时", {
+        throw new ProcessError("Process stop timeout", {
           projectId,
           pid: thePid,
           attempts,
         });
       }
     } else if (!killed && strict) {
-      throw new ProcessError("停止进程失败", { projectId, pid: thePid });
+      throw new ProcessError("Failed to stop process", { projectId, pid: thePid });
     }
   }
 
@@ -358,7 +358,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
             fs.unlinkSync(tempFilePath);
             deletedCount++;
           } catch (err) {
-            log(projectId, "WARN", "删除临时日志文件失败", {
+            log(projectId, "WARN", "Failed to delete temporary log file", {
               projectId,
               tempFile,
               error: err.message,
@@ -367,7 +367,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
           }
         }
 
-        log(projectId, "INFO", "临时日志文件清理完成", {
+        log(projectId, "INFO", "Temporary log file cleanup completed", {
           projectId,
           deletedCount,
           totalTempFiles: tempFiles.length,
@@ -376,7 +376,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
       }
     }
   } catch (err) {
-    log(projectId, "WARN", "清理临时日志文件时出错", {
+    log(projectId, "WARN", "Error cleaning temporary log files", {
       projectId,
       error: err.message,
       requestId: req.requestId,
@@ -387,13 +387,13 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
   try {
     if (logCacheManager.isEnabled()) {
       logCacheManager.delete(projectId);
-      log(projectId, "INFO", "日志缓存已清理", {
+      log(projectId, "INFO", "Log cache cleaned", {
         projectId,
         requestId: req.requestId,
       });
     }
   } catch (err) {
-    log(projectId, "WARN", "清理日志缓存时出错", {
+    log(projectId, "WARN", "Error cleaning log cache", {
       projectId,
       error: err.message,
       requestId: req.requestId,
@@ -405,7 +405,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
   // 停止成功后释放端口
   if (allKilled && results.length > 0) {
     portPool.release(String(projectId));
-    log(projectId, "INFO", "端口已释放", {
+    log(projectId, "INFO", "Port released", {
       projectId,
       requestId: req.requestId,
     });
@@ -413,7 +413,7 @@ async function stopDevServerByProjectId(req, projectId, options = {}) {
   
   return {
     success: true,
-    message: allKilled ? "已停止" : "部分停止失败但继续执行",
+    message: allKilled ? "Stopped" : "Partially stopped but continue execution",
     projectId,
     pid: null,
     killedPids: results,

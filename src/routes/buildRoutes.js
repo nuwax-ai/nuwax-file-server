@@ -27,7 +27,7 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const projectId = req.query.projectId;
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       
       // 设置长超时时间：依赖安装可能需要较长时间
@@ -48,16 +48,16 @@ const routes = [
       const basePath = req.query.basePath;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (!pid) {
-        throw new ValidationError("进程ID不能为空", { field: "pid" });
+        throw new ValidationError("Process ID cannot be empty", { field: "pid" });
       }
       if (!port) {
-        throw new ValidationError("端口号不能为空", { field: "port" });
+        throw new ValidationError("Port cannot be empty", { field: "port" });
       }
       if (!basePath) {
-        throw new ValidationError("basePath不能为空", { field: "basePath" });
+        throw new ValidationError("basePath cannot be empty", { field: "basePath" });
       }
 
       const result = await keepAliveDevServer(
@@ -76,7 +76,7 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const projectId = req.query.projectId;
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       // 设置长超时时间：构建可能需要较长时间
@@ -95,10 +95,10 @@ const routes = [
       const pid = req.query.pid;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (!pid) {
-        throw new ValidationError("进程ID不能为空", { field: "pid" });
+        throw new ValidationError("Process ID cannot be empty", { field: "pid" });
       }
 
       const result = await stopDevServer(req, String(projectId), pid, {
@@ -114,7 +114,7 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const projectId = req.query.projectId;
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       // 设置长超时时间：重启包含依赖安装，可能需要较长时间
@@ -141,10 +141,10 @@ const routes = [
       const { projectId, errorMessage } = req.body;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (!errorMessage) {
-        throw new ValidationError("错误消息不能为空", {
+        throw new ValidationError("Error message cannot be empty", {
           field: "errorMessage",
         });
       }
@@ -170,13 +170,13 @@ const routes = [
       const logType = req.query.logType || "temp";
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       // 解析起始行号，默认为1
       const startLine = startIndex ? parseInt(startIndex, 10) : 1;
       if (isNaN(startLine) || startLine < 1) {
-        throw new ValidationError("起始行号必须是正整数（从1开始）", {
+        throw new ValidationError("Start index must be a positive integer (starting from 1)", {
           field: "startIndex",
           value: startIndex,
         });
@@ -193,7 +193,7 @@ const routes = [
       const stats = logCacheManager.getStats();
       res.json({
         success: true,
-        message: "获取日志缓存统计成功",
+        message: "Get log cache statistics successfully",
         stats,
       });
     },
@@ -205,7 +205,7 @@ const routes = [
       logCacheManager.clear();
       res.json({
         success: true,
-        message: "所有日志缓存已清理",
+        message: "All log caches have been cleared",
       });
     },
   },
@@ -216,7 +216,7 @@ const routes = [
       const status = portPool.getStatus();
       res.json({
         success: true,
-        message: "获取端口池状态成功",
+        message: "Get port pool status successfully",
         ...status,
       });
     },

@@ -7,7 +7,7 @@ const options = {
     info: {
       title: "Application Builder API",
       version: "1.0.0",
-      description: "应用构建系统 API 文档",
+      description: "Application builder API documentation",
       contact: {
         name: "API Support",
       },
@@ -15,13 +15,13 @@ const options = {
     servers: [
       {
         url: `http://localhost:${config.PORT}`,
-        description: `${config.NODE_ENV} 环境`,
+        description: `${config.NODE_ENV} environment`,
       },
     ],
     tags: [
-      { name: "Build", description: "构建相关接口" },
-      { name: "Project", description: "项目管理接口" },
-      { name: "Code", description: "代码提交接口" },
+      { name: "Build", description: "Build related interfaces" },
+      { name: "Project", description: "Project management interfaces" },
+      { name: "Code", description: "Code submission interfaces" },
     ],
     components: {
       schemas: {
@@ -33,7 +33,7 @@ const options = {
               type: "object",
               properties: {
                 type: { type: "string", example: "VALIDATION_ERROR" },
-                message: { type: "string", example: "项目ID不能为空" },
+                message: { type: "string", example: "Project ID cannot be empty" },
                 timestamp: { type: "string", format: "date-time" },
                 requestId: { type: "string" },
                 details: { type: "object" },

@@ -1,61 +1,61 @@
-# 快速开始指南
+# Quick start
 
-本指南将帮助你快速上手使用 nuwax-file-server CLI 工具。
+This guide helps you get started with the nuwax-file-server CLI.
 
-## 1. 本地测试
+## 1. Local testing
 
-在项目根目录执行以下命令：
+From the project root:
 
 ```bash
-# 安装依赖
+# Install dependencies
 pnpm install
 
-# 启动服务（开发环境）
+# Start the server (development)
 pnpm run cli:start:dev
 
-# 查看服务状态
+# Check status
 pnpm run cli:status
 
-# 测试健康检查
+# Health check
 curl http://localhost:60000/health
 
-# 停止服务
+# Stop the server
 pnpm run cli:stop
 ```
 
-## 2. 全局安装使用
+## 2. Global install
 
 ```bash
-# 全局安装
+# Global install
 npm install -g .
 
-# 或
+# or
 pnpm add -g .
 
-# 然后在任何目录使用
+# Then run from any directory
 nuwax-file-server start --env development
 nuwax-file-server status
 nuwax-file-server stop
 ```
 
-## 3. 命令说明
+## 3. Commands
 
-| 命令                                | 说明                     |
-| ----------------------------------- | ------------------------ |
-| `nuwax-file-server start`           | 启动服务（默认生产环境） |
-| `nuwax-file-server start --env dev` | 启动服务（开发环境）     |
-| `nuwax-file-server stop`            | 停止服务                 |
-| `nuwax-file-server restart`         | 重启服务                 |
-| `nuwax-file-server status`          | 查看服务状态             |
-| `nuwax-file-server --help`          | 查看帮助                 |
+| Command | Description |
+| ------- | ----------- |
+| `nuwax-file-server start` | Start (default: production) |
+| `nuwax-file-server start --env dev` | Start (development) |
+| `nuwax-file-server stop` | Stop |
+| `nuwax-file-server restart` | Restart |
+| `nuwax-file-server status` | Status |
+| `nuwax-file-server --help` | Help |
 
-## 4. 健康检查
+## 4. Health check
 
 ```bash
 curl http://localhost:60000/health
 ```
 
-### 响应示例
+### Example response
 
 ```json
 {
@@ -76,60 +76,56 @@ curl http://localhost:60000/health
 }
 ```
 
-## 5. 环境变量配置
+## 5. Environment variables
 
-### 使用默认配置
+### Defaults
 
 ```bash
-# 使用 env.production 的所有默认值
+# Use defaults from env.production
 nuwax-file-server start --env production --port 60000
 ```
 
-### 自定义路径配置
+### Override paths
 
 ```bash
-# 根据实际需求覆盖路径变量
+# Override path-related variables as needed
 nuwax-file-server start --env production --port 60000 \
   PROJECT_SOURCE_DIR=/data/projects \
   DIST_TARGET_DIR=/var/www/html \
   UPLOAD_PROJECT_DIR=/data/uploads
 ```
 
-详细配置说明请参考：[环境变量配置文档](./ENV.md)
+See the full reference: [Environment variables](./ENV.md)
 
-## 6. 常见问题
+## 6. Troubleshooting
 
-### 服务无法启动
+### Server will not start
 
-检查端口是否被占用：
+Check if the port is in use:
 
 ```bash
-# 查看端口占用
 lsof -i :60000
 
-# 或使用 netstat
+# or
 netstat -tlnp | grep 60000
 ```
 
-### 服务停止失败
+### Stop fails
 
-使用强制停止：
+Force stop:
 
 ```bash
 nuwax-file-server stop --force
 ```
 
-### 查看服务日志
+### Logs / sanity check
 
 ```bash
-# 查看服务状态
 nuwax-file-server status
-
-# 查看健康端点
 curl http://localhost:60000/health
 ```
 
-## 7. Docker 部署
+## 7. Docker
 
 ```yaml
 # docker-compose.yml
@@ -159,216 +155,164 @@ services:
       retries: 3
 ```
 
-## 8. 测试脚本
+## 8. Tests
 
-项目提供了多种测试脚本来验证 CLI 功能。
+The repo includes several ways to exercise the CLI.
 
-### 8.1 运行所有测试
+### 8.1 Run all tests
 
 ```bash
-# 运行所有测试
 pnpm run test:run
 
-# 运行单元测试
 pnpm run test:unit
 
-# 运行集成测试
 pnpm run test:integration
 ```
 
-### 8.2 CLI 单元测试
+### 8.2 CLI unit tests
 
 ```bash
-# 运行 CLI 专用测试
 npx jest tests/unit/cli.test.js
 
-# 或使用 npm script
 pnpm run test:unit -- --testPathPattern=cli.test.js
 ```
 
-**CLI 测试覆盖范围：**
+**Coverage areas:**
 
-| 测试组            | 内容                                   |
-| ----------------- | -------------------------------------- |
-| Service Manager   | PID 文件、进程状态、服务状态           |
-| Environment Utils | 环境变量获取、类型转换、命令行参数解析 |
-| Cross-Platform    | 平台检测、路径处理                     |
-| Config            | CLI 专用配置验证                       |
+| Group | Topics |
+| ----- | ------ |
+| Service Manager | PID file, process state, service status |
+| Environment Utils | Env resolution, typing, CLI parsing |
+| Cross-Platform | Platform detection, paths |
+| Config | CLI-specific config validation |
 
-### 8.3 手动测试脚本
+### 8.3 Manual checks
 
-#### 开发环境测试
+#### Development
 
 ```bash
-# 1. 启动开发环境服务
 pnpm run cli:start:dev
-
-# 2. 检查服务状态
 pnpm run cli:status
-
-# 3. 测试健康检查
 curl http://localhost:60000/health
-
-# 4. 停止服务
 pnpm run cli:stop
 ```
 
-#### 生产环境测试
+#### Production
 
 ```bash
-# 1. 启动生产环境服务
 pnpm run cli:start:prod
-
-# 2. 检查服务状态
 pnpm run cli:status
-
-# 3. 测试健康检查
 curl http://localhost:60000/health
-
-# 4. 重启服务
 pnpm run cli:restart
-
-# 5. 停止服务
 pnpm run cli:stop
 ```
 
-#### 自定义配置测试
+#### Custom config
 
 ```bash
-# 使用自定义端口启动
 nuwax-file-server start --env development --port 60001
 
-# 使用自定义路径配置启动
 nuwax-file-server start --env development --port 60002 \
   PROJECT_SOURCE_DIR=/data/test-projects \
   DIST_TARGET_DIR=/var/www/test-nginx
 
-# 检查状态
 nuwax-file-server status
-
-# 停止
 nuwax-file-server stop
 ```
 
-### 8.4 测试健康检查端点
+### 8.4 Health endpoint
 
 ```bash
-# 基础健康检查
 curl http://localhost:60000/health
 
-# 格式化输出（需要 jq）
 curl http://localhost:60000/health | jq
 
-# 检查特定字段
 curl http://localhost:60000/health | jq '.status'
 curl http://localhost:60000/health | jq '.uptime'
 curl http://localhost:60000/health | jq '.memory'
 ```
 
-### 8.5 跨平台测试
+### 8.5 Cross-platform
 
-#### macOS/Linux
+#### macOS / Linux
 
 ```bash
-# 启动服务
 nuwax-file-server start --env production
-
-# 查看进程
 ps aux | grep nuwax-file-server
-
-# 停止服务
 nuwax-file-server stop
 ```
 
 #### Windows
 
 ```cmd
-:: 启动服务
 nuwax-file-server start --env production
-
-:: 查看进程
 tasklist | findstr nuwax-file-server
-
-:: 停止服务
 nuwax-file-server stop --force
 ```
 
-### 8.6 自动化测试脚本
+### 8.6 Automation script (`test-cli.sh`)
 
-创建一个测试脚本 `test-cli.sh`：
+Create `test-cli.sh`:
 
 ```bash
 #!/bin/bash
 
-# nuwax-file-server CLI 自动化测试脚本
+# nuwax-file-server CLI smoke test
 
 set -e
 
-echo "=== nuwax-file-server CLI 测试 ==="
+echo "=== nuwax-file-server CLI test ==="
 
-# 配置
 PORT=60000
 HEALTH_URL="http://localhost:${PORT}/health"
 
-# 测试函数
 test_command() {
     local cmd=$1
     local description=$2
-    echo "测试: ${description}"
-    echo "命令: ${cmd}"
+    echo "Test: ${description}"
+    echo "Command: ${cmd}"
     eval "${cmd}"
-    echo "✓ 完成"
+    echo "✓ done"
     echo ""
 }
 
-# 停止可能运行的服务
-echo "清理环境..."
+echo "Cleaning up..."
 nuwax-file-server stop 2>/dev/null || true
 sleep 1
 
-# 启动服务
-test_command "nuwax-file-server start --env production --port ${PORT}" "启动服务"
+test_command "nuwax-file-server start --env production --port ${PORT}" "start server"
 
-# 等待服务启动
 sleep 3
 
-# 测试健康检查
-echo "测试: 健康检查"
+echo "Test: health check"
 curl -s "${HEALTH_URL}" | jq '.status'
-echo "✓ 健康检查通过"
+echo "✓ health OK"
 echo ""
 
-# 测试状态查询
-test_command "nuwax-file-server status" "查询服务状态"
+test_command "nuwax-file-server status" "status"
 
-# 测试重启
-test_command "nuwax-file-server restart" "重启服务"
+test_command "nuwax-file-server restart" "restart"
 sleep 3
 
-# 再次检查健康
-echo "测试: 重启后健康检查"
+echo "Test: health after restart"
 curl -s "${HEALTH_URL}" | jq '.status'
-echo "✓ 重启后健康检查通过"
+echo "✓ health OK after restart"
 echo ""
 
-# 停止服务
-test_command "nuwax-file-server stop" "停止服务"
+test_command "nuwax-file-server stop" "stop"
 
-echo "=== 所有测试通过 ==="
+echo "=== All tests passed ==="
 ```
 
-运行测试脚本：
+Run it:
 
 ```bash
-# 赋予执行权限
 chmod +x test-cli.sh
-
-# 运行测试
 ./test-cli.sh
 ```
 
-## 9. 相关文档
+## 9. Related docs
 
-- [README.md](../README.md) - 项目主文档
-- [ENV.md](./ENV.md) - 环境变量配置完整指南
-- [CHANGELOG.md](../CHANGELOG.md) - 更新日志
+- [README.md](../README.md) — Main readme
+- [ENV.md](./ENV.md) — Environment variables
+- [CHANGELOG.md](../CHANGELOG.md) — Changelog

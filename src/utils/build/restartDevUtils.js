@@ -19,7 +19,7 @@ const projectSourceDir = config.PROJECT_SOURCE_DIR;
 
 // 重启开发服务器
 async function restartDevServer(req, projectId) {
-  log(projectId, "INFO", "开始重启开发服务器", {
+  log(projectId, "INFO", "Start restarting development server", {
     projectId,
     requestId: req.requestId,
   });
@@ -29,11 +29,11 @@ async function restartDevServer(req, projectId) {
   const jsonFilePath = path.join(projectPath, "package.json");
   const exists = fs.existsSync(jsonFilePath);
   if (!exists) {
-    log(projectId, "WARN", "项目缺少package.json文件", {
+    log(projectId, "WARN", "Project missing package.json file", {
       projectId,
       requestId: req.requestId,
     });
-    throw new ResourceError("项目缺少package.json文件", {
+    throw new ResourceError("Project missing package.json file", {
       projectId,
       projectPath,
     });
@@ -43,7 +43,7 @@ async function restartDevServer(req, projectId) {
   try {
     jsonContent = JSON.parse(fs.readFileSync(jsonFilePath, "utf8"));
   } catch (error) {
-    throw new FileError("package.json文件格式错误", {
+    throw new FileError("package.json file format error", {
       projectId,
       jsonFilePath,
       originalError: error.message,
@@ -53,16 +53,16 @@ async function restartDevServer(req, projectId) {
   const jsonScripts = jsonContent.scripts;
   const devScript = jsonScripts.dev;
   if (!devScript) {
-    log(projectId, "WARN", "项目缺少dev脚本", {
+    log(projectId, "WARN", "Project missing dev script", {
       projectId,
       requestId: req.requestId,
     });
-    throw new BusinessError("项目缺少dev脚本", { projectId });
+    throw new BusinessError("Project missing dev script", { projectId });
   }
 
   // 如果项目正在启动中，等待完成
   // if (isProjectStarting(projectId)) {
-  //   throw new BusinessError("该项目正在启动中，请稍后重试", {
+  //   throw new BusinessError("Project is starting, please try again later", {
   //     projectId,
   //     code: ERROR_CODES.PROJECT_STARTING,
   //   });
@@ -80,21 +80,21 @@ async function restartDevServer(req, projectId) {
     });
 
     // 2. 删除node_modules
-    log(projectId, "INFO", "开始删除node_modules和lock文件", {
+    log(projectId, "INFO", "Start deleting node_modules and lock file", {
       projectId,
       requestId: req.requestId,
     });
     await removeNodeModules(projectPath, projectId);
 
     // 3. 创建.npmrc文件
-    log(projectId, "INFO", "创建.npmrc文件", {
+    log(projectId, "INFO", "Create .npmrc file", {
       projectId,
       requestId: req.requestId,
     });
     await createPnpmNpmrc(projectPath, projectId);
 
     // 4. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行）
-    log(projectId, "INFO", "开始启动dev服务器", {
+    log(projectId, "INFO", "Start starting dev server", {
       projectId,
       requestId: req.requestId,
     });
@@ -106,7 +106,7 @@ async function restartDevServer(req, projectId) {
       devScript,
     });
 
-    log(projectId, "INFO", "dev服务器重启完成", {
+    log(projectId, "INFO", "Dev server restart completed", {
       projectId,
       pid,
       port: actualPort,
@@ -115,7 +115,7 @@ async function restartDevServer(req, projectId) {
 
     return {
       success: true,
-      message: "开发服务器重启成功",
+      message: "Development server restart successfully",
       projectId,
       pid,
       port: actualPort,

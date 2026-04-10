@@ -28,7 +28,7 @@ async function startDevServer(req, projectId) {
 
   addStartingProject(projectId);
   try {
-    log(projectId, "INFO", "启动开发服务器", {
+    log(projectId, "INFO", "Start starting development server", {
       projectId,
       requestId: req.requestId,
     });
@@ -37,11 +37,11 @@ async function startDevServer(req, projectId) {
 
     const exists = fs.existsSync(jsonFilePath);
     if (!exists) {
-      log(projectId, "WARN", "项目缺少package.json文件", {
+      log(projectId, "WARN", "Project missing package.json file", {
         projectId,
         requestId: req.requestId,
       });
-      throw new ResourceError("项目缺少package.json文件", {
+      throw new ResourceError("Project missing package.json file", {
         projectId,
         projectPath,
       });
@@ -51,7 +51,7 @@ async function startDevServer(req, projectId) {
     try {
       jsonContent = JSON.parse(fs.readFileSync(jsonFilePath, "utf8"));
     } catch (error) {
-      throw new FileError("package.json文件格式错误", {
+      throw new FileError("package.json file format error", {
         projectId,
         jsonFilePath,
         originalError: error.message,
@@ -61,11 +61,11 @@ async function startDevServer(req, projectId) {
     const jsonScripts = jsonContent.scripts;
     const devScript = jsonScripts.dev;
     if (!devScript) {
-      log(projectId, "WARN", "项目缺少dev脚本", {
+      log(projectId, "WARN", "Project missing dev script", {
         projectId,
         requestId: req.requestId,
       });
-      throw new BusinessError("缺少dev脚本，请在package.json中添加dev脚本", { projectId });
+      throw new BusinessError("Project missing dev script, please add dev script in package.json", { projectId });
     }
 
     // Linux 环境下：检测 libc 类型与已安装 Rollup 原生包是否匹配，若不匹配则清理依赖
@@ -85,7 +85,7 @@ async function startDevServer(req, projectId) {
           // 在 musl 系统上若装了 gnu 变体，或在 glibc 系统上若装了 musl 变体，则清理
           const mismatch = (isMusl && hasRollupGnu) || (!isMusl && hasRollupMusl);
           if (mismatch) {
-            log(projectId, "WARN", "检测到 Rollup 原生包与 libc 不匹配，清理依赖后重装", {
+            log(projectId, "WARN", "Detected Rollup native package does not match libc, clean dependencies and reinstall", {
               projectId,
               isMusl,
               glibcVersion: glibcVersion || null,
@@ -95,7 +95,7 @@ async function startDevServer(req, projectId) {
         }
       }
     } catch (e) {
-      log(projectId, "WARN", "Linux 原生包匹配检测失败（忽略继续）", {
+      log(projectId, "WARN", "Linux native package matching detection failed (ignore continue)", {
         error: e && e.message,
       });
     }
@@ -122,7 +122,7 @@ async function startDevServer(req, projectId) {
     //   };
     // }
 
-    log(projectId, "INFO", "开始以非阻塞方式执行 dev 脚本", {
+    log(projectId, "INFO", "Start executing dev script in non-blocking mode", {
       projectId,
       requestId: req.requestId,
     });
@@ -135,7 +135,7 @@ async function startDevServer(req, projectId) {
     });
     return {
       success: true,
-      message: "开发服务器已启动",
+      message: "Development server started",
       projectId,
       pid,
       port: actualPort,

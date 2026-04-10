@@ -33,7 +33,7 @@ async function copyBuildOutputToTarget({
     const targetDir = path.join(targetBase, projectId, "dist");
 
     if (!fs.existsSync(sourceDir)) {
-      const msg = `未找到dist目录: ${sourceDir}`;
+      const msg = `dist directory not found: ${sourceDir}`;
       log(projectId, "WARN", msg, { projectId });
       outStream && outStream.write(`${msg}\n`);
       return;
@@ -70,11 +70,11 @@ async function copyBuildOutputToTarget({
       copyRecursiveSync(sourceDir, targetDir);
     }
 
-    const okMsg = `dist目录已拷贝到: ${targetDir}`;
+    const okMsg = `dist directory copied to: ${targetDir}`;
     log(projectId, "INFO", okMsg, { projectId });
     outStream && outStream.write(`${okMsg}\n`);
   } catch (err) {
-    const errMsg = `拷贝dist目录失败: ${err.message}`;
+    const errMsg = `Failed to copy dist directory: ${err.message}`;
     log(projectId, "ERROR", errMsg, { projectId });
     outStream && outStream.write(`${errMsg}\n`);
     throw err;
@@ -89,10 +89,10 @@ function runBuildScript(projectId, projectPath, scriptName, extraArgs = []) {
         ? " -- " + extraArgs.map((s) => String(s)).join(" ")
         : "";
     const command = `cd ${projectPath} && pnpm run ${scriptName}${argsPart}`;
-    logBuild(projectId, "INFO", "执行命令", { command });
+    logBuild(projectId, "INFO", "Execute command", { command });
     // 同步输出到普通日志也打印一次，便于从统一日志流检索
     try {
-      log(projectId, "INFO", "执行构建脚本", { command, cwd: projectPath });
+      log(projectId, "INFO", "Execute build script", { command, cwd: projectPath });
     } catch (_) {}
 
     exec(
@@ -103,7 +103,7 @@ function runBuildScript(projectId, projectPath, scriptName, extraArgs = []) {
       },
       (error, stdout, stderr) => {
       if (error) {
-        logBuild(projectId, "ERROR", "执行错误", {
+        logBuild(projectId, "ERROR", "Execution error", {
           error: error.message,
           stderr,
         });
@@ -124,7 +124,7 @@ function runBuildScript(projectId, projectPath, scriptName, extraArgs = []) {
 
         return reject(buildError);
       }
-      logBuild(projectId, "INFO", "脚本执行完成", { stdout });
+      logBuild(projectId, "INFO", "Script execution completed", { stdout });
       resolve(stdout);
     });
   });
@@ -142,7 +142,7 @@ async function buildProject(req, projectId) {
 
   const exists = fs.existsSync(jsonFilePath);
   if (!exists) {
-    throw new ResourceError("项目缺少package.json文件", {
+    throw new ResourceError("Project missing package.json file", {
       projectId,
       projectPath,
     });
@@ -152,7 +152,7 @@ async function buildProject(req, projectId) {
   try {
     jsonContent = JSON.parse(fs.readFileSync(jsonFilePath, "utf8"));
   } catch (error) {
-    throw new FileError("package.json文件格式错误", {
+    throw new FileError("package.json file format error", {
       projectId,
       jsonFilePath,
       originalError: error.message,
@@ -162,16 +162,16 @@ async function buildProject(req, projectId) {
   const jsonScripts = jsonContent.scripts;
   const buildScript = jsonScripts.build;
   if (!buildScript) {
-    log(projectId, "WARN", "项目缺少build脚本", {
+    log(projectId, "WARN", "Project missing build script", {
       projectId,
       requestId: req.requestId,
     });
-    throw new BusinessError("项目缺少build脚本", { projectId });
+    throw new BusinessError("Project missing build script", { projectId });
   }
 
   // 项目级互斥：同一项目仅允许一个构建
   if (buildingProjects.has(projectId)) {
-    throw new BusinessError("该项目正在构建中", { projectId });
+    throw new BusinessError("This project is being built", { projectId });
   }
 
   // 全局并发限制
@@ -179,7 +179,7 @@ async function buildProject(req, projectId) {
     ? config.MAX_BUILD_CONCURRENCY
     : 20;
   if (currentBuilds >= max) {
-    throw new BusinessError("并发已满，请稍后重试", {
+    throw new BusinessError("Concurrency is full, please try again later", {
       currentBuilds,
       maxConcurrency: max,
     });
@@ -215,16 +215,16 @@ async function buildProject(req, projectId) {
     }
 
     // 安装依赖
-    log(projectId, "INFO", "开始安装依赖", { projectId });
+    log(projectId, "INFO", "Start installing dependencies", { projectId });
     await installDependencies(req, projectId, projectPath);
 
     // 执行构建：Vite 直接使用 pnpm exec，避免 npm-run 参数分隔影响
     if (typeof buildScript === "string" && buildScript.includes("vite")) {
       const viteArgs = ["exec", "vite", "build", ...buildExtraArgs, "--debug"];
       const command = `cd ${projectPath} && pnpm ${viteArgs.join(" ")}`;
-      logBuild(projectId, "INFO", "执行命令(直接vite)", { command });
+      logBuild(projectId, "INFO", "Execute command(direct vite)", { command });
       try {
-        log(projectId, "INFO", "执行构建脚本(直接vite)", {
+        log(projectId, "INFO", "Execute build script(direct vite)", {
           command,
           cwd: projectPath,
         });
@@ -232,7 +232,7 @@ async function buildProject(req, projectId) {
       await new Promise((resolve, reject) => {
         exec(command, (error, stdout, stderr) => {
           if (error) {
-            logBuild(projectId, "ERROR", "执行错误", {
+            logBuild(projectId, "ERROR", "Execution error", {
               error: error.message,
               stderr,
             });
@@ -248,12 +248,12 @@ async function buildProject(req, projectId) {
             });
             return reject(buildError);
           }
-          logBuild(projectId, "INFO", "脚本执行完成", { stdout });
+          logBuild(projectId, "INFO", "Script execution completed", { stdout });
           resolve(stdout);
         });
       });
     } else {
-      log(projectId, "INFO", "开始同步执行 build 脚本", { projectId });
+      log(projectId, "INFO", "Start synchronously executing build script", { projectId });
       await runBuildScript(projectId, projectPath, "build", buildExtraArgs);
     }
 
@@ -261,7 +261,7 @@ async function buildProject(req, projectId) {
     await copyBuildOutputToTarget({ req, projectPath, projectId });
     return {
       success: true,
-      message: "构建完成",
+      message: "Build completed",
       projectId,
     };
   } finally {

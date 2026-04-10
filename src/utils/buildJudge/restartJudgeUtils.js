@@ -35,7 +35,7 @@ function shouldRestartForSingleFile(fileName) {
   // 检查是否匹配需要重启的模式
   for (const pattern of restartRequiredPatterns) {
     if (pattern.test(fileName)) {
-      log(null, "INFO", `检测到需要重启的文件: ${fileName}`, {
+      log(null, "INFO", `Detected file that needs to be restarted: ${fileName}`, {
         fileName,
         pattern: pattern.toString(),
       });

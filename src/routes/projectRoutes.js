@@ -50,7 +50,7 @@ const upload = multer({
     } else {
       // 将文件类型错误转换为 ValidationError
       cb(
-        new ValidationError("文件类型不被允许", {
+        new ValidationError("File type not allowed", {
           fileExtension: ext,
           allowedExtensions: config.UPLOAD_ALLOWED_EXTENSIONS,
         }),
@@ -155,13 +155,13 @@ function decodeFileNameMiddleware(req, res, next) {
         "utf8"
       );
       req.file.originalname = decodedName;
-      log("system", "INFO", "文件名解码成功", {
+      log("system", "INFO", "File name decoded successfully", {
         before: beforeDecode,
         after: decodedName,
       });
     } catch (err) {
       // 如果解码失败，记录日志但继续处理
-      log("system", "WARN", "文件名解码失败", {
+      log("system", "WARN", "File name decoded failed", {
         originalName: req.file.originalname,
         error: err.message,
       });
@@ -179,7 +179,7 @@ const routes = [
       const { projectId } = req.body;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       const result = await projectService.createProject(String(projectId));
@@ -194,13 +194,13 @@ const routes = [
       const { projectId, codeVersion, pid, basePath } = req.body;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (!codeVersion) {
-        throw new ValidationError("代码版本不能为空", { field: "codeVersion" });
+        throw new ValidationError("Code version cannot be empty", { field: "codeVersion" });
       }
       if (!req.file) {
-        throw new ValidationError("请上传压缩包文件", { field: "zipFile" });
+        throw new ValidationError("Please upload a zip file", { field: "zipFile" });
       }
 
       // 处理文件上传（移动到项目目录）
@@ -228,7 +228,7 @@ const routes = [
         try {
           await projectService.cleanupProjectDirectory(String(projectId));
         } catch (cleanupErr) {
-          log(projectId, "ERROR", "路由层清理项目目录失败", {
+          log(projectId, "ERROR", "Route layer cleanup project directory failed", {
             projectId,
             error: cleanupErr.message,
           });
@@ -239,7 +239,7 @@ const routes = [
           try {
             fs.unlinkSync(req.file.path);
           } catch (cleanupErr) {
-            log(projectId, "ERROR", "清理上传文件失败", {
+            log(projectId, "ERROR", "Clean upload file failed", {
               projectId,
               error: cleanupErr.message,
             });
@@ -255,7 +255,7 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { projectId, command, proxyPath } = req.query;
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       // 构建项目路径
@@ -263,7 +263,7 @@ const routes = [
 
       // 检查项目目录是否存在
       if (!fs.existsSync(projectPath)) {
-        throw new ValidationError("项目不存在", { field: "projectId" });
+        throw new ValidationError("Project does not exist", { field: "projectId" });
       }
 
       // 获取项目内容
@@ -275,7 +275,7 @@ const routes = [
         );
         res.status(200).json({ success: true, ...result });
       } catch (err) {
-        const message = err?.message || "查询失败";
+        const message = err?.message || "Query failed";
         res.status(500).json({ success: false, message });
       }
     }),
@@ -286,10 +286,10 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, command, proxyPath } = req.query;
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (!codeVersion) {
-        throw new ValidationError("代码版本不能为空", { field: "codeVersion" });
+        throw new ValidationError("Code version cannot be empty", { field: "codeVersion" });
       }
       try {
         const result = await getProjectContentByVersion(
@@ -300,7 +300,7 @@ const routes = [
         );
         res.status(200).json({ success: true, ...result });
       } catch (err) {
-        const message = err?.message || "查询失败";
+        const message = err?.message || "Query failed";
         res.status(500).json({ success: false, message });
       }
     }),
@@ -333,7 +333,7 @@ const routes = [
 
       // 检查zip文件是否存在
       if (!fs.existsSync(result.zipPath)) {
-        throw new SystemError("导出的zip文件不存在", {
+        throw new SystemError("Exported zip file does not exist", {
           zipPath: result.zipPath,
         });
       }
@@ -348,15 +348,15 @@ const routes = [
 
       res.sendFile(result.zipPath, (err) => {
         if (err) {
-          log(projectId, "ERROR", "发送zip文件失败", {
+          log(projectId, "ERROR", "Send zip file failed", {
             projectId,
             error: err.message,
           });
           if (!res.headersSent) {
-            res.status(500).json({ success: false, message: "文件发送失败" });
+            res.status(500).json({ success: false, message: "File send failed" });
           }
         } else {
-          log(projectId, "INFO", "zip文件发送成功", {
+          log(projectId, "INFO", "Zip file send successfully", {
             projectId,
             zipPath: result.zipPath,
           });
@@ -372,7 +372,7 @@ const routes = [
       const { projectId, pid } = req.query;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       const result = await projectService.deleteProject(
@@ -392,10 +392,10 @@ const routes = [
       const { projectId, fileName } = req.body;
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (!req.file) {
-        throw new ValidationError("请上传文件", { field: "file" });
+        throw new ValidationError("Please upload a file", { field: "file" });
       }
 
       try {
@@ -411,7 +411,7 @@ const routes = [
           try {
             fs.unlinkSync(req.file.path);
           } catch (cleanupErr) {
-            log(projectId, "ERROR", "清理上传文件失败", {
+            log(projectId, "ERROR", "Clean upload file failed", {
               projectId,
               error: cleanupErr.message,
             });
@@ -428,12 +428,12 @@ const routes = [
       const { sourceProjectId, targetProjectId } = req.body;
 
       if (!sourceProjectId) {
-        throw new ValidationError("源项目ID不能为空", {
+        throw new ValidationError("Source project ID cannot be empty", {
           field: "sourceProjectId",
         });
       }
       if (!targetProjectId) {
-        throw new ValidationError("目标项目ID不能为空", {
+        throw new ValidationError("Target project ID cannot be empty", {
           field: "targetProjectId",
         });
       }

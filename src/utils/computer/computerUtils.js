@@ -16,14 +16,14 @@ async function ensureWorkspaceRoot(logId = "computer") {
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!workspaceRoot) {
-    throw new ValidationError("COMPUTER_WORKSPACE_DIR 配置不存在", {
+    throw new ValidationError("COMPUTER_WORKSPACE_DIR configuration does not exist", {
       field: "COMPUTER_WORKSPACE_DIR",
     });
   }
 
   if (!fs.existsSync(workspaceRoot)) {
     await fs.promises.mkdir(workspaceRoot, { recursive: true });
-    log(logId, "INFO", "创建用户工作空间根目录", { workspaceRoot });
+    log(logId, "INFO", "Created user workspace root directory", { workspaceRoot });
   }
 
   return workspaceRoot;
@@ -124,10 +124,10 @@ async function createWorkspace(userId, cId, file) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
-    throw new ValidationError("userId 不能为空", { field: "userId" });
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
   if (!cId) {
-    throw new ValidationError("cId 不能为空", { field: "cId" });
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
 
   const workspaceRoot = await ensureWorkspaceRoot(logId);
@@ -204,7 +204,7 @@ async function createWorkspace(userId, cId, file) {
 
   const skillsExistsAfter = fs.existsSync(targetSkillsDir);
   const agentsExistsAfter = fs.existsSync(targetAgentsDir);
-  log(logId, "INFO", "删除旧 skills 和 agents 目录完成", {
+  log(logId, "INFO", "Deleted old skills and agents directories completed", {
     userId,
     cId,
     targetSkillsDir,
@@ -215,7 +215,7 @@ async function createWorkspace(userId, cId, file) {
 
   // 如果没有文件：不写入 skills 和 agents
   if (!file) {
-    log(logId, "INFO", "创建工作空间（无上传文件，无 skills 和 agents）", {
+    log(logId, "INFO", "Created workspace (no uploaded file, no skills and agents)", {
       userId,
       cId,
       workspaceRoot,
@@ -226,25 +226,25 @@ async function createWorkspace(userId, cId, file) {
     });
 
     return {
-      message: "工作空间已创建（无上传文件，无 skills 和 agents）",
+      message: "Workspace created (no uploaded file, no skills and agents)",
       workspaceRoot,
     };
   }
 
   // 有上传文件时，要求是 zip
   if (!file.path) {
-    throw new ValidationError("上传文件无有效路径", { field: "file.path" });
+    throw new ValidationError("Uploaded file has no valid path", { field: "file.path" });
   }
 
   const ext = path.extname(file.originalname || file.filename || "").toLowerCase();
   if (ext !== ".zip") {
-    throw new ValidationError("仅支持 zip 文件", {
+    throw new ValidationError("Only zip files are supported", {
       field: "file",
       originalName: file.originalname,
     });
   }
 
-  log(logId, "DEBUG", "开始处理上传的 zip 文件", {
+  log(logId, "DEBUG", "Start processing uploaded zip file", {
     userId,
     cId,
     workspaceRoot,
@@ -261,9 +261,9 @@ async function createWorkspace(userId, cId, file) {
       await fs.promises.mkdir(tmpRoot, { recursive: true });
     }
     await fs.promises.mkdir(extractRoot, { recursive: true });
-    log(logId, "DEBUG", "开始解压 zip 文件", { extractRoot });
+    log(logId, "DEBUG", "Start extracting zip file", { extractRoot });
     await extractZip(file.path, extractRoot);
-    log(logId, "DEBUG", "zip 文件解压完成", { extractRoot });
+    log(logId, "DEBUG", "Zip file extracted successfully", { extractRoot });
 
     // 查找压缩包中的 skills 和 agents 目录
     const skillsDir = await findDir(extractRoot, "skills");
@@ -287,7 +287,7 @@ async function createWorkspace(userId, cId, file) {
         await moveDirectory(srcPath, destPath);
       }
       updatedDirs.push("skills");
-      log(logId, "INFO", "skills 已更新到工作空间", {
+      log(logId, "INFO", "skills updated to workspace", {
         userId,
         cId,
         workspaceRoot,
@@ -295,7 +295,7 @@ async function createWorkspace(userId, cId, file) {
         targetSkillsDir,
       });
     } else {
-      log(logId, "INFO", "zip 中未找到 skills 目录，跳过", {
+      log(logId, "INFO", "skills directory not found in zip, skipping", {
         userId,
         cId,
         extractRoot,
@@ -306,7 +306,7 @@ async function createWorkspace(userId, cId, file) {
     if (agentsDir) {
       await moveDirectory(agentsDir, targetAgentsDir);
       updatedDirs.push("agents");
-      log(logId, "INFO", "agents 已更新到工作空间", {
+      log(logId, "INFO", "agents updated to workspace", {
         userId,
         cId,
         workspaceRoot,
@@ -314,7 +314,7 @@ async function createWorkspace(userId, cId, file) {
         targetAgentsDir,
       });
     } else {
-      log(logId, "INFO", "zip 中未找到 agents 目录，跳过", {
+      log(logId, "INFO", "agents directory not found in zip, skipping", {
         userId,
         cId,
         extractRoot,
@@ -323,7 +323,7 @@ async function createWorkspace(userId, cId, file) {
 
     // 如果两个目录都没找到，记录警告但不中断流程
     if (updatedDirs.length === 0) {
-      log(logId, "WARN", "zip 中未找到 skills 和 agents 目录", {
+      log(logId, "WARN", "skills and agents directories not found in zip", {
         userId,
         cId,
         extractRoot,
@@ -331,8 +331,8 @@ async function createWorkspace(userId, cId, file) {
     }
 
     const message = updatedDirs.length > 0
-      ? `工作空间创建完成，${updatedDirs.join(" 和 ")} 已更新`
-      : "工作空间创建完成（zip 中未找到 skills 和 agents）";
+      ? `Workspace created successfully, ${updatedDirs.join(" and ")} updated`
+      : "Workspace created successfully (skills and agents directories not found in zip)";
 
     log(logId, "INFO", message, {
       userId,
@@ -346,7 +346,7 @@ async function createWorkspace(userId, cId, file) {
       workspaceRoot,
     };
   } catch (error) {
-    log(logId, "ERROR", "处理上传的 zip 文件失败", {
+    log(logId, "ERROR", "Failed to process uploaded zip file", {
       userId,
       cId,
       error: error.message,
@@ -361,7 +361,7 @@ async function createWorkspace(userId, cId, file) {
       throw error;
     }
 
-    throw new SystemError(`创建工作空间失败: ${error.message}`, {
+    throw new SystemError(`Failed to create workspace: ${error.message}`, {
       userId,
       cId,
     });
@@ -372,7 +372,7 @@ async function createWorkspace(userId, cId, file) {
         await fs.promises.rm(extractRoot, { recursive: true, force: true });
       }
     } catch (e) {
-      log(logId, "WARN", "清理临时解压的 zip 失败", {
+      log(logId, "WARN", "Failed to clean up temporary extracted zip", {
         extractRoot,
         error: e.message,
       });
@@ -383,7 +383,7 @@ async function createWorkspace(userId, cId, file) {
         await fs.promises.unlink(file.path);
       }
     } catch (e) {
-      log(logId, "WARN", "清理上传的 zip 文件失败", {
+      log(logId, "WARN", "Failed to clean up uploaded zip file", {
         tempZipPath: file?.path,
         error: e.message,
       });
@@ -404,18 +404,18 @@ async function pushSkillsToWorkspace(userId, cId, file) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
-    throw new ValidationError("userId 不能为空", { field: "userId" });
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
   if (!cId) {
-    throw new ValidationError("cId 不能为空", { field: "cId" });
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
   if (!file || !file.path) {
-    throw new ValidationError("上传文件无有效路径", { field: "file.path" });
+    throw new ValidationError("Uploaded file has no valid path", { field: "file.path" });
   }
 
   const ext = path.extname(file.originalname || file.filename || "").toLowerCase();
   if (ext !== ".zip") {
-    throw new ValidationError("仅支持 zip 文件", {
+    throw new ValidationError("Only zip files are supported", {
       field: "file",
       originalName: file?.originalname,
     });
@@ -456,20 +456,20 @@ async function pushSkillsToWorkspace(userId, cId, file) {
     }
 
     await fs.promises.mkdir(extractRoot, { recursive: true });
-    log(logId, "DEBUG", "开始解压 skill zip 文件", { extractRoot });
+    log(logId, "DEBUG", "Start extracting skill zip file", { extractRoot });
     await extractZip(file.path, extractRoot);
-    log(logId, "DEBUG", "skill zip 文件解压完成", { extractRoot });
+    log(logId, "DEBUG", "Skill zip file extracted successfully", { extractRoot });
 
     // 查找压缩包中的 skills 目录，遍历其下具体 skill 子目录
     const skillsDir = await findDir(extractRoot, "skills");
     if (!skillsDir) {
-      log(logId, "WARN", "zip 中未找到 skills 目录", {
+      log(logId, "WARN", "skills directory not found in zip", {
         userId,
         cId,
         extractRoot,
       });
       return {
-        message: "zip 中未找到 skills 目录",
+        message: "skills directory not found in zip",
         workspaceRoot,
         updatedSkills: [],
       };
@@ -481,13 +481,13 @@ async function pushSkillsToWorkspace(userId, cId, file) {
     const skillDirs = skillEntries.filter((e) => e.isDirectory() && !e.name.startsWith("."));
 
     if (skillDirs.length === 0) {
-      log(logId, "WARN", "zip 的 skills 目录下未找到 skill 子目录", {
+      log(logId, "WARN", "skills directory in zip has no skill subdirectories", {
         userId,
         cId,
         skillsDir,
       });
       return {
-        message: "zip 的 skills 目录下未找到 skill 子目录",
+        message: "skills directory in zip has no skill subdirectories",
         workspaceRoot,
         updatedSkills: [],
       };
@@ -506,7 +506,7 @@ async function pushSkillsToWorkspace(userId, cId, file) {
       await moveDirectory(srcSkillPath, destSkillPath);
       updatedSkills.push(skillDir.name);
 
-      log(logId, "INFO", "skill 已推送到工作空间", {
+      log(logId, "INFO", "skill pushed to workspace", {
         userId,
         cId,
         skillName: skillDir.name,
@@ -516,8 +516,8 @@ async function pushSkillsToWorkspace(userId, cId, file) {
 
     const message =
       updatedSkills.length > 0
-        ? `已推送 ${updatedSkills.length} 个 skill: ${updatedSkills.join(", ")}`
-        : "zip 中未找到有效 skill 目录";
+        ? `Pushed ${updatedSkills.length} skills: ${updatedSkills.join(", ")}`
+        : "skills directory not found in zip";
 
     log(logId, "INFO", message, {
       userId,
@@ -532,7 +532,7 @@ async function pushSkillsToWorkspace(userId, cId, file) {
       updatedSkills,
     };
   } catch (error) {
-    log(logId, "ERROR", "推送 skill 到工作空间失败", {
+    log(logId, "ERROR", "Failed to push skill to workspace", {
       userId,
       cId,
       error: error.message,
@@ -547,7 +547,7 @@ async function pushSkillsToWorkspace(userId, cId, file) {
       throw error;
     }
 
-    throw new SystemError(`推送 skill 失败: ${error.message}`, {
+    throw new SystemError(`Failed to push skill to workspace: ${error.message}`, {
       userId,
       cId,
     });
@@ -557,7 +557,7 @@ async function pushSkillsToWorkspace(userId, cId, file) {
         await fs.promises.rm(extractRoot, { recursive: true, force: true });
       }
     } catch (e) {
-      log(logId, "WARN", "清理临时解压目录失败", {
+      log(logId, "WARN", "Failed to clean up temporary extracted zip", {
         extractRoot,
         error: e.message,
       });
@@ -567,7 +567,7 @@ async function pushSkillsToWorkspace(userId, cId, file) {
         await fs.promises.unlink(file.path);
       }
     } catch (e) {
-      log(logId, "WARN", "清理上传的 zip 文件失败", {
+      log(logId, "WARN", "Failed to clean up uploaded zip file", {
         tempZipPath: file?.path,
         error: e.message,
       });

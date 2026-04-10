@@ -147,13 +147,13 @@ async function stopProcess(pid, force = false) {
       const child = spawn('taskkill', killArgs, { stdio: 'pipe' });
       
       child.on('error', (err) => {
-        error(`停止进程失败: ${err.message}`);
+        error(`Stop process failed: ${err.message}`);
         resolve(false);
       });
       
       child.on('close', (code) => {
         if (code === 0) {
-          success(`进程 ${pid} 已停止`);
+          success(`Process ${pid} stopped`);
           resolve(true);
         } else if (force) {
           // 强制模式下，尝试使用 /F 标志
@@ -170,25 +170,25 @@ async function stopProcess(pid, force = false) {
       try {
         // 优先尝试杀死进程组
         process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
-        success(`进程组 ${pid} 已停止`);
+        success(`Process group ${pid} stopped`);
         resolve(true);
       } catch (err) {
         if (err.code === 'ESRCH') {
           // 进程不存在
-          success(`进程 ${pid} 不存在，视为已停止`);
+          success(`Process ${pid} does not exist, already stopped`);
           resolve(true);
         } else {
           // 回退到单个进程
           try {
             process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
-            success(`进程 ${pid} 已停止`);
+            success(`Process ${pid} stopped`);
             resolve(true);
           } catch (killErr) {
             if (killErr.code === 'ESRCH') {
-              success(`进程 ${pid} 不存在，视为已停止`);
+              success(`Process ${pid} does not exist, already stopped`);
               resolve(true);
             } else {
-              error(`停止进程失败: ${killErr.message}`);
+              error(`Stop process failed: ${killErr.message}`);
               resolve(false);
             }
           }
@@ -219,18 +219,18 @@ async function startService(options) {
       if (!cliOptions.has(key)) {
         const value = arg.slice(eqIdx + 1);
         process.env[key] = value;
-        info(`CLI 参数覆盖环境变量: ${key}=${value}`);
+        info(`CLI parameter overrides environment variable: ${key}=${value}`);
       }
     }
   });
   
-  info(`启动 ${SERVICE_CONFIG.name} 服务...`);
+  info(`Start ${SERVICE_CONFIG.name} service...`);
   
   // 检查服务是否已在运行
   const existingPidInfo = readPidFile();
   if (existingPidInfo && isProcessRunning(existingPidInfo.pid)) {
-    error(`服务已在运行中 (PID: ${existingPidInfo.pid})`);
-    info(`请使用 'nuwax-file-server stop' 停止现有服务后再试`);
+    error(`Service is already running (PID: ${existingPidInfo.pid})`);
+    info(`Please use 'nuwax-file-server stop' to stop the existing service before trying again`);
     process.exit(1);
   }
   
@@ -238,16 +238,16 @@ async function startService(options) {
   // 参考 scripts/start-*.js 的做法：先设置 NODE_ENV
   const envType = env || 'production';
   process.env.NODE_ENV = envType;
-  info(`使用环境: ${envType}`);
+  info(`Use environment: ${envType}`);
   
   if (port) {
     process.env.PORT = port;
-    info(`使用端口: ${port}`);
+    info(`Use port: ${port}`);
   }
   
   if (config) {
     process.env.CONFIG_FILE = config;
-    info(`使用配置文件: ${config}`);
+    info(`Use configuration file: ${config}`);
   }
   
   // 确保日志目录存在
@@ -270,7 +270,7 @@ async function startService(options) {
   });
 
   child.on('error', (err) => {
-    error(`启动服务失败: ${err.message}`);
+    error(`Start service failed: ${err.message}`);
     process.exit(1);
   });
 
@@ -278,7 +278,7 @@ async function startService(options) {
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
   if (!isProcessRunning(child.pid)) {
-    error('服务启动失败');
+    error('Start service failed');
     process.exit(1);
   }
 
@@ -294,11 +294,11 @@ async function startService(options) {
   writePidFile(pidInfo);
   child.unref();
 
-  success(`服务已启动 (PID: ${child.pid})`);
-  log(`服务运行在: http://localhost:${pidInfo.port}`, 'cyan');
-  log(`环境: ${pidInfo.env}`, 'cyan');
-  log(`平台: ${pidInfo.platform}`, 'cyan');
-  log(`PID 文件: ${getPidFilePath()}`, 'cyan');
+  success(`Service started (PID: ${child.pid})`);
+  log(`Service running on: http://localhost:${pidInfo.port}`, 'cyan');
+  log(`Environment: ${pidInfo.env}`, 'cyan');
+  log(`Platform: ${pidInfo.platform}`, 'cyan');
+  log(`PID file: ${getPidFilePath()}`, 'cyan');
 }
 
 /**
@@ -308,22 +308,22 @@ async function startService(options) {
 async function stopService(options) {
   const { force } = options;
   
-  info(`停止 ${SERVICE_CONFIG.name} 服务...`);
+  info(`Stop ${SERVICE_CONFIG.name} service...`);
   
   // 读取 PID 文件
   const pidInfo = readPidFile();
   
   if (!pidInfo) {
-    error('未找到运行中的服务');
-    info('服务可能未启动或 PID 文件已丢失');
+    error('Service not found');
+    info('Service may not be running or PID file has been lost');
     process.exit(0);
   }
   
   // 检查进程是否正在运行
   if (!isProcessRunning(pidInfo.pid)) {
-    info('服务进程已停止，清理 PID 文件...');
+    info('Service process has stopped, clean PID file...');
     deletePidFile();
-    success('服务已停止');
+    success('Service has stopped');
     process.exit(0);
   }
   
@@ -337,18 +337,18 @@ async function stopService(options) {
     // 再次检查
     if (!isProcessRunning(pidInfo.pid)) {
       deletePidFile();
-      success('服务已停止');
+      success('Service has stopped');
       process.exit(0);
     }
   }
   
   if (force) {
-    error('强制停止失败，请手动停止进程');
+    error('Force stop failed, please stop the process manually');
     process.exit(1);
   }
   
   // 尝试强制停止
-  info('尝试强制停止...');
+  info('Try to force stop...');
   const forceStopped = await stopProcess(pidInfo.pid, true);
   
   if (forceStopped) {
@@ -356,12 +356,12 @@ async function stopService(options) {
     
     if (!isProcessRunning(pidInfo.pid)) {
       deletePidFile();
-      success('服务已强制停止');
+      success('Service has been forced stopped');
       process.exit(0);
     }
   }
   
-  error('停止服务失败');
+  error('Stop service failed');
   process.exit(1);
 }
 
@@ -370,51 +370,51 @@ async function stopService(options) {
  * @param {Object} options 命令行选项
  */
 async function restartService(options) {
-  log(`重启 ${SERVICE_CONFIG.name} 服务...`, 'yellow');
+  log(`Restart ${SERVICE_CONFIG.name} service...`, 'yellow');
   
   // 先停止服务
-  info('停止现有服务...');
+  info('Stop existing service...');
   try {
     await stopService({ force: false });
   } catch (err) {
     // 忽略停止错误（服务可能未运行）
-    info('服务未运行或已停止');
+    info('Service not running or has stopped');
   }
   
   // 等待一段时间
   await new Promise((resolve) => setTimeout(resolve, 2000));
   
   // 启动服务
-  info('启动服务...');
+  info('Start service...');
   await startService(options);
   
-  success('服务已重启');
+  success('Service has been restarted');
 }
 
 /**
  * 查看服务状态
  */
 function statusService() {
-  info(`${SERVICE_CONFIG.name} 服务状态:`);
+  info(`${SERVICE_CONFIG.name} service status:`);
   
   const pidInfo = readPidFile();
   
   if (!pidInfo) {
-    log('服务未运行', 'yellow');
+    log('Service not running', 'yellow');
     process.exit(0);
   }
   
   const running = isProcessRunning(pidInfo.pid);
   
   console.log('');
-  console.log(`  服务名称: ${SERVICE_CONFIG.name}`);
-  console.log(`  运行状态: ${running ? '运行中' : '已停止'}`);
-  console.log(`  进程 ID: ${pidInfo.pid}`);
-  console.log(`  环境: ${pidInfo.env || 'production'}`);
-  console.log(`  端口: ${pidInfo.port || '60000'}`);
-  console.log(`  版本: ${pidInfo.version || version}`);
-  console.log(`  平台: ${pidInfo.platform || process.platform}`);
-  console.log(`  启动时间: ${pidInfo.startedAt || '未知'}`);
+  console.log(`  Service name: ${SERVICE_CONFIG.name}`);
+  console.log(`  Running status: ${running ? 'Running' : 'Stopped'}`);
+  console.log(`  Process ID: ${pidInfo.pid}`);
+  console.log(`  Environment: ${pidInfo.env || 'production'}`);
+  console.log(`  Port: ${pidInfo.port || '60000'}`);
+  console.log(`  Version: ${pidInfo.version || version}`);
+  console.log(`  Platform: ${pidInfo.platform || process.platform}`);
+  console.log(`  Started at: ${pidInfo.startedAt || 'Unknown'}`);
   
   if (pidInfo.startedAt) {
     const startedAt = new Date(pidInfo.startedAt);
@@ -423,17 +423,17 @@ function statusService() {
     const hours = Math.floor(uptime / 3600);
     const minutes = Math.floor((uptime % 3600) / 60);
     const seconds = uptime % 60;
-    console.log(`  运行时间: ${hours}小时 ${minutes}分 ${seconds}秒`);
+    console.log(`  Uptime: ${hours} hours ${minutes} minutes ${seconds} seconds`);
   }
   
-  console.log(`  PID 文件: ${getPidFilePath()}`);
+  console.log(`  PID file: ${getPidFilePath()}`);
   console.log('');
   
   if (!running) {
-    log('警告: 服务进程不存在，但 PID 文件仍存在', 'yellow');
-    info('建议执行 stop 命令清理');
+    log('Warning: Service process does not exist, but PID file still exists', 'yellow');
+    info('Suggest executing stop command to clean up');
   } else {
-    log('服务运行正常', 'green');
+    log('Service running normally', 'green');
   }
 }
 
@@ -442,45 +442,45 @@ function main() {
   // 包名与描述
   program
     .name('nuwax-file-server')
-    .description('跨平台文件服务部署工具，支持 start/stop/restart/status')
-    .version(version, '-v, --version', '显示版本号')
-    .helpOption('-h, --help', '显示帮助信息');
+    .description('Cross-platform file service deployment tool, supporting start/stop/restart/status')
+    .version(version, '-v, --version', 'Display version number')
+    .helpOption('-h, --help', 'Display help information');
 
   // start 命令
   program
     .command('start').allowUnknownOption()
-    .description('启动服务')
+    .description('Start service')
     .option('--env <environment>', '环境: development|production|test', 'production')
-    .option('--port <port>', '服务端口号')
-    .option('--config <path>', '自定义配置文件路径')
+    .option('--port <port>', 'Service port')
+    .option('--config <path>', 'Custom configuration file path')
     .action(startService);
 
   // stop 命令
   program
     .command('stop')
-    .description('停止服务')
-    .option('--force', '强制停止')
+    .description('Stop service')
+    .option('--force', 'Force stop')
     .action(stopService);
 
   // restart 命令
   program
     .command('restart').allowUnknownOption()
-    .description('重启服务')
+    .description('Restart service')
     .option('--env <environment>', '环境: development|production|test', 'production')
-    .option('--port <port>', '服务端口号')
-    .option('--config <path>', '自定义配置文件路径')
+    .option('--port <port>', 'Service port')
+    .option('--config <path>', 'Custom configuration file path')
     .action(restartService);
 
   // status 命令
   program
     .command('status')
-    .description('查看服务状态')
+    .description('View service status')
     .action(statusService);
 
   // help 命令（与 --help 一致，便于显式调用）
   program
     .command('help')
-    .description('显示帮助信息')
+    .description('Display help information')
     .action(() => {
       program.outputHelp();
     });

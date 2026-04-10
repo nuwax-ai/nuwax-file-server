@@ -92,34 +92,34 @@ function replaceContentDirectly(existingContent, newContentStr) {
 async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   if (codeVersion === undefined || codeVersion === null) {
-    throw new ValidationError("codeVersion不能为空", {
+    throw new ValidationError("codeVersion cannot be empty", {
       field: "codeVersion",
     });
   }
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("codeVersion必须是数字", {
+    throw new ValidationError("codeVersion must be a number", {
       field: "codeVersion",
     });
   }
   if (!Array.isArray(files)) {
-    throw new ValidationError("files必须是数组", { field: "files" });
+    throw new ValidationError("files must be an array", { field: "files" });
   }
 
   // 验证文件操作结构
   for (let i = 0; i < files.length; i++) {
     const fileOp = files[i];
     if (!fileOp || typeof fileOp.operation !== "string") {
-      throw new ValidationError(`files[${i}].operation 不能为空`, {
+      throw new ValidationError(`files[${i}].operation cannot be empty`, {
         field: `files[${i}].operation`,
       });
     }
     // 使用 name 作为文件路径字段
     if (!fileOp.name || typeof fileOp.name !== "string") {
-      throw new ValidationError(`files[${i}].name 不能为空`, {
+      throw new ValidationError(`files[${i}].name cannot be empty`, {
         field: `files[${i}].name`,
       });
     }
@@ -127,7 +127,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
     const operation = fileOp.operation.toLowerCase();
     if (!["create", "delete", "rename", "modify"].includes(operation)) {
       throw new ValidationError(
-        `files[${i}].operation 必须是 create、delete、rename 或 modify 之一`,
+        `files[${i}].operation must be one of create, delete, rename or modify`,
         { field: `files[${i}].operation` }
       );
     }
@@ -135,7 +135,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
     // 验证特定操作所需的字段
     if (operation === "rename" && !fileOp.renameFrom) {
       throw new ValidationError(
-        `files[${i}].renameFrom 不能为空（重命名操作需要）`,
+        `files[${i}].renameFrom cannot be empty (rename operation requires)`,
         { field: `files[${i}].renameFrom` }
       );
     }
@@ -143,7 +143,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
     if (operation === "modify") {
       if (typeof fileOp.contents !== "string") {
         throw new ValidationError(
-          `files[${i}].contents 必须是字符串（修改操作需要）`,
+          `files[${i}].contents must be a string (modify operation requires)`,
           { field: `files[${i}].contents` }
         );
       }
@@ -152,8 +152,8 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
   if (!fs.existsSync(projectPath)) {
-    log(projectId, "ERROR", "项目不存在", { projectId, projectPath });
-    throw new ResourceError("项目不存在", { projectId });
+    log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
+    throw new ResourceError("Project does not exist", { projectId });
   }
 
   let backupZipPath = "";
@@ -165,16 +165,16 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
     }
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
-    log(projectId, "DEBUG", "开始备份项目", { projectId, backupZipPath });
+    log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
     await backupProjectToZip(projectId, projectPath, backupZipPath);
-    log(projectId, "INFO", "项目已备份", {
+    log(projectId, "INFO", "Project backed up successfully", {
       projectId,
       zipPath: backupZipPath,
     });
 
     // 2) 处理文件操作
     try {
-      log(projectId, "DEBUG", "开始处理文件操作", { projectId, filesCount: files.length });
+      log(projectId, "DEBUG", "Start processing file operations", { projectId, filesCount: files.length });
       for (const fileOp of files) {
         const operation = fileOp.operation.toLowerCase();
         // 使用 name 作为文件路径
@@ -188,7 +188,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
         const resolvedProjectPath = path.resolve(projectPath);
         if (!resolvedTargetPath.startsWith(resolvedProjectPath + path.sep) &&
             resolvedTargetPath !== resolvedProjectPath) {
-          log(projectId, "WARN", "文件路径不安全，跳过", {
+          log(projectId, "WARN", "Unsafe file path, skipping", {
             filePath: normalizedPath,
             resolvedPath: resolvedTargetPath,
           });
@@ -201,7 +201,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
             await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
             const contents = fileOp.contents || "";
             await fs.promises.writeFile(targetPath, contents, "utf8");
-            log(projectId, "INFO", "文件创建成功", {
+            log(projectId, "INFO", "File created successfully", {
               filePath: normalizedPath,
             });
             break;
@@ -211,11 +211,11 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
             // 删除文件
             if (fs.existsSync(targetPath)) {
               await fs.promises.unlink(targetPath);
-              log(projectId, "INFO", "文件删除成功", {
+              log(projectId, "INFO", "File deleted successfully", {
                 filePath: normalizedPath,
               });
             } else {
-              log(projectId, "WARN", "要删除的文件不存在", {
+              log(projectId, "WARN", "File to delete does not exist", {
                 filePath: normalizedPath,
               });
             }
@@ -226,7 +226,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
             // 重命名文件
             const renameFrom = fileOp.renameFrom;
             if (!renameFrom || typeof renameFrom !== "string") {
-              log(projectId, "WARN", "重命名操作缺少 renameFrom", {
+              log(projectId, "WARN", "Rename operation missing renameFrom", {
                 filePath: normalizedPath,
               });
               break;
@@ -239,7 +239,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
             // 安全检查
             if (!resolvedOldPath.startsWith(resolvedProjectPath + path.sep) &&
                 resolvedOldPath !== resolvedProjectPath) {
-              log(projectId, "WARN", "重命名源路径不安全，跳过", {
+              log(projectId, "WARN", "Unsafe rename source path, skipping", {
                 renameFrom: normalizedFrom,
                 resolvedPath: resolvedOldPath,
               });
@@ -249,12 +249,12 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
             if (fs.existsSync(oldPath)) {
               await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
               await fs.promises.rename(oldPath, targetPath);
-              log(projectId, "INFO", "文件重命名成功", {
+              log(projectId, "INFO", "File renamed successfully", {
                 oldPath: normalizedFrom,
                 newPath: normalizedPath,
               });
             } else {
-              log(projectId, "WARN", "要重命名的文件不存在", {
+              log(projectId, "WARN", "File to rename does not exist", {
                 renameFrom: normalizedFrom,
               });
             }
@@ -264,7 +264,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
           case "modify": {
             // 修改文件：前端传入完整 contents，这里根据新旧内容按行生成增删改
             if (!fs.existsSync(targetPath)) {
-              log(projectId, "WARN", "要修改的文件不存在", {
+              log(projectId, "WARN", "File to modify does not exist", {
                 filePath: normalizedPath,
               });
               break;
@@ -286,7 +286,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 
             // 1) 若内容完全一致，不覆写文件，避免触发 HMR
             if (changesCount === 0) {
-              log(projectId, "INFO", "文件内容无变化，跳过写入", {
+              log(projectId, "INFO", "File content unchanged, skipping write", {
                 filePath: normalizedPath,
               });
               break;
@@ -294,7 +294,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 
             // 2) 写入修改后的内容
             await fs.promises.writeFile(targetPath, finalContent, "utf8");
-            log(projectId, "INFO", "文件修改成功", {
+            log(projectId, "INFO", "File modified successfully", {
               filePath: normalizedPath,
               changesCount,
             });
@@ -302,7 +302,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
           }
 
           default: {
-            log(projectId, "WARN", "不支持的操作类型", {
+            log(projectId, "WARN", "Unsupported operation type", {
               operation,
               filePath: normalizedPath,
             });
@@ -312,20 +312,20 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
       }
 
       // 3) 清理空目录
-      log(projectId, "DEBUG", "开始清理空目录", { projectId });
+      log(projectId, "DEBUG", "Start cleaning empty directories", { projectId });
       try {
         await removeEmptyDirectories(
           projectPath,
           config.TRAVERSE_EXCLUDE_DIRS || []
         );
       } catch (e) {
-        log(projectId, "WARN", "清理空目录失败", {
+        log(projectId, "WARN", "Failed to clean empty directories", {
           projectId,
           error: e && e.message,
         });
       }
 
-      log(projectId, "INFO", "部分文件更新成功", {
+      log(projectId, "INFO", "Specified files updated successfully", {
         projectId,
         filesCount: files.length,
         elapsedMs: Date.now() - startTime,
@@ -333,12 +333,12 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 
       return {
         success: true,
-        message: "部分文件更新成功",
+        message: "Specified files updated successfully",
         projectId,
         filesCount: files.length,
       };
     } catch (e) {
-      log(projectId, "ERROR", "处理文件操作失败", {
+      log(projectId, "ERROR", "Failed to process file operations", {
         projectId,
         error: e && e.message,
         elapsedMs: Date.now() - startTime,
@@ -348,7 +348,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
   } catch (backupErr) {
     // 备份阶段失败：不执行回滚（无备份可回滚），直接抛出
     if (!backupErr.isOperational) {
-      throw new SystemError("备份项目失败", {
+      throw new SystemError("Failed to backup project", {
         projectId,
         originalError: backupErr && backupErr.message,
       });
@@ -360,22 +360,22 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
 async function allFilesUpdate(projectId, codeVersion, files, req) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("codeVersion必须是数字", {
+    throw new ValidationError("codeVersion must be a number", {
       field: "codeVersion",
     });
   }
   if (!Array.isArray(files)) {
-    throw new ValidationError("files必须是数组", { field: "files" });
+    throw new ValidationError("files must be an array", { field: "files" });
   }
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
   if (!fs.existsSync(projectPath)) {
-    log(projectId, "ERROR", "项目不存在", { projectId, projectPath });
-    throw new ResourceError("项目不存在", { projectId });
+    log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
+    throw new ResourceError("Project does not exist", { projectId });
   }
 
   let backupZipPath = "";
@@ -387,12 +387,12 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
     }
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
-    log(projectId, "DEBUG", "开始备份项目", { projectId, backupZipPath });
+    log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
     await backupProjectToZip(projectId, projectPath, backupZipPath);
 
     // 2) 写入文件
     try {
-      log(projectId, "DEBUG", "开始写入文件", { projectId, filesCount: files.length });
+      log(projectId, "DEBUG", "Start writing files", { projectId, filesCount: files.length });
       for (const file of files) {
         if (!file || typeof file.name !== "string") continue;
         const targetPath = path.join(projectPath, file.name);
@@ -404,7 +404,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
             // 确保目标目录存在（跨目录重命名时需要）
             await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
             await fs.promises.rename(oldPath, targetPath);
-            log(projectId, "INFO", "文件重命名成功", {
+            log(projectId, "INFO", "File renamed successfully", {
               projectId,
               oldPath: file.renameFrom,
               newPath: file.name,
@@ -423,7 +423,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
         if (isBinary) {
           // 如果文件已存在，跳过写入
           if (fs.existsSync(targetPath)) {
-            log(projectId, "INFO", "二进制文件已存在，跳过写入", {
+            log(projectId, "INFO", "Binary file already exists, skipping write", {
               filePath: file.name,
             });
             continue;
@@ -436,18 +436,18 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
               await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
               const buffer = Buffer.from(file.contents, "base64");
               await fs.promises.writeFile(targetPath, buffer);
-              log(projectId, "INFO", "二进制文件写入成功", {
+              log(projectId, "INFO", "Binary file written successfully", {
                 filePath: file.name,
               });
             } catch (e) {
-              log(projectId, "ERROR", "二进制文件写入失败", {
+              log(projectId, "ERROR", "Failed to write binary file", {
                 filePath: file.name,
                 error: e && e.message,
               });
             }
           } else {
             // 二进制文件没有内容（可能是大文件），且文件不存在
-            log(projectId, "WARN", "二进制文件不存在且无内容，跳过", {
+            log(projectId, "WARN", "Binary file does not exist and has no content, skipping", {
               filePath: file.name,
             });
           }
@@ -464,7 +464,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
         await fs.promises.writeFile(targetPath, file.contents || "", "utf8");
       }
     } catch (e) {
-      log(projectId, "ERROR", "写入文件失败", {
+      log(projectId, "ERROR", "Failed to write files", {
         projectId,
         error: e && e.message,
         elapsedMs: Date.now() - startTime,
@@ -474,7 +474,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
 
     // 3) 清理缺失文件与空目录
     try {
-      log(projectId, "DEBUG", "开始清理缺失文件与空目录", { projectId });
+      log(projectId, "DEBUG", "Start cleaning missing files and empty directories", { projectId });
       const keepSet = new Set(
         files
           .filter((f) => f && typeof f.name === "string")
@@ -490,7 +490,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
         config.TRAVERSE_EXCLUDE_DIRS || []
       );
     } catch (e) {
-      log(projectId, "ERROR", "清理缺失文件失败，开始回滚", {
+      log(projectId, "ERROR", "Failed to clean missing files, starting rollback", {
         projectId,
         error: e && e.message,
         elapsedMs: Date.now() - startTime,
@@ -498,14 +498,14 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
       throw e;
     }
 
-    log(projectId, "INFO", "文件提交成功", {
+    log(projectId, "INFO", "Files submitted successfully", {
       projectId,
       filesCount: files.length,
       elapsedMs: Date.now() - startTime,
     });
     return {
       success: true,
-      message: "文件提交成功",
+      message: "Files submitted successfully",
       projectId,
       restarted: false,
     };
@@ -513,7 +513,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
   } catch (backupErr) {
     // 备份阶段失败：不执行回滚（无备份可回滚），直接抛出
     if (!backupErr.isOperational) {
-      throw new SystemError("备份旧版本失败", {
+      throw new SystemError("Failed to backup old version", {
         projectId,
         originalError: backupErr && backupErr.message,
       });
@@ -534,25 +534,25 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
 async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("codeVersion必须是数字", {
+    throw new ValidationError("codeVersion must be a number", {
       field: "codeVersion",
     });
   }
   if (!file) {
-    throw new ValidationError("文件不能为空", { field: "file" });
+    throw new ValidationError("File cannot be empty", { field: "file" });
   }
   if (!filePath || typeof filePath !== "string") {
-    throw new ValidationError("文件路径不能为空", { field: "filePath" });
+    throw new ValidationError("File path cannot be empty", { field: "filePath" });
   }
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
   if (!fs.existsSync(projectPath)) {
-    log(projectId, "ERROR", "项目不存在", { projectId, projectPath });
-    throw new ResourceError("项目不存在", { projectId });
+    log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
+    throw new ResourceError("Project does not exist", { projectId });
   }
 
   // 规范化文件路径，确保是相对路径
@@ -563,7 +563,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
   const resolvedTargetPath = path.resolve(targetPath);
   const resolvedProjectPath = path.resolve(projectPath);
   if (!resolvedTargetPath.startsWith(resolvedProjectPath)) {
-    throw new ValidationError("文件路径不安全，不能超出项目目录", {
+    throw new ValidationError("File path is not safe, cannot exceed project directory", {
       field: "filePath",
       providedPath: filePath,
       resolvedPath: resolvedTargetPath,
@@ -579,9 +579,9 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
     }
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
-    log(projectId, "DEBUG", "开始备份项目", { projectId, backupZipPath });
+    log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
     await backupProjectToZip(projectId, projectPath, backupZipPath);
-    log(projectId, "INFO", `项目已备份: ${backupZipPath}`, {
+    log(projectId, "INFO", `Project backed up: ${backupZipPath}`, {
       projectId,
       zipPath: backupZipPath,
     });
@@ -589,18 +589,18 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
     // 2) 写入文件
     try {
       // 确保目标目录存在
-      log(projectId, "DEBUG", "开始写入上传文件", { projectId, filePath: normalizedPath });
+      log(projectId, "DEBUG", "Start writing uploaded file", { projectId, filePath: normalizedPath });
       await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
 
       // 写入文件内容，统一使用buffer（multer memoryStorage对所有文件类型都提供buffer）
       if (!file.buffer) {
-        throw new ValidationError("文件内容格式不正确，缺少buffer", {
+        throw new ValidationError("File content format is incorrect, missing buffer", {
           field: "file",
         });
       }
       
       // 记录写入前的文件信息，用于调试
-      log(projectId, "INFO", "准备写入文件", {
+      log(projectId, "INFO", "Prepare to write file", {
         targetPath,
         bufferLength: file.buffer.length,
         expectedSize: file.size,
@@ -611,7 +611,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
       // 直接写入Buffer，Node.js会自动以二进制模式写入
       await fs.promises.writeFile(targetPath, file.buffer);
 
-      log(projectId, "INFO", "文件上传成功", {
+      log(projectId, "INFO", "File uploaded successfully", {
         projectId,
         filePath: normalizedPath,
         targetPath: resolvedTargetPath,
@@ -626,14 +626,14 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
       if (needRestart) {
         try {
           const restartResult = await restartDevServer(req, projectId);
-          log(projectId, "INFO", "重启开发服务器成功", {
+          log(projectId, "INFO", "Restart development server successfully", {
             projectId,
             pid: restartResult.pid,
             port: restartResult.port,
           });
           return {
             success: true,
-            message: "文件上传并重启开发服务器成功",
+            message: "File uploaded and restarted development server successfully",
             projectId,
             filePath: normalizedPath,
             targetPath: resolvedTargetPath,
@@ -643,26 +643,26 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
             restarted: true,
           };
         } catch (e) {
-          log(projectId, "ERROR", "重启开发服务器失败", {
+          log(projectId, "ERROR", "Failed to restart development server", {
             projectId,
             filePath: normalizedPath,
             error: e && e.message,
           });
         }
       } else {
-        log(projectId, "INFO", "文件修改不需要重启开发服务器", {
+        log(projectId, "INFO", "File modification does not require restarting development server", {
           projectId,
           filePath: normalizedPath,
         });
         return {
           success: true,
-          message: "文件上传成功，无需重启开发服务器",
+          message: "File uploaded successfully, no need to restart development server",
           projectId,
           restarted: false,
         };
       }
     } catch (e) {
-      log(projectId, "ERROR", "写入文件失败", {
+      log(projectId, "ERROR", "Failed to write file", {
         projectId,
         filePath: normalizedPath,
         error: e && e.message,
@@ -673,7 +673,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
   } catch (backupErr) {
     // 备份阶段失败：不执行回滚（无备份可回滚），直接抛出
     if (!backupErr.isOperational) {
-      throw new SystemError("备份项目失败", {
+      throw new SystemError("Failed to backup project", {
         projectId,
         filePath: normalizedPath,
         originalError: backupErr && backupErr.message,
@@ -694,35 +694,35 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
 async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
   const startTime = Date.now();
   if (!projectId) {
-    throw new ValidationError("项目ID不能为空", { field: "projectId" });
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("codeVersion必须是数字", {
+    throw new ValidationError("codeVersion must be a number", {
       field: "codeVersion",
     });
   }
   const rollbackToNum = Number(rollbackTo);
   if (!Number.isFinite(rollbackToNum)) {
-    throw new ValidationError("rollbackTo必须是数字", {
+    throw new ValidationError("rollbackTo must be a number", {
       field: "rollbackTo",
     });
   }
   if (rollbackToNum < 0) {
-    throw new ValidationError("rollbackTo不能小于0", {
+    throw new ValidationError("rollbackTo cannot be less than 0", {
       field: "rollbackTo",
     });
   }
   if (rollbackToNum >= versionNum) {
-    throw new ValidationError("rollbackTo必须小于当前codeVersion", {
+    throw new ValidationError("rollbackTo must be less than current codeVersion", {
       field: "rollbackTo",
     });
   }
 
   const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
   if (!fs.existsSync(projectPath)) {
-    log(projectId, "ERROR", "项目不存在", { projectId, projectPath });
-    throw new ResourceError("项目不存在", { projectId });
+    log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
+    throw new ResourceError("Project does not exist", { projectId });
   }
 
   // 检查要回滚到的版本的备份文件是否存在
@@ -731,12 +731,12 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
   const rollbackZipPath = path.join(backupDir, rollbackZipName);
   
   if (!fs.existsSync(rollbackZipPath)) {
-    log(projectId, "ERROR", "回滚版本备份文件不存在", {
+    log(projectId, "ERROR", "Rollback version backup file does not exist", {
       projectId,
       rollbackTo: rollbackToNum,
       zipPath: rollbackZipPath,
     });
-    throw new ResourceError("回滚版本备份文件不存在", {
+      throw new ResourceError("Rollback version backup file does not exist", {
       projectId,
       rollbackTo: rollbackToNum,
     });
@@ -754,21 +754,21 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
     // 如果当前版本的备份已存在，跳过备份（避免覆盖）
     if (!fs.existsSync(currentBackupZipPath)) {
       await backupProjectToZip(projectId, projectPath, currentBackupZipPath);
-      log(projectId, "INFO", "当前版本已备份", {
+      log(projectId, "INFO", "Current version backed up", {
         projectId,
         zipPath: currentBackupZipPath,
       });
     } else {
-      log(projectId, "INFO", "当前版本备份已存在，跳过备份", {
+      log(projectId, "INFO", "Current version backup already exists, skipping backup", {
         projectId,
         zipPath: currentBackupZipPath,
       });
     }
 
     // 2) 从指定版本恢复项目
-    log(projectId, "DEBUG", "开始从备份恢复项目", { projectId, rollbackToNum, rollbackZipPath });
+    log(projectId, "DEBUG", "Start restoring project from backup", { projectId, rollbackToNum, rollbackZipPath });
     await restoreProjectFromZip(projectId, projectPath, rollbackZipPath);
-    log(projectId, "INFO", "项目回滚成功", {
+    log(projectId, "INFO", "Project rolled back successfully", {
       projectId,
       newVersion: versionNum,
       toVersion: rollbackToNum,
@@ -778,12 +778,12 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
 
     return {
       success: true,
-      message: "项目回滚成功",
+      message: "Project rolled back successfully",
       newVersion: versionNum,
       rollbackTo: rollbackToNum,
     };
   } catch (restoreErr) {
-    log(projectId, "ERROR", "回滚项目失败", {
+    log(projectId, "ERROR", "Failed to rollback project", {
       projectId,
       rollbackTo: rollbackToNum,
       error: restoreErr && restoreErr.message,
@@ -793,16 +793,16 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
     // 如果恢复失败，尝试从当前版本备份恢复（如果存在）
     if (currentBackupZipPath && fs.existsSync(currentBackupZipPath)) {
       try {
-        log(projectId, "INFO", "回滚失败，尝试恢复当前版本", {
+        log(projectId, "INFO", "Failed to rollback, trying to restore current version", {
           projectId,
           backupPath: currentBackupZipPath,
         });
         await restoreProjectFromZip(projectId, projectPath, currentBackupZipPath);
-        log(projectId, "INFO", "已恢复当前版本", {
+        log(projectId, "INFO", "Current version restored", {
           projectId,
         });
       } catch (recoveryErr) {
-        log(projectId, "ERROR", "恢复当前版本失败", {
+        log(projectId, "ERROR", "Failed to restore current version", {
           projectId,
           error: recoveryErr && recoveryErr.message,
         });
@@ -810,7 +810,7 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
     }
     
     if (!restoreErr.isOperational) {
-      throw new SystemError("回滚项目失败", {
+      throw new SystemError("Failed to rollback project", {
         projectId,
         rollbackTo: rollbackToNum,
         originalError: restoreErr && restoreErr.message,

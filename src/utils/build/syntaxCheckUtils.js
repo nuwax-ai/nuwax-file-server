@@ -20,7 +20,7 @@ async function runSyntaxCheck(projectId, projectPath, timeoutMs = 15000) {
     // 检查项目类型
     const projectType = detectProjectType(projectPath);
     
-    log(projectId, "INFO", "开始语法检查", {
+    log(projectId, "INFO", "Start syntax check", {
       projectId,
       projectType,
       timeoutMs,
@@ -58,7 +58,7 @@ async function runSyntaxCheck(projectId, projectPath, timeoutMs = 15000) {
 
     // 所有检查都通过
     if (results.length === 0) {
-      log(projectId, "INFO", "跳过语法检查：未检测到源代码文件", {
+      log(projectId, "INFO", "Skip syntax check: no source code files detected", {
         projectId,
       });
       return { passed: true, method: "skipped" };
@@ -68,7 +68,7 @@ async function runSyntaxCheck(projectId, projectPath, timeoutMs = 15000) {
     const methods = results.map(r => r.method).filter(Boolean).join(", ");
     const totalDuration = results.reduce((sum, r) => sum + (r.duration || 0), 0);
     
-    log(projectId, "INFO", "所有语法检查通过", {
+    log(projectId, "INFO", "All syntax checks passed", {
       projectId,
       methods,
       totalDuration,
@@ -80,7 +80,7 @@ async function runSyntaxCheck(projectId, projectPath, timeoutMs = 15000) {
       duration: totalDuration,
     };
   } catch (error) {
-    log(projectId, "WARN", "语法检查执行失败", {
+    log(projectId, "WARN", "Syntax check execution failed", {
       projectId,
       error: error.message,
     });
@@ -191,7 +191,7 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
       // 如果用户有 tsconfig.json，继承它的 compilerOptions
       if (hasTsconfig) {
         config.extends = "./tsconfig.json";
-        log(projectId, "INFO", "检查配置将继承用户的 tsconfig.json", {
+        log(projectId, "INFO", "Check configuration will inherit user's tsconfig.json", {
           projectId,
         });
       } else {
@@ -223,14 +223,14 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
       fs.writeFileSync(checkConfigPath, JSON.stringify(checkConfig, null, 2), "utf8");
       createdCheckConfig = true;
       
-      log(projectId, "INFO", "创建临时 tsconfig.check.json 用于语法检查", {
+      log(projectId, "INFO", "Create temporary tsconfig.check.json for syntax check", {
         projectId,
         hasTsconfig,
         extends: checkConfig.extends || "无",
         include: checkConfig.include,
       });
     } catch (error) {
-      log(projectId, "WARN", "无法创建 tsconfig.check.json", {
+      log(projectId, "WARN", "Failed to create tsconfig.check.json", {
         projectId,
         error: error.message,
       });
@@ -240,11 +240,11 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
         try {
           fs.writeFileSync(tsconfigPath, JSON.stringify(createCheckConfig(false), null, 2), "utf8");
           createdTempTsconfig = true;
-          log(projectId, "INFO", "创建临时 tsconfig.json 作为降级方案", {
+          log(projectId, "INFO", "Create temporary tsconfig.json as fallback", {
             projectId,
           });
         } catch (e) {
-          log(projectId, "ERROR", "无法创建任何 TypeScript 配置文件", {
+          log(projectId, "ERROR", "Failed to create any TypeScript configuration file", {
             projectId,
             error: e.message,
           });
@@ -263,7 +263,7 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
       ? ["--project", configToUse, "--noEmit", "--skipLibCheck"] 
       : ["--yes", "tsc", "--project", configToUse, "--noEmit", "--skipLibCheck"];
     
-    log(projectId, "INFO", "运行 TypeScript 类型检查", {
+    log(projectId, "INFO", "Run TypeScript type check", {
       projectId,
       command,
       args: args.join(" "),
@@ -295,12 +295,12 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
         try {
           if (fs.existsSync(checkConfigPath)) {
             fs.unlinkSync(checkConfigPath);
-            log(projectId, "INFO", "已清理临时 tsconfig.check.json", {
+            log(projectId, "INFO", "Cleaned temporary tsconfig.check.json", {
               projectId,
             });
           }
         } catch (error) {
-          log(projectId, "WARN", "清理 tsconfig.check.json 失败", {
+          log(projectId, "WARN", "Failed to clean tsconfig.check.json", {
             projectId,
             error: error.message,
           });
@@ -312,12 +312,12 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
         try {
           if (fs.existsSync(tsconfigPath)) {
             fs.unlinkSync(tsconfigPath);
-            log(projectId, "INFO", "已清理临时 tsconfig.json", {
+            log(projectId, "INFO", "Cleaned temporary tsconfig.json", {
               projectId,
             });
           }
         } catch (error) {
-          log(projectId, "WARN", "清理 tsconfig.json 失败", {
+          log(projectId, "WARN", "Failed to clean tsconfig.json", {
             projectId,
             error: error.message,
           });
@@ -332,7 +332,7 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
       cleanupTempConfig();
       
       if (code === 0) {
-        log(projectId, "INFO", "TypeScript 类型检查通过", {
+        log(projectId, "INFO", "TypeScript type check passed", {
           projectId,
           duration,
         });
@@ -342,7 +342,7 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
         const errorOutput = stderr || stdout;
         const errorSummary = extractTypeScriptErrors(errorOutput);
         
-        log(projectId, "ERROR", "TypeScript 类型检查失败", {
+        log(projectId, "ERROR", "TypeScript type check failed", {
           projectId,
           code,
           duration,
@@ -363,7 +363,7 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
       // 清理临时配置
       cleanupTempConfig();
       
-      log(projectId, "WARN", "TypeScript 检查执行失败", {
+      log(projectId, "WARN", "TypeScript check execution failed", {
         projectId,
         error: error.message,
       });
@@ -378,7 +378,7 @@ async function runTypeScriptCheck(projectId, projectPath, timeoutMs) {
         // 清理临时配置
         cleanupTempConfig();
         
-        log(projectId, "WARN", "TypeScript 检查超时", {
+        log(projectId, "WARN", "TypeScript check timeout", {
           projectId,
           timeoutMs,
         });
@@ -406,7 +406,7 @@ async function runJavaScriptCheck(projectId, projectPath, timeoutMs) {
     const entryFiles = findEntryFiles(projectPath);
     
     if (entryFiles.length === 0) {
-      log(projectId, "INFO", "跳过 JavaScript 语法检查：未找到入口文件", {
+      log(projectId, "INFO", "Skip JavaScript syntax check: no entry files found", {
         projectId,
       });
       resolve({ passed: true, method: "javascript-skipped" });
@@ -424,7 +424,7 @@ async function runJavaScriptCheck(projectId, projectPath, timeoutMs) {
       "--format=esm",
     ];
     
-    log(projectId, "INFO", "运行 JavaScript 语法检查", {
+    log(projectId, "INFO", "Run JavaScript syntax check", {
       projectId,
       entryFiles,
     });
@@ -450,7 +450,7 @@ async function runJavaScriptCheck(projectId, projectPath, timeoutMs) {
       const duration = Date.now() - startTime;
       
       if (code === 0) {
-        log(projectId, "INFO", "JavaScript 语法检查通过", {
+        log(projectId, "INFO", "JavaScript syntax check passed", {
           projectId,
           duration,
         });
@@ -459,7 +459,7 @@ async function runJavaScriptCheck(projectId, projectPath, timeoutMs) {
         const errorOutput = stderr || stdout;
         const errorSummary = errorOutput.substring(0, 1000);
         
-        log(projectId, "ERROR", "JavaScript 语法检查失败", {
+        log(projectId, "ERROR", "JavaScript syntax check failed", {
           projectId,
           code,
           duration,
@@ -477,7 +477,7 @@ async function runJavaScriptCheck(projectId, projectPath, timeoutMs) {
     });
     
     child.on("error", (error) => {
-      log(projectId, "WARN", "JavaScript 检查执行失败", {
+      log(projectId, "WARN", "JavaScript check execution failed", {
         projectId,
         error: error.message,
       });
@@ -488,7 +488,7 @@ async function runJavaScriptCheck(projectId, projectPath, timeoutMs) {
     setTimeout(() => {
       try {
         child.kill();
-        log(projectId, "WARN", "JavaScript 检查超时", {
+        log(projectId, "WARN", "JavaScript check timeout", {
           projectId,
           timeoutMs,
         });
@@ -592,7 +592,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
     const htmlFiles = findHtmlFiles(projectPath);
     
     if (htmlFiles.length === 0) {
-      log(projectId, "INFO", "跳过 HTML 语法检查：未找到 HTML 文件", {
+      log(projectId, "INFO", "Skip HTML syntax check: no HTML files found", {
         projectId,
       });
       resolve({ passed: true, method: "html-skipped" });
@@ -602,7 +602,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
     // 确保有宽松的验证配置
     const configCreated = ensureHtmlValidateConfig(projectPath);
     if (configCreated) {
-      log(projectId, "INFO", "自动创建宽松的 HTML 验证配置", {
+      log(projectId, "INFO", "Automatically create宽松的 HTML 验证配置", {
         projectId,
         configPath: ".htmlvalidate.json",
       });
@@ -616,7 +616,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
       "--formatter=text",
     ];
     
-    log(projectId, "INFO", "运行 HTML 语法检查", {
+    log(projectId, "INFO", "Run HTML syntax check", {
       projectId,
       htmlFiles,
       fileCount: htmlFiles.length,
@@ -643,7 +643,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
       const duration = Date.now() - startTime;
       
       if (code === 0) {
-        log(projectId, "INFO", "HTML 语法检查通过", {
+        log(projectId, "INFO", "HTML syntax check passed", {
           projectId,
           duration,
           fileCount: htmlFiles.length,
@@ -653,7 +653,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
         const errorOutput = stdout || stderr;
         const errorSummary = extractHtmlErrors(errorOutput);
         
-        log(projectId, "ERROR", "HTML 语法检查失败", {
+        log(projectId, "ERROR", "HTML syntax check failed", {
           projectId,
           code,
           duration,
@@ -671,7 +671,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
     });
     
     child.on("error", (error) => {
-      log(projectId, "WARN", "HTML 检查执行失败", {
+      log(projectId, "WARN", "HTML check execution failed", {
         projectId,
         error: error.message,
       });
@@ -683,7 +683,7 @@ async function runHtmlCheck(projectId, projectPath, timeoutMs) {
     setTimeout(() => {
       try {
         child.kill();
-        log(projectId, "WARN", "HTML 检查超时", {
+        log(projectId, "WARN", "HTML check timeout", {
           projectId,
           timeoutMs,
         });
@@ -781,7 +781,7 @@ function searchHtmlFilesInDir(dir, basePath, maxDepth = 2) {
  * @returns {string} 错误摘要
  */
 function extractHtmlErrors(output) {
-  if (!output) return "未知错误";
+  if (!output) return "Unknown error";
   
   const lines = output.split("\n");
   const errorLines = [];
@@ -817,7 +817,7 @@ function extractHtmlErrors(output) {
  * @returns {string} 错误摘要
  */
 function extractTypeScriptErrors(output) {
-  if (!output) return "未知错误";
+  if (!output) return "Unknown error";
   
   const lines = output.split("\n");
   const errorLines = [];

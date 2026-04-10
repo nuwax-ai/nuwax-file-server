@@ -2,14 +2,14 @@
  * @swagger
  * tags:
  *   name: Project
- *   description: 项目管理相关接口
+ *   description: Project management APIs
  */
 
 /**
  * @swagger
  * /api/project/create-project:
  *   post:
- *     summary: 创建新项目
+ *     summary: Create a new project
  *     tags: [Project]
  *     requestBody:
  *       required: true
@@ -22,10 +22,10 @@
  *             properties:
  *               projectId:
  *                 type: string
- *                 description: 项目ID
+ *                 description: Project ID
  *     responses:
  *       200:
- *         description: 项目创建成功
+ *         description: Project created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -38,7 +38,7 @@
  *                 projectPath:
  *                   type: string
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:
@@ -49,7 +49,7 @@
  * @swagger
  * /api/project/upload-start-dev:
  *   post:
- *     summary: 上传项目文件并启动开发服务器
+ *     summary: Upload project archive and start the dev server
  *     tags: [Project]
  *     requestBody:
  *       required: true
@@ -63,17 +63,17 @@
  *             properties:
  *               projectId:
  *                 type: string
- *                 description: 项目ID
+ *                 description: Project ID
  *               file:
  *                 type: string
  *                 format: binary
- *                 description: 项目压缩包(.zip)
+ *                 description: Project archive (.zip)
  *               basePath:
  *                 type: string
- *                 description: 基础路径(仅Vite项目)
+ *                 description: Base path (Vite projects only)
  *     responses:
  *       200:
- *         description: 上传并启动成功
+ *         description: Uploaded and dev server started
  *         content:
  *           application/json:
  *             schema:
@@ -90,7 +90,7 @@
  *                 port:
  *                   type: number
  *       400:
- *         description: 参数错误或文件格式错误
+ *         description: Invalid parameters or file format
  *         content:
  *           application/json:
  *             schema:
@@ -101,7 +101,7 @@
  * @swagger
  * /api/project/get-project-content:
  *   get:
- *     summary: 获取项目内容
+ *     summary: Get project content
  *     tags: [Project]
  *     parameters:
  *       - in: query
@@ -109,10 +109,10 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *     responses:
  *       200:
- *         description: 成功获取项目内容
+ *         description: Project content retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -134,7 +134,7 @@
  *                       sizeExceeded:
  *                         type: boolean
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:
@@ -145,7 +145,7 @@
  * @swagger
  * /api/project/backup-current-version:
  *   post:
- *     summary: 备份当前版本
+ *     summary: Backup the current version
  *     tags: [Project]
  *     requestBody:
  *       required: true
@@ -159,13 +159,13 @@
  *             properties:
  *               projectId:
  *                 type: string
- *                 description: 项目ID
+ *                 description: Project ID
  *               codeVersion:
  *                 type: string
- *                 description: 代码版本号
+ *                 description: Code version
  *     responses:
  *       200:
- *         description: 备份成功
+ *         description: Backup successful
  *         content:
  *           application/json:
  *             schema:
@@ -178,7 +178,7 @@
  *                 zipPath:
  *                   type: string
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:
@@ -189,7 +189,7 @@
  * @swagger
  * /api/project/export-project:
  *   get:
- *     summary: 导出项目为压缩包
+ *     summary: Export project as a ZIP archive
  *     tags: [Project]
  *     parameters:
  *       - in: query
@@ -197,17 +197,17 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *     responses:
  *       200:
- *         description: 成功下载项目压缩包
+ *         description: Project ZIP file download
  *         content:
  *           application/zip:
  *             schema:
  *               type: string
  *               format: binary
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:
@@ -218,7 +218,7 @@
  * @swagger
  * /api/project/get-project-content-by-version:
  *   get:
- *     summary: 获取指定版本的项目内容
+ *     summary: Get project content for a specific version
  *     tags: [Project]
  *     parameters:
  *       - in: query
@@ -226,16 +226,16 @@
  *         required: true
  *         schema:
  *           type: string
- *         description: 项目ID
+ *         description: Project ID
  *       - in: query
  *         name: codeVersion
  *         required: true
  *         schema:
  *           type: string
- *         description: 代码版本号
+ *         description: Code version
  *     responses:
  *       200:
- *         description: 成功获取项目内容
+ *         description: Project content retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -257,7 +257,7 @@
  *                       sizeExceeded:
  *                         type: boolean
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:

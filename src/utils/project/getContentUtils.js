@@ -153,7 +153,7 @@ async function traverseDirectory(targetDir, basePath, projectId, proxyPath) {
 
         files.push(fileInfo);
       } catch (error) {
-        log(projectId, "WARN", `处理文件失败: ${fullPath} - ${error.message}`, {
+        log(projectId, "WARN", `Process file failed: ${fullPath} - ${error.message}`, {
           filePath: fullPath,
           error: error.message,
         });
@@ -175,11 +175,11 @@ async function getProjectContent(projectPath, command, proxyPath) {
   const projectId = path.basename(projectPath);
 
   try {
-    log(projectId, "INFO", "开始获取项目内容", { projectPath, command });
+    log(projectId, "INFO", "Start getting project content", { projectPath, command });
 
-    log(projectId, "DEBUG", "开始遍历项目目录", { projectPath });
+    log(projectId, "DEBUG", "Start traversing project directory", { projectPath });
     const files = await traverseDirectory(projectPath, null, projectId, proxyPath);
-    log(projectId, "DEBUG", "项目目录遍历完成", { projectPath, fileCount: files.length });
+    log(projectId, "DEBUG", "Project directory traversal completed", { projectPath, fileCount: files.length });
 
     // 根据 command 参数过滤 cpage_config.json
     let filteredFiles = files;
@@ -188,7 +188,7 @@ async function getProjectContent(projectPath, command, proxyPath) {
     }
 
     // 获取框架信息
-    log(projectId, "DEBUG", "开始检测框架信息", { projectPath });
+    log(projectId, "DEBUG", "Start detecting framework information", { projectPath });
     const frameworkInfo = getFrameworkInfo(projectPath);
 
     const result = {
@@ -199,7 +199,7 @@ async function getProjectContent(projectPath, command, proxyPath) {
     log(
       projectId,
       "INFO",
-      `项目内容获取完成，共${filteredFiles.length}个文件`,
+      `Project content obtained, total ${filteredFiles.length} files`,
       {
         projectPath,
         fileCount: filteredFiles.length,
@@ -210,13 +210,13 @@ async function getProjectContent(projectPath, command, proxyPath) {
 
     return result;
   } catch (error) {
-    log(projectId, "ERROR", `获取项目内容失败: ${error.message}`, {
+    log(projectId, "ERROR", `Get project content failed: ${error.message}`, {
       projectPath,
       originalError: error.message,
       elapsedMs: Date.now() - startTime,
     });
 
-    throw new SystemError(`获取项目内容失败: ${error.message}`, {
+    throw new SystemError(`Get project content failed: ${error.message}`, {
       projectPath,
       originalError: error.message,
     });
@@ -234,7 +234,7 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
   const startTime = Date.now();
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
-    throw new ValidationError("代码版本必须是数字", { field: "codeVersion" });
+    throw new ValidationError("Code version must be a number", { field: "codeVersion" });
   }
 
   // 构建备份文件路径
@@ -243,7 +243,7 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
 
   // 检查备份文件是否存在
   if (!fs.existsSync(backupZipPath)) {
-    throw new ResourceError(`版本 ${versionNum} 的备份文件不存在`, {
+    throw new ResourceError(`Backup file for version ${versionNum} does not exist`, {
       projectId,
       codeVersion: versionNum,
       backupZipPath,
@@ -262,7 +262,7 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
     // 创建临时目录
     await fs.promises.mkdir(tempExtractDir, { recursive: true });
 
-    log(projectId, "INFO", `开始解压版本 ${versionNum} 的备份文件`, {
+    log(projectId, "INFO", `Start extracting backup file for version ${versionNum}`, {
       projectId,
       codeVersion: versionNum,
       backupZipPath,
@@ -270,16 +270,16 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
     });
 
     // 解压备份文件到临时目录
-    log(projectId, "DEBUG", "开始解压版本备份文件", { projectId, backupZipPath, tempExtractDir });
+    log(projectId, "DEBUG", "Start extracting version backup file", { projectId, backupZipPath, tempExtractDir });
     await extractZip(backupZipPath, tempExtractDir);
-    log(projectId, "DEBUG", `版本 ${versionNum} 备份文件解压完成`, {
+    log(projectId, "DEBUG", `Version ${versionNum} backup file extraction completed`, {
       projectId,
       codeVersion: versionNum,
       tempExtractDir,
     });
 
     // 获取项目内容 - 使用统一的遍历函数，传入解压目录作为基准路径
-    log(projectId, "DEBUG", "开始遍历版本目录", { projectId, tempExtractDir });
+    log(projectId, "DEBUG", "Start traversing version directory", { projectId, tempExtractDir });
     const files = await traverseDirectory(
       tempExtractDir,
       tempExtractDir,
@@ -295,7 +295,7 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
 
     const result = { files: filteredFiles };
 
-    log(projectId, "INFO", `版本 ${versionNum} 项目内容获取完成`, {
+    log(projectId, "INFO", `Version ${versionNum} project content obtained`, {
       projectId,
       codeVersion: versionNum,
       fileCount: result.files ? result.files.length : 0,
@@ -309,13 +309,13 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
     try {
       if (fs.existsSync(tempExtractDir)) {
         await fs.promises.rm(tempExtractDir, { recursive: true, force: true });
-        log(projectId, "INFO", `临时目录已清理: ${tempExtractDir}`, {
+        log(projectId, "INFO", `Temporary directory cleaned: ${tempExtractDir}`, {
           projectId,
           codeVersion: versionNum,
         });
       }
     } catch (cleanupError) {
-      log(projectId, "WARN", `清理临时目录失败: ${cleanupError.message}`, {
+      log(projectId, "WARN", `Clean temporary directory failed: ${cleanupError.message}`, {
         projectId,
         codeVersion: versionNum,
         tempExtractDir,

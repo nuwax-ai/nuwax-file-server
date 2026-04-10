@@ -27,17 +27,17 @@ class PnpmPruneScheduler {
    */
   start() {
     if (!this.config.enabled) {
-      log('scheduler', 'INFO', 'pnpm prune 定时任务已禁用（PNPM_PRUNE_ENABLED=false）');
+      log('scheduler', 'INFO', 'pnpm prune scheduler is disabled (PNPM_PRUNE_ENABLED=false)');
       return;
     }
 
     // 验证 cron 表达式
     if (!cron.validate(this.config.schedule)) {
-      log('scheduler', 'ERROR', `无效的 cron 表达式: ${this.config.schedule}`);
+      log('scheduler', 'ERROR', `Invalid cron expression: ${this.config.schedule}`);
       return;
     }
 
-    log('scheduler', 'INFO', 'pnpm prune 定时任务已启动', {
+    log('scheduler', 'INFO', 'pnpm prune scheduler is started', {
       schedule: this.config.schedule,
       timezone: this.config.timezone,
     });
@@ -56,10 +56,10 @@ class PnpmPruneScheduler {
 
     // 如果配置了启动时执行，则立即执行一次
     if (this.config.runOnStart) {
-      log('scheduler', 'INFO', '启动时立即执行一次 pnpm prune');
+      log('scheduler', 'INFO', 'Immediately execute pnpm prune on startup');
       setTimeout(() => {
         this.executePrune();
-      }, 5000); // 延迟 5 秒，让应用完全启动
+      }, 5000); // Delay 5 seconds to ensure the application is fully started
     }
   }
 
@@ -69,7 +69,7 @@ class PnpmPruneScheduler {
   stop() {
     if (this.task) {
       this.task.stop();
-      log('scheduler', 'INFO', 'pnpm prune 定时任务已停止');
+      log('scheduler', 'INFO', 'pnpm prune scheduler is stopped');
     }
   }
 
@@ -78,28 +78,28 @@ class PnpmPruneScheduler {
    */
   async executePrune() {
     if (this.isRunning) {
-      log('scheduler', 'WARN', 'pnpm prune 正在执行中，跳过本次调度');
+      log('scheduler', 'WARN', 'pnpm prune is running, skipping this schedule');
       return;
     }
 
     this.isRunning = true;
     
     log('scheduler', 'INFO', '====================================');
-    log('scheduler', 'INFO', '开始执行 pnpm store prune');
+    log('scheduler', 'INFO', 'Start executing pnpm store prune');
     log('scheduler', 'INFO', '====================================');
 
     try {
       // 获取清理前的状态
       const beforeStatus = await this.getStoreStatus();
       if (beforeStatus) {
-        log('scheduler', 'INFO', '清理前状态', beforeStatus);
+        log('scheduler', 'INFO', 'Before status', beforeStatus);
       }
 
       // 执行清理
       const result = await this.runCommand('pnpm store prune');
       
       if (result.success) {
-        log('scheduler', 'INFO', '✅ pnpm store prune 执行成功');
+        log('scheduler', 'INFO', '✅ pnpm store prune executed successfully');
         if (result.stdout) {
           log('scheduler', 'INFO', result.stdout);
         }
@@ -107,21 +107,21 @@ class PnpmPruneScheduler {
         // 获取清理后的状态
         const afterStatus = await this.getStoreStatus();
         if (afterStatus) {
-          log('scheduler', 'INFO', '清理后状态', afterStatus);
+          log('scheduler', 'INFO', 'After status', afterStatus);
         }
       } else {
-        log('scheduler', 'ERROR', '❌ pnpm store prune 执行失败', {
+        log('scheduler', 'ERROR', '❌ pnpm store prune executed failed', {
           error: result.error,
         });
       }
     } catch (error) {
-      log('scheduler', 'ERROR', 'pnpm prune 执行异常', {
+      log('scheduler', 'ERROR', 'pnpm prune executed exception', {
         error: error.message,
       });
     } finally {
       this.isRunning = false;
       log('scheduler', 'INFO', '====================================');
-      log('scheduler', 'INFO', 'pnpm store prune 执行完成');
+      log('scheduler', 'INFO', 'pnpm store prune executed successfully');
       log('scheduler', 'INFO', '====================================\n');
     }
   }

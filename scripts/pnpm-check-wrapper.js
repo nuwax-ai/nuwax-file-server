@@ -14,8 +14,8 @@ const config = (await import("../src/appConfig/index.js")).default;
 const projectSourceDir = config.PROJECT_SOURCE_DIR;
 const scriptPath = path.join(__dirname, "pnpm-check.sh");
 
-console.log(`🔧 当前环境: ${config.NODE_ENV}`);
-console.log(`📂 项目目录: ${projectSourceDir}`);
+console.log(`🔧 Current environment: ${config.NODE_ENV}`);
+console.log(`📂 Project directory: ${projectSourceDir}`);
 console.log("");
 
 const child = spawn("bash", [scriptPath, projectSourceDir], {
@@ -28,7 +28,7 @@ const child = spawn("bash", [scriptPath, projectSourceDir], {
 });
 
 child.on("error", (error) => {
-  console.error("❌ 执行失败:", error.message);
+  console.error("❌ Execution failed:", error.message);
   process.exit(1);
 });
 

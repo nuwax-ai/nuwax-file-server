@@ -391,26 +391,26 @@ async function startDev_NonBlocking({
 
         preProcess.stdout.on("data", (data) => {
           const msg = data.toString();
-          safeWrite(outStream, msg, "主日志");
-          safeWrite(tempOutStream, msg, "临时日志");
+          safeWrite(outStream, msg, "Main log");
+          safeWrite(tempOutStream, msg, "Temp log");
         });
 
         preProcess.stderr.on("data", (data) => {
           const msg = data.toString();
-          safeWrite(outStream, msg, "主日志");
-          safeWrite(tempOutStream, msg, "临时日志");
+          safeWrite(outStream, msg, "Main log");
+          safeWrite(tempOutStream, msg, "Temp log");
         });
 
         preProcess.on("error", (err) => {
           const errorMessage = `预处理命令执行出错（忽略并继续后续流程）: ${err.message}\n`;
-          safeWrite(outStream, errorMessage, "主日志", true);
-          safeWrite(tempOutStream, errorMessage, "临时日志", true);
+          safeWrite(outStream, errorMessage, "Main log", true);
+          safeWrite(tempOutStream, errorMessage, "Temp log", true);
           resolve();
         });
 
         preProcess.on("close", (code) => {
           if (code !== 0) {
-            const errorMessage = `预处理命令退出码为 ${code}（忽略并继续后续流程）\n`;
+            const errorMessage = `Preprocessing command exit code is ${code} (ignore and continue subsequent process)\n`;
             safeWrite(outStream, errorMessage, "主日志", true);
             safeWrite(tempOutStream, errorMessage, "临时日志", true);
           }
@@ -418,8 +418,8 @@ async function startDev_NonBlocking({
         });
       } catch (error) {
         const errorMessage = `预处理命令启动失败（忽略并继续后续流程）: ${error.message}\n`;
-        safeWrite(outStream, errorMessage, "主日志", true);
-        safeWrite(tempOutStream, errorMessage, "临时日志", true);
+        safeWrite(outStream, errorMessage, "Main log", true);
+        safeWrite(tempOutStream, errorMessage, "Temp log", true);
         resolve();
       }
     });
@@ -433,16 +433,16 @@ async function startDev_NonBlocking({
       });
     } catch (error) {
       // 安装失败时记录错误并抛出（safeWrite 会自动添加时间戳）- 立即刷新到磁盘
-      const errorMessage = `依赖安装失败: ${error.message}\n`;
-      safeWrite(outStream, errorMessage, "主日志", true);  // flush = true
-      safeWrite(tempOutStream, errorMessage, "临时日志", true);  // flush = true
+      const errorMessage = `Dependency installation failed: ${error.message}\n`;
+      safeWrite(outStream, errorMessage, "Main log", true);  // flush = true
+      safeWrite(tempOutStream, errorMessage, "Temp log", true);  // flush = true
       throw error;
     }
 
     // 在日志文件开头写入开始执行
-    const startMessage = `开始执行脚本: dev\n`;
-    safeWrite(outStream, startMessage, "主日志");
-    safeWrite(tempOutStream, startMessage, "临时日志");
+    const startMessage = `Start executing script: dev\n`;
+    safeWrite(outStream, startMessage, "Main log");
+    safeWrite(tempOutStream, startMessage, "Temp log");
 
     // 构建 dev 命令参数
     const npmArgs = [];
@@ -469,7 +469,7 @@ async function startDev_NonBlocking({
 
     // 记录参数信息以便调试
     if (extraArgsEscaped) {
-      log(projectId, "INFO", "生成的额外参数", {
+      log(projectId, "INFO", "Generated extra arguments", {
         extraArgs: extraArgs,
         npmArgs: npmArgs,
         extraArgsEscaped: extraArgsEscaped,
@@ -534,13 +534,13 @@ async function startDev_NonBlocking({
     // 将实际执行的命令写入日志文件
     if (execCommand) {
       const commandMessage = `> ${execCommand}\n`;
-      safeWrite(outStream, commandMessage, "主日志");
-      safeWrite(tempOutStream, commandMessage, "临时日志");
+      safeWrite(outStream, commandMessage, "Main log");
+      safeWrite(tempOutStream, commandMessage, "Temp log");
     }
 
     // 打印将要执行的完整命令与上下文，便于排查
     try {
-      log(projectId, "INFO", "开启子进程,串行执行预处理并启动 dev:", {
+      log(projectId, "INFO", "Start child process, sequentially execute preprocessing and start dev:", {
         command: fullCommand,
         cwd: projectPath,
         devScript,
@@ -564,34 +564,34 @@ async function startDev_NonBlocking({
 
     // 添加日志流的错误处理
     outStream.on("error", (err) => {
-      log(projectId, "ERROR", "主日志流错误", { 
+      log(projectId, "ERROR", "Main log stream error", { 
         error: err.message,
         code: err.code,
         path: logPath,
         destroyed: outStream.destroyed,
       });
-      handleStreamError("主日志", err);
+      handleStreamError("Main log", err);
     });
     tempOutStream.on("error", (err) => {
-      log(projectId, "ERROR", "临时日志流错误", { 
+      log(projectId, "ERROR", "Temp log stream error", { 
         error: err.message,
         code: err.code,
         path: tempLogPath,
         destroyed: tempOutStream.destroyed,
       });
-      handleStreamError("临时日志", err);
+      handleStreamError("Temp log", err);
     });
 
     // 安全地重定向子进程输出到双日志文件
     if (child.stdout) {
       child.stdout.on("data", (data) => {
         // 使用安全的写入函数，避免向已关闭的流写入
-        const mainWriteOk = safeWrite(outStream, data, "主日志");
-        const tempWriteOk = safeWrite(tempOutStream, data, "临时日志");
+        const mainWriteOk = safeWrite(outStream, data, "Main log");
+        const tempWriteOk = safeWrite(tempOutStream, data, "Temp log");
         
         // 如果任一写入失败，记录详细信息（但不影响另一个流）
         if (!mainWriteOk || !tempWriteOk) {
-          log(projectId, "DEBUG", "日志写入状态", {
+          log(projectId, "DEBUG", "Log writing status", {
             mainWriteOk,
             tempWriteOk,
             mainDestroyed: outStream ? outStream.destroyed : null,
@@ -601,7 +601,7 @@ async function startDev_NonBlocking({
         }
       });
       child.stdout.on("error", (err) => {
-        log(projectId, "WARN", "子进程stdout错误", { error: err.message });
+        log(projectId, "WARN", "Child process stdout error", { error: err.message });
       });
       child.stdout.on("end", () => {
         // stdout 流结束时，不立即关闭日志流，等待子进程完全退出
@@ -612,12 +612,12 @@ async function startDev_NonBlocking({
     if (child.stderr) {
       child.stderr.on("data", (data) => {
         // 使用安全的写入函数，避免向已关闭的流写入
-        const mainWriteOk = safeWrite(outStream, data, "主日志");
-        const tempWriteOk = safeWrite(tempOutStream, data, "临时日志");
+        const mainWriteOk = safeWrite(outStream, data, "Main log");
+        const tempWriteOk = safeWrite(tempOutStream, data, "Temp log");
         
         // 如果任一写入失败，记录详细信息（但不影响另一个流）
         if (!mainWriteOk || !tempWriteOk) {
-          log(projectId, "DEBUG", "日志写入状态(stderr)", {
+          log(projectId, "DEBUG", "Log writing status(stderr)", {
             mainWriteOk,
             tempWriteOk,
             mainDestroyed: outStream ? outStream.destroyed : null,
@@ -627,18 +627,18 @@ async function startDev_NonBlocking({
         }
       });
       child.stderr.on("error", (err) => {
-        log(projectId, "WARN", "子进程stderr错误", { error: err.message });
+        log(projectId, "WARN", "Child process stderr error", { error: err.message });
       });
       child.stderr.on("end", () => {
         // stderr 流结束时，不立即关闭日志流，等待子进程完全退出
-        log(projectId, "INFO", "子进程stderr流已结束", { pid: child.pid });
+        log(projectId, "INFO", "Child process stderr stream ended", { pid: child.pid });
       });
     }
 
     // 监听子进程退出事件，安全关闭日志流
     child.on("exit", (code, signal) => {
       childExited = true;
-      log(projectId, "INFO", "子进程已退出", {
+      log(projectId, "INFO", "Child process exited", {
         pid: child.pid,
         code,
         signal,
@@ -650,9 +650,9 @@ async function startDev_NonBlocking({
     });
 
     child.on("error", (err) => {
-      log(projectId, "WARN", "子进程错误", { error: err.message });
+      log(projectId, "WARN", "Child process error", { error: err.message });
       childExited = true;
-      log(projectId, "ERROR", "子进程启动失败", {
+      log(projectId, "ERROR", "Child process startup failed", {
         pid: child.pid,
         error: err.message,
       });
@@ -676,7 +676,7 @@ async function startDev_NonBlocking({
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
 
-    log(projectId, "INFO", "使用端口池分配的端口和当前进程ID", {
+    log(projectId, "INFO", "Using port pool allocated port and current process ID", {
         projectId,
         pid: child.pid,
         port: port
@@ -708,14 +708,14 @@ async function startDev_NonBlocking({
 
     if (!projectAlive) {
       const waitSeconds = Math.round(maxAliveWaitMs / 1000);
-      log(projectId, "WARN", "开发服务器在限定时间内仍不可访问", {
+      log(projectId, "WARN", "Development server is not accessible within the limited time", {
         port,
         pid: child.pid,
         basePath: resolvedBasePath,
         waitSeconds,
       });
     } else {
-      log(projectId, "INFO", "项目可访问校验通过", {
+      log(projectId, "INFO", "Project accessibility verification passed", {
         port,
         basePath: resolvedBasePath,
         elapsedMs: Date.now() - aliveStartedAt,
@@ -730,7 +730,7 @@ async function startDev_NonBlocking({
       runningDevProcesses.set(projectId, info);
     }
 
-    log(projectId, "INFO", "开发服务器启动成功", {
+    log(projectId, "INFO", "Development server startup successfully", {
       projectId,
       pid: child.pid,
       port: port,
@@ -742,7 +742,7 @@ async function startDev_NonBlocking({
     // 启动失败，释放已分配的端口
     if (allocatedPort) {
       portPool.release(String(projectId));
-      log(projectId, "INFO", "启动失败，已释放端口", { 
+      log(projectId, "INFO", "Startup failed, port released", { 
         port: allocatedPort,
         error: error.message 
       });
@@ -772,7 +772,7 @@ async function killProcess(projectId, pid) {
 
   // 首先检查进程是否存在
   if (!isProcessRunning(pidNum)) {
-    log(projectId, "INFO", "进程已不存在", { pid: pidNum });
+    log(projectId, "INFO", "Process does not exist", { pid: pidNum });
     runningDevProcesses.delete(projectId);
     return true;
   }
@@ -784,16 +784,16 @@ async function killProcess(projectId, pid) {
     // 优先杀进程组（detached）
     process.kill(-pidNum);
     killed = true;
-    killMethod = "进程组";
+    killMethod = "Process group";
     log(projectId, "INFO", "通过进程组杀死进程", { pid: pidNum });
   } catch (e) {
     if (e && (e.code === "ESRCH" || e.errno === "ESRCH")) {
       // 进程组不存在，不能认为已杀死；继续尝试对单个进程发送信号
       killed = false;
-      killMethod = "进程组(不存在)";
-      log(projectId, "INFO", "进程组不存在，回退尝试单个进程kill", { pid: pidNum });
+      killMethod = "Process group(not exist)";
+      log(projectId, "INFO", "Process group does not exist, back to try single process kill", { pid: pidNum });
     } else {
-      log(projectId, "WARN", "杀死进程组失败", {
+      log(projectId, "WARN", "Failed to kill process group", {
         pid: pidNum,
         error: e.message,
       });
@@ -805,14 +805,14 @@ async function killProcess(projectId, pid) {
       process.kill(pidNum);
       killed = true;
       killMethod = "单个进程";
-      log(projectId, "INFO", "通过单个进程杀死进程", { pid: pidNum });
+      log(projectId, "INFO", "Kill process through single process", { pid: pidNum });
     } catch (e) {
       if (e && (e.code === "ESRCH" || e.errno === "ESRCH")) {
         killed = true;
-        killMethod = "单个进程(不存在)";
-        log(projectId, "INFO", "进程不存在，视为已停止", { pid: pidNum });
+        killMethod = "Single process(not exist)";
+        log(projectId, "INFO", "Process does not exist,视为已停止", { pid: pidNum });
       } else {
-        log(projectId, "ERROR", "杀死进程失败", {
+        log(projectId, "ERROR", "Failed to kill process", {
           pid: pidNum,
           error: e.message,
         });
@@ -826,14 +826,14 @@ async function killProcess(projectId, pid) {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     if (!isProcessRunning(pidNum)) {
-      log(projectId, "INFO", "进程已成功停止", {
+      log(projectId, "INFO", "Process stopped successfully", {
         pid: pidNum,
         method: killMethod,
       });
       runningDevProcesses.delete(projectId);
       return true;
     } else {
-      log(projectId, "WARN", "进程仍然存在，kill可能失败", {
+      log(projectId, "WARN", "Process still exists, kill may have failed", {
         pid: pidNum,
         method: killMethod,
       });

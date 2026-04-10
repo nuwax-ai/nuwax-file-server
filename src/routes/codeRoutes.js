@@ -22,7 +22,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, files } = req.body || {};
-      log(projectId, "INFO", "部分文件更新", {
+      log(projectId, "INFO", "Partial files update", {
         projectId,
         codeVersion,
         filesCount: files ? files.length : 0,
@@ -38,7 +38,7 @@ const routes = [
             try {
               fileOp.contents = decodeURIComponent(fileOp.contents);
             } catch (err) {
-              log(projectId, "WARN", "解码文件内容失败", {
+              log(projectId, "WARN", "Decode file content failed", {
                 fileName: fileOp.path,
                 error: err.message,
               });
@@ -62,7 +62,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, files, basePath, pid } = req.body || {};
-      log(projectId, "INFO", "提交文件", {
+      log(projectId, "INFO", "Submit files", {
         projectId,
         codeVersion,
         basePath,
@@ -70,15 +70,15 @@ const routes = [
       });
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (codeVersion === undefined || codeVersion === null) {
-        throw new ValidationError("codeVersion不能为空", {
+        throw new ValidationError("codeVersion cannot be empty", {
           field: "codeVersion",
         });
       }
       if (!Array.isArray(files)) {
-        throw new ValidationError("files必须是数组", { field: "files" });
+        throw new ValidationError("files must be an array", { field: "files" });
       }
 
       // 解码文件内容（前端使用 encodeURIComponent 编码）
@@ -88,7 +88,7 @@ const routes = [
             try {
               file.contents = decodeURIComponent(file.contents);
             } catch (err) {
-              log(projectId, "WARN", "解码文件内容失败", {
+              log(projectId, "WARN", "Decode file content failed", {
                 fileName: file.name,
                 error: err.message,
               });
@@ -122,22 +122,22 @@ const routes = [
       });
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (codeVersion === undefined || codeVersion === null) {
-        throw new ValidationError("codeVersion不能为空", {
+        throw new ValidationError("codeVersion cannot be empty", {
           field: "codeVersion",
         });
       }
       if (!file) {
-        throw new ValidationError("文件不能为空", { field: "file" });
+        throw new ValidationError("File cannot be empty", { field: "file" });
       }
       if (!filePath || typeof filePath !== "string") {
-        throw new ValidationError("文件路径不能为空", { field: "filePath" });
+        throw new ValidationError("File path cannot be empty", { field: "filePath" });
       }
 
       // 记录接收到的文件信息，用于调试
-      log(projectId, "INFO", "接收到的文件信息", {
+      log(projectId, "INFO", "Received file information", {
         originalname: file.originalname,
         mimetype: file.mimetype,
         size: file.size,
@@ -168,22 +168,22 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, rollbackTo } = req.body || {};
-      log(projectId, "INFO", "回滚版本", {
+      log(projectId, "INFO", "Rollback version", {
         projectId,
         codeVersion,
         rollbackTo,
       });
 
       if (!projectId) {
-        throw new ValidationError("项目ID不能为空", { field: "projectId" });
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
       if (codeVersion === undefined || codeVersion === null) {
-        throw new ValidationError("codeVersion不能为空", {
+        throw new ValidationError("codeVersion cannot be empty", {
           field: "codeVersion",
         });
       }
       if (rollbackTo === undefined || rollbackTo === null) {
-        throw new ValidationError("rollbackTo不能为空", {
+        throw new ValidationError("rollbackTo cannot be empty", {
           field: "rollbackTo",
         });
       }

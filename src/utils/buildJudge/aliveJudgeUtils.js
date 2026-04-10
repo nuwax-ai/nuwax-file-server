@@ -38,7 +38,7 @@ async function isProjectAlive(projectId, port, basePath, options = {}) {
         finished = true;
         // 2xx/3xx 认为服务存活
         const alive = res.statusCode >= 200 && res.statusCode < 300;
-        log(projectId, "INFO", "存活探测HTTP响应", { statusCode: res.statusCode, url: urlStr, alive });
+        log(projectId, "INFO", "Alive detection HTTP response", { statusCode: res.statusCode, url: urlStr, alive });
         // 消耗数据并结束
         res.resume();
         resolve(alive);
@@ -48,14 +48,14 @@ async function isProjectAlive(projectId, port, basePath, options = {}) {
     req.on("error", (err) => {
       if (finished) return;
       finished = true;
-      log(projectId, "WARN", "存活探测HTTP请求错误", { error: err && err.message, url: urlStr, });
+      log(projectId, "WARN", "Alive detection HTTP request error", { error: err && err.message, url: urlStr, });
       resolve(false);
     });
 
     req.setTimeout(timeoutMs, () => {
       if (finished) return;
       finished = true;
-      log(projectId, "INFO", "存活探测HTTP请求超时", { url: urlStr, timeoutMs });
+      log(projectId, "INFO", "Alive detection HTTP request timeout", { url: urlStr, timeoutMs });
       req.destroy();
       resolve(false);
     });

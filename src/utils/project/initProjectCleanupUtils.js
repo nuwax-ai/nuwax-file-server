@@ -14,28 +14,28 @@ async function deleteInitProjectFolder(initProjectDir, initProjectName) {
 
     // 检查目标路径是否存在
     if (!fs.existsSync(targetPath)) {
-      log("default", "INFO", `初始化项目文件夹不存在: ${targetPath}`);
+      log("default", "INFO", `Initialization project directory does not exist: ${targetPath}`);
       return true;
     }
 
     // 检查是否为目录
     const stats = fs.statSync(targetPath);
     if (!stats.isDirectory()) {
-      log("default", "WARN", `目标路径不是目录: ${targetPath}`);
+      log("default", "WARN", `Target path is not a directory: ${targetPath}`);
       return false;
     }
 
     // 递归删除目录
     fs.rmSync(targetPath, { recursive: true, force: true });
 
-    log("default", "INFO", `成功删除初始化项目文件夹: ${targetPath}`);
+    log("default", "INFO", `Successfully deleted initialization project directory: ${targetPath}`);
     return true;
   } catch (error) {
-    log("default", "ERROR", `删除初始化项目文件夹失败: ${error.message}`);
+    log("default", "ERROR", `Delete initialization project directory failed: ${error.message}`);
     log(
       "default",
       "ERROR",
-      `目标路径: ${path.join(initProjectDir, initProjectName)}`
+      `Target path: ${path.join(initProjectDir, initProjectName)}`
     );
     return false;
   }
@@ -51,13 +51,13 @@ async function cleanupInitProjectOnStartup(config) {
     const { INIT_PROJECT_DIR, INIT_PROJECT_NAME } = config;
 
     if (!INIT_PROJECT_DIR || !INIT_PROJECT_NAME) {
-      log("default", "WARN", "INIT_PROJECT_DIR 或 INIT_PROJECT_NAME 配置缺失");
+      log("default", "WARN", "INIT_PROJECT_DIR or INIT_PROJECT_NAME configuration missing");
       return false;
     }
 
-    log("default", "INFO", "开始清理初始化项目文件夹...");
-    log("default", "INFO", `目标目录: ${INIT_PROJECT_DIR}`);
-    log("default", "INFO", `项目名称: ${INIT_PROJECT_NAME}`);
+    log("default", "INFO", "Start cleaning initialization project directory...");
+    log("default", "INFO", `Target directory: ${INIT_PROJECT_DIR}`);
+    log("default", "INFO", `Project name: ${INIT_PROJECT_NAME}`);
 
     const success = await deleteInitProjectFolder(
       INIT_PROJECT_DIR,
@@ -65,14 +65,14 @@ async function cleanupInitProjectOnStartup(config) {
     );
 
     if (success) {
-      log("default", "INFO", "初始化项目文件夹清理完成");
+      log("default", "INFO", "Initialization project directory cleanup completed");
     } else {
-      log("default", "ERROR", "初始化项目文件夹清理失败");
+      log("default", "ERROR", "Initialization project directory cleanup failed");
     }
 
     return success;
   } catch (error) {
-    log("default", "ERROR", `清理初始化项目文件夹时发生错误: ${error.message}`);
+    log("default", "ERROR", `Clean initialization project directory failed: ${error.message}`);
     return false;
   }
 }

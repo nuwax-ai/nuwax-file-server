@@ -32,9 +32,9 @@ function loadEnvFile(envName) {
   const envFile = path.join(__dirname, "..", `env.${envName}`);
   if (fs.existsSync(envFile)) {
     dotenv.config({ path: envFile });
-    console.log(`已加载环境配置文件: env.${envName}`);
+    console.log(`Environment configuration file env.${envName} loaded`);
   } else {
-    const message = `环境配置文件 env.${envName} 不存在，请创建对应的环境配置文件后重试`;
+    const message = `Environment configuration file env.${envName} does not exist, please create the corresponding environment configuration file and try again`;
     console.error(message);
     throw new Error(message);
   }

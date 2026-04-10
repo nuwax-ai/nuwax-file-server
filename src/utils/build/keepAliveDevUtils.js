@@ -18,7 +18,7 @@ async function keepAliveDevServer(req, projectId, pid, port, basePath) {
   const pidNum = Number(pid);
   const portNum = Number(port);
 
-  log(projectId, "INFO", "开始检查开发服务器状态", {
+  log(projectId, "INFO", "Start checking development server status", {
     projectId,
     pid: pidNum,
     port: portNum,
@@ -28,7 +28,7 @@ async function keepAliveDevServer(req, projectId, pid, port, basePath) {
   // 检查项目是否存活
   const projectAlive = await isProjectAlive(projectId, portNum, basePath);
   if (projectAlive) {
-    log(projectId, "INFO", "dev服务器存活，直接返回成功", {
+    log(projectId, "INFO", "Development server is alive, returning success", {
       projectId,
       pid: pidNum,
       port: portNum,
@@ -37,14 +37,14 @@ async function keepAliveDevServer(req, projectId, pid, port, basePath) {
 
     return {
       success: true,
-      message: "开发服务器存活",
+      message: "Development server is alive",
       projectId,
       pid: pidNum,
       port: portNum,
     };
   }
 
-  log(projectId, "INFO", "dev服务器不存活，重新启动", {
+  log(projectId, "INFO", "Development server is not alive, restarting", {
     projectId,
     pid: pidNum,
     port: portNum,

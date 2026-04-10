@@ -5,11 +5,11 @@ import portPool from "./portPool.js";
 
 /**
  * 额外参数工具类
- * 封装端口参数、basePath 参数和环境变量的处理逻辑
+ * 封装 port 参数、basePath 参数和 environment variables 的处理逻辑
  */
 class ExtraArgsUtils {
   /**
-   * 处理启动参数和环境变量
+   * 处理启动参数和 environment variables
    * @param {Object} options 配置选项
    * @param {string} options.devScript dev脚本内容
    * @param {string} options.projectId 项目ID
@@ -44,7 +44,7 @@ class ExtraArgsUtils {
       // 获取 projectId 用于日志（从 query 或 body 中）
       const projectId = (req.query && req.query.projectId) || (req.body && req.body.projectId) || "unknown";
       if (basePath) {
-        log(projectId, "INFO", "读取到 basePath", { 
+        log(projectId, "INFO", "Read basePath", { 
           basePath: basePath,
           source: req.body && req.body.basePath ? "body" : "query"
         });

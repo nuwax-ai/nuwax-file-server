@@ -235,7 +235,7 @@ function logger(req, res, next) {
   req.requestId = requestId;
 
   // 记录请求开始
-  const requestLogMessage = `${req.method}-[${req.requestId}] -请求 ${
+  const requestLogMessage = `${req.method}-[${req.requestId}] -Request ${
     req.originalUrl || req.url
   } -`;
   const requestLogMeta = {
@@ -268,7 +268,7 @@ function logger(req, res, next) {
     const level =
       res.statusCode >= 400 ? "ERROR" : res.statusCode >= 300 ? "WARN" : "INFO";
 
-    const responseLogMessage = `${req.method}-[${req.requestId}] -响应(${
+    const responseLogMessage = `${req.method}-[${req.requestId}] -Response(${
       res.statusCode
     }) ${req.originalUrl || req.url} - `;
     const responseLogMeta = {
@@ -288,7 +288,7 @@ function logger(req, res, next) {
       const endTime = Date.now();
       const responseTime = endTime - startTime;
 
-      const closeLogMessage = `${req.method}-[${req.requestId}] -响应(${
+      const closeLogMessage = `${req.method}-[${req.requestId}] -Response(${
         res.statusCode
       }) ${req.originalUrl || req.url} - Connection closed`;
       const closeLogMeta = {

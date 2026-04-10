@@ -147,9 +147,9 @@ function formatErrorResponse(error, requestId = null) {
     code: error.code || (error.details && error.details.code) || "UNKNOWN_ERROR",
     error: {
       type: error.type || ERROR_TYPES.UNKNOWN_ERROR,
-      message: error.message || "未知错误",
+      message: error.message || "Unknown error",
       timestamp:
-        error.timestamp || getCSTTimestampString(), // 东八区时间
+        error.timestamp || getCSTTimestampString(), // CST time
       requestId: requestId,
     },
   };
@@ -184,42 +184,42 @@ function errorHandler(err, req, res, next) {
         const maxMb =
           Math.round((config.UPLOAD_MAX_FILE_SIZE_BYTES / 1024 / 1024) * 10) /
           10;
-        error = new ValidationError("文件大小超出限制", {
+        error = new ValidationError("File size exceeds limit", {
           maxSize: `${maxMb}MB`,
         });
       } else if (error.code === "LIMIT_FILE_COUNT") {
-        error = new ValidationError("文件数量超出限制");
+        error = new ValidationError("File count exceeds limit");
       } else if (error.code === "LIMIT_UNEXPECTED_FILE") {
         error = new ValidationError(
-          "文件字段名错误，请使用 'file' 字段上传文件",
+          "File field name error, please use 'file' field to upload file",
           {
             expectedField: "file",
             receivedField: error.field,
           }
         );
       } else if (error.code === "LIMIT_PART_COUNT") {
-        error = new ValidationError("表单字段数量超出限制");
+        error = new ValidationError("Form field count exceeds limit");
       } else if (error.code === "LIMIT_FIELD_KEY") {
-        error = new ValidationError("字段名长度超出限制");
+        error = new ValidationError("Field name length exceeds limit");
       } else if (error.code === "LIMIT_FIELD_VALUE") {
-        error = new ValidationError("字段值长度超出限制");
+        error = new ValidationError("Field value length exceeds limit");
       } else if (error.code === "LIMIT_FIELD_COUNT") {
-        error = new ValidationError("表单字段数量超出限制");
+        error = new ValidationError("Form field count exceeds limit");
       } else {
-        error = new ValidationError("文件上传错误: " + error.message, {
+        error = new ValidationError("File upload error: " + error.message, {
           code: error.code,
           field: error.field,
         });
       }
     } else if (error.code === "ENOENT") {
-      error = new ResourceError("文件或目录不存在");
+      error = new ResourceError("File or directory not found");
     } else if (error.code === "EACCES") {
-      error = new PermissionError("权限不足");
+      error = new PermissionError("Permission denied");
     } else if (error.code === "ECONNREFUSED") {
-      error = new SystemError("连接被拒绝", { code: error.code });
+      error = new SystemError("Connection refused", { code: error.code });
     } else {
       // 未知错误转换为系统错误
-      error = new SystemError(error.message || "系统内部错误", {
+      error = new SystemError(error.message || "Internal server error", {
         originalError: error.name,
         code: error.code,
       });
@@ -228,7 +228,7 @@ function errorHandler(err, req, res, next) {
 
   // 记录错误日志
   const logLevel = error.statusCode >= 500 ? "ERROR" : "WARN";
-  log(projectId, logLevel, `错误处理: ${error.message}`, {
+  log(projectId, logLevel, `Error handling: ${error.message}`, {
     requestId,
     errorType: error.type,
     statusCode: error.statusCode,
@@ -247,10 +247,10 @@ function errorHandler(err, req, res, next) {
 
 // 404处理中间件
 function notFoundHandler(req, res, next) {
-  const error = new ResourceError(`路径不存在: ${req.originalUrl}`);
+  const error = new ResourceError(`Path not found: ${req.originalUrl}`);
   const requestId = req.requestId || "unknown";
 
-  log("default", "WARN", `404错误: ${req.originalUrl}`, {
+  log("default", "WARN", `404 error: ${req.originalUrl}`, {
     requestId,
     method: req.method,
     ip: req.ip,

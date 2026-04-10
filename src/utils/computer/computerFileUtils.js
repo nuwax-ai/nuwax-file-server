@@ -100,7 +100,7 @@ async function getFileList(userId, cId, proxyPath) {
   
 
   if (!fs.existsSync(targetDir)) {
-    log(logId, "INFO", "目录不存在，返回空列表", {
+    log(logId, "INFO", "Directory does not exist, returning empty list", {
       targetDir,
       userId: normalizedUserId,
       cId: normalizedCId,
@@ -108,7 +108,7 @@ async function getFileList(userId, cId, proxyPath) {
     return { files: [] };
   }
 
-  log(logId, "DEBUG", "开始获取用户文件列表", {
+  log(logId, "DEBUG", "Start getting user file list", {
     targetDir,
     userId: normalizedUserId,
     cId: normalizedCId,
@@ -117,7 +117,7 @@ async function getFileList(userId, cId, proxyPath) {
   try {
     const files = await traverseDirectory(targetDir, targetDir, logId, proxyPath);
 
-    log(logId, "INFO", "用户文件列表获取完成", {
+    log(logId, "INFO", "User file list obtained successfully", {
       fileCount: files.length,
       targetDir,
       userId: normalizedUserId,
@@ -127,7 +127,7 @@ async function getFileList(userId, cId, proxyPath) {
 
     return { files };
   } catch (error) {
-    log(logId, "ERROR", "获取用户文件列表失败", {
+    log(logId, "ERROR", "Failed to get user file list", {
       targetDir,
       userId: normalizedUserId,
       cId: normalizedCId,
@@ -135,7 +135,7 @@ async function getFileList(userId, cId, proxyPath) {
       elapsedMs: Date.now() - startTime,
     });
 
-    throw new SystemError(`获取文件列表失败: ${error.message}`, {
+    throw new SystemError(`Failed to get file list: ${error.message}`, {
       targetDir,
       originalError: error.message,
     });
@@ -155,13 +155,13 @@ async function updateFiles(userId, cId, files) {
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!userId) {
-    throw new ValidationError("userId 不能为空", { field: "userId" });
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
   if (!cId) {
-    throw new ValidationError("cId 不能为空", { field: "cId" });
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
   if (!Array.isArray(files)) {
-    throw new ValidationError("files必须是数组", { field: "files" });
+    throw new ValidationError("files must be an array", { field: "files" });
   }
 
   const normalizedUserId = String(userId);
@@ -176,12 +176,12 @@ async function updateFiles(userId, cId, files) {
   for (let i = 0; i < files.length; i++) {
     const fileOp = files[i];
     if (!fileOp || typeof fileOp.operation !== "string") {
-      throw new ValidationError(`files[${i}].operation 不能为空`, {
+      throw new ValidationError(`files[${i}].operation cannot be empty`, {
         field: `files[${i}].operation`,
       });
     }
     if (!fileOp.name || typeof fileOp.name !== "string") {
-      throw new ValidationError(`files[${i}].name 不能为空`, {
+      throw new ValidationError(`files[${i}].name cannot be empty`, {
         field: `files[${i}].name`,
       });
     }
@@ -189,7 +189,7 @@ async function updateFiles(userId, cId, files) {
     const operation = fileOp.operation.toLowerCase();
     if (!["create", "delete", "rename", "modify"].includes(operation)) {
       throw new ValidationError(
-        `files[${i}].operation 必须是 create、delete、rename 或 modify 之一`,
+        `files[${i}].operation must be one of create, delete, rename or modify`,
         { field: `files[${i}].operation` }
       );
     }
@@ -197,7 +197,7 @@ async function updateFiles(userId, cId, files) {
     // 验证特定操作所需的字段
     if (operation === "rename" && !fileOp.renameFrom) {
       throw new ValidationError(
-        `files[${i}].renameFrom 不能为空（重命名操作需要）`,
+        `files[${i}].renameFrom cannot be empty (rename operation requires)`,
         { field: `files[${i}].renameFrom` }
       );
     }
@@ -205,14 +205,14 @@ async function updateFiles(userId, cId, files) {
     if (operation === "modify" && fileOp.isDir !== true) {
       if (typeof fileOp.contents !== "string") {
         throw new ValidationError(
-          `files[${i}].contents 必须是字符串（修改操作需要）`,
+          `files[${i}].contents must be a string (modify operation requires)`,
           { field: `files[${i}].contents` }
         );
       }
     }
   }
 
-  log(logId, "DEBUG", "开始更新用户文件", {
+  log(logId, "DEBUG", "Start updating user files", {
     userId: normalizedUserId,
     cId: normalizedCId,
     filesCount: files.length,
@@ -234,7 +234,7 @@ async function updateFiles(userId, cId, files) {
         !resolvedTargetPath.startsWith(resolvedTargetDir + path.sep) &&
         resolvedTargetPath !== resolvedTargetDir
       ) {
-        log(logId, "WARN", "文件路径不安全，跳过", {
+        log(logId, "WARN", "File path is not secure, skipping", {
           filePath: normalizedPath,
           resolvedPath: resolvedTargetPath,
         });
@@ -249,18 +249,18 @@ async function updateFiles(userId, cId, files) {
             if (fs.existsSync(targetPath)) {
               const stat = await fs.promises.stat(targetPath);
               if (stat.isFile()) {
-                throw new ValidationError("无法创建目录，已存在同名文件", {
+                throw new ValidationError("Cannot create directory, file with the same name already exists", {
                   filePath: normalizedPath,
                 });
               }
               // 目录已存在，跳过创建
-              log(logId, "INFO", "目录已存在，跳过创建", {
+              log(logId, "INFO", "Directory already exists, skipping creation", {
                 filePath: normalizedPath,
               });
               break;
             }
             await fs.promises.mkdir(targetPath, { recursive: true });
-            log(logId, "INFO", "目录创建成功", {
+            log(logId, "INFO", "Directory created successfully", {
               filePath: normalizedPath,
             });
             break;
@@ -270,12 +270,12 @@ async function updateFiles(userId, cId, files) {
           if (fs.existsSync(targetPath)) {
             const stat = await fs.promises.stat(targetPath);
             if (stat.isDirectory()) {
-              throw new ValidationError("无法创建文件，已存在同名目录", {
+              throw new ValidationError("Cannot create file, directory with the same name already exists", {
                 filePath: normalizedPath,
               });
             }
             // 文件已存在，跳过创建
-            log(logId, "INFO", "文件已存在，跳过创建", {
+            log(logId, "INFO", "File already exists, skipping creation", {
               filePath: normalizedPath,
             });
             break;
@@ -283,7 +283,7 @@ async function updateFiles(userId, cId, files) {
           await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
           const contents = fileOp.contents || "";
           await fs.promises.writeFile(targetPath, contents, "utf8");
-          log(logId, "INFO", "文件创建成功", {
+          log(logId, "INFO", "File created successfully", {
             filePath: normalizedPath,
           });
           break;
@@ -296,18 +296,18 @@ async function updateFiles(userId, cId, files) {
             if (stat.isDirectory()) {
               // 删除目录（递归删除）
               await fs.promises.rm(targetPath, { recursive: true, force: true });
-              log(logId, "INFO", "目录删除成功", {
+              log(logId, "INFO", "Directory deleted successfully", {
                 filePath: normalizedPath,
               });
             } else {
               // 删除文件
               await fs.promises.unlink(targetPath);
-              log(logId, "INFO", "文件删除成功", {
+              log(logId, "INFO", "File deleted successfully", {
                 filePath: normalizedPath,
               });
             }
           } else {
-            log(logId, "WARN", "要删除的文件或目录不存在", {
+            log(logId, "WARN", "The file or directory to be deleted does not exist", {
               filePath: normalizedPath,
             });
           }
@@ -318,7 +318,7 @@ async function updateFiles(userId, cId, files) {
           // 重命名文件或目录
           const renameFrom = fileOp.renameFrom;
           if (!renameFrom || typeof renameFrom !== "string") {
-            log(logId, "WARN", "重命名操作缺少 renameFrom", {
+            log(logId, "WARN", "Rename operation missing renameFrom", {
               filePath: normalizedPath,
             });
             break;
@@ -335,7 +335,7 @@ async function updateFiles(userId, cId, files) {
             !resolvedSourcePath.startsWith(resolvedTargetDir + path.sep) &&
             resolvedSourcePath !== resolvedTargetDir
           ) {
-            log(logId, "WARN", "源路径不安全，跳过重命名", {
+            log(logId, "WARN", "Source path is not secure, skipping rename", {
               sourcePath: normalizedFrom,
               targetPath: normalizedPath,
             });
@@ -352,12 +352,12 @@ async function updateFiles(userId, cId, files) {
             });
             
             await fs.promises.rename(sourcePath, targetPath);
-            log(logId, "INFO", isDirectory ? "目录重命名成功" : "文件重命名成功", {
+            log(logId, "INFO", isDirectory ? "Directory renamed successfully" : "File renamed successfully", {
               sourcePath: normalizedFrom,
               targetPath: normalizedPath,
             });
           } else {
-            log(logId, "WARN", "要重命名的文件或目录不存在", {
+            log(logId, "WARN", "The file or directory to be renamed does not exist", {
               sourcePath: normalizedFrom,
             });
           }
@@ -367,7 +367,7 @@ async function updateFiles(userId, cId, files) {
         case "modify": {
           // 修改文件：直接写入新内容
           if (!fs.existsSync(targetPath)) {
-            log(logId, "WARN", "要修改的文件不存在", {
+            log(logId, "WARN", "The file to be modified does not exist", {
               filePath: normalizedPath,
             });
             break;
@@ -376,7 +376,7 @@ async function updateFiles(userId, cId, files) {
           // 如果是目录，跳过修改
           const modifyStat = await fs.promises.stat(targetPath);
           if (modifyStat.isDirectory()) {
-            log(logId, "INFO", "目标是目录，跳过修改", {
+            log(logId, "INFO", "The target is a directory, skipping modification", {
               filePath: normalizedPath,
             });
             break;
@@ -393,7 +393,7 @@ async function updateFiles(userId, cId, files) {
 
           // 若内容完全一致，不覆写文件
           if (existingContent === newContentStr) {
-            log(logId, "INFO", "文件内容无变化，跳过写入", {
+            log(logId, "INFO", "File content has no changes, skipping write", {
               filePath: normalizedPath,
             });
             break;
@@ -401,14 +401,14 @@ async function updateFiles(userId, cId, files) {
 
           // 写入修改后的内容
           await fs.promises.writeFile(targetPath, newContentStr, "utf8");
-          log(logId, "INFO", "文件修改成功", {
+          log(logId, "INFO", "File modified successfully", {
             filePath: normalizedPath,
           });
           break;
         }
 
         default: {
-          log(logId, "WARN", "不支持的操作类型", {
+          log(logId, "WARN", "Unsupported operation type", {
             operation,
             filePath: normalizedPath,
           });
@@ -417,7 +417,7 @@ async function updateFiles(userId, cId, files) {
       }
     }
 
-    log(logId, "INFO", "用户文件更新成功", {
+    log(logId, "INFO", "User files updated successfully", {
       userId: normalizedUserId,
       cId: normalizedCId,
       filesCount: files.length,
@@ -426,20 +426,20 @@ async function updateFiles(userId, cId, files) {
 
     return {
       success: true,
-      message: "用户文件更新成功",
+      message: "User files updated successfully",
       userId: normalizedUserId,
       cId: normalizedCId,
       filesCount: files.length,
     };
   } catch (error) {
-    log(logId, "ERROR", "用户文件更新失败", {
+    log(logId, "ERROR", "User files updated failed", {
       userId: normalizedUserId,
       cId: normalizedCId,
       error: error.message,
       elapsedMs: Date.now() - startTime,
     });
 
-    throw new SystemError(`用户文件更新失败: ${error.message}`, {
+    throw new SystemError(`User files updated failed: ${error.message}`, {
       userId: normalizedUserId,
       cId: normalizedCId,
       originalError: error.message,
@@ -461,16 +461,16 @@ async function uploadFile(userId, cId, file, filePath) {
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!userId) {
-    throw new ValidationError("userId 不能为空", { field: "userId" });
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
   if (!cId) {
-    throw new ValidationError("cId 不能为空", { field: "cId" });
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
   if (!file) {
-    throw new ValidationError("文件不能为空", { field: "file" });
+    throw new ValidationError("file cannot be empty", { field: "file" });
   }
   if (!filePath || typeof filePath !== "string") {
-    throw new ValidationError("文件路径不能为空", { field: "filePath" });
+    throw new ValidationError("filePath cannot be empty", { field: "filePath" });
   }
 
   const normalizedUserId = String(userId);
@@ -492,7 +492,7 @@ async function uploadFile(userId, cId, file, filePath) {
     !resolvedTargetPath.startsWith(resolvedTargetDir + path.sep) &&
     resolvedTargetPath !== resolvedTargetDir
   ) {
-    throw new ValidationError("文件路径不安全，不能超出用户目录", {
+    throw new ValidationError("File path is not secure, cannot exceed user directory", {
       field: "filePath",
       providedPath: filePath,
       resolvedPath: resolvedTargetPath,
@@ -511,14 +511,14 @@ async function uploadFile(userId, cId, file, filePath) {
       // 如果是文本文件
       await fs.promises.writeFile(targetPath, file.contents, "utf8");
     } else {
-      throw new ValidationError("文件内容格式不正确", {
+      throw new ValidationError("File content format is incorrect", {
         field: "file",
         hasBuffer: !!file.buffer,
         hasContents: typeof file.contents,
       });
     }
 
-    log(logId, "INFO", "文件上传成功", {
+    log(logId, "INFO", "File uploaded successfully", {
       userId: normalizedUserId,
       cId: normalizedCId,
       filePath: normalizedPath,
@@ -533,7 +533,7 @@ async function uploadFile(userId, cId, file, filePath) {
 
     return {
       success: true,
-      message: "文件上传成功",
+      message: "File uploaded successfully",
       fileSize: file.buffer
         ? file.buffer.length
         : file.contents
@@ -541,7 +541,7 @@ async function uploadFile(userId, cId, file, filePath) {
         : 0,
     };
   } catch (error) {
-    log(logId, "ERROR", "文件上传失败", {
+    log(logId, "ERROR", "File upload failed", {
       userId: normalizedUserId,
       cId: normalizedCId,
       filePath: normalizedPath,
@@ -549,7 +549,7 @@ async function uploadFile(userId, cId, file, filePath) {
       elapsedMs: Date.now() - startTime,
     });
 
-    throw new SystemError(`文件上传失败: ${error.message}`, {
+    throw new SystemError(`File upload failed: ${error.message}`, {
       userId: normalizedUserId,
       cId: normalizedCId,
       filePath: normalizedPath,
@@ -575,25 +575,25 @@ async function uploadFiles(userId, cId, files, filePaths) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
-    throw new ValidationError("userId 不能为空", { field: "userId" });
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
   if (!cId) {
-    throw new ValidationError("cId 不能为空", { field: "cId" });
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
   if (!Array.isArray(files)) {
-    throw new ValidationError("files 必须是数组", { field: "files" });
+    throw new ValidationError("files must be an array", { field: "files" });
   }
   if (!Array.isArray(filePaths)) {
-    throw new ValidationError("filePaths 必须是数组", { field: "filePaths" });
+    throw new ValidationError("filePaths must be an array", { field: "filePaths" });
   }
   if (files.length !== filePaths.length) {
     throw new ValidationError(
-      `文件数量 (${files.length}) 与路径数量 (${filePaths.length}) 不匹配`,
+      `File count (${files.length}) does not match path count (${filePaths.length})`,
       { field: "filePaths" }
     );
   }
 
-  log(logId, "DEBUG", "开始批量上传文件", {
+  log(logId, "DEBUG", "Start batch uploading files", {
     userId,
     cId,
     filesCount: files.length,
@@ -608,20 +608,20 @@ async function uploadFiles(userId, cId, files, filePaths) {
       const filePath = filePaths[i];
 
       if (!file) {
-        log(logId, "WARN", "批量上传中遇到空文件对象，跳过", {
+        log(logId, "WARN", "Empty file object encountered in batch upload, skipping", {
           index: i,
           filePath,
         });
         results.push({
           success: false,
           filePath,
-          error: "文件对象为空",
+          error: "Empty file object",
         });
         continue;
       }
 
       if (!filePath || typeof filePath !== "string") {
-        log(logId, "WARN", "批量上传中文件路径无效，跳过", {
+        log(logId, "WARN", "Invalid file path in batch upload, skipping", {
           index: i,
           originalname: file.originalname,
         });
@@ -629,7 +629,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
           success: false,
           filePath: filePath || "",
           originalname: file.originalname,
-          error: "文件路径无效",
+          error: "Invalid file path",
         });
         continue;
       }
@@ -643,7 +643,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
           ...result,
         });
       } catch (error) {
-        log(logId, "ERROR", "批量上传中单个文件上传失败", {
+        log(logId, "ERROR", "Single file upload failed in batch upload", {
           filePath,
           originalname: file.originalname,
           error: error.message,
@@ -660,7 +660,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
     const successCount = results.filter((r) => r.success).length;
     const failCount = results.filter((r) => !r.success).length;
 
-    log(logId, "INFO", "批量上传文件完成", {
+    log(logId, "INFO", "Batch upload files completed", {
       userId,
       cId,
       totalCount: files.length,
@@ -671,21 +671,21 @@ async function uploadFiles(userId, cId, files, filePaths) {
 
     return {
       success: true,
-      message: "批量上传完成",
+      message: "Batch upload completed",
       totalCount: files.length,
       successCount,
       failCount,
       results,
     };
   } catch (error) {
-    log(logId, "ERROR", "批量上传文件失败", {
+    log(logId, "ERROR", "Batch upload files failed", {
       userId,
       cId,
       error: error.message,
       elapsedMs: Date.now() - startTime,
     });
 
-    throw new SystemError(`批量上传文件失败: ${error.message}`, {
+    throw new SystemError(`Batch upload files failed: ${error.message}`, {
       userId,
       cId,
       originalError: error.message,
@@ -714,13 +714,13 @@ async function downloadAllFiles(userId, cId) {
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!userId) {
-    throw new ValidationError("userId 不能为空", { field: "userId" });
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
   if (!cId) {
-    throw new ValidationError("cId 不能为空", { field: "cId" });
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
   if (!workspaceRoot) {
-    throw new SystemError("COMPUTER_WORKSPACE_DIR 未配置，无法创建压缩包");
+    throw new SystemError("COMPUTER_WORKSPACE_DIR is not configured, cannot create zip");
   }
 
   const normalizedUserId = String(userId);
@@ -731,7 +731,7 @@ async function downloadAllFiles(userId, cId) {
     // 目录不存在时，返回一个仅包含顶层目录的空压缩包
     const zipFileName = `${normalizedUserId}_${normalizedCId}.zip`;
 
-    log(logId, "WARN", "工作目录不存在，返回空压缩包", {
+    log(logId, "WARN", "Workspace directory does not exist, returning empty zip", {
       targetDir,
       userId: normalizedUserId,
       cId: normalizedCId,
@@ -750,12 +750,12 @@ async function downloadAllFiles(userId, cId) {
 
     archive.on("warning", (err) => {
       if (err.code === "ENOENT") {
-        log(logId, "WARN", "创建空压缩包时遇到文件问题", {
+        log(logId, "WARN", "Encountered file problem when creating empty zip", {
           message: err.message,
           code: err.code,
         });
       } else {
-        log(logId, "ERROR", "创建空压缩包时发生警告", {
+        log(logId, "ERROR", "Encountered warning when creating empty zip", {
           message: err.message,
           code: err.code,
         });
@@ -764,7 +764,7 @@ async function downloadAllFiles(userId, cId) {
     });
 
     archive.on("error", (err) => {
-      log(logId, "ERROR", "创建空压缩包失败", {
+      log(logId, "ERROR", "Failed to create empty zip", {
         message: err.message,
       });
     });
@@ -774,7 +774,7 @@ async function downloadAllFiles(userId, cId) {
 
   const zipFileName = `${normalizedUserId}_${normalizedCId}.zip`;
 
-  log(logId, "DEBUG", "开始创建工作目录压缩包", {
+  log(logId, "DEBUG", "Start creating workspace directory zip", {
     targetDir,
     zipFileName,
   });
@@ -827,7 +827,7 @@ async function downloadAllFiles(userId, cId) {
         }
       } catch (error) {
         // 如果无法获取文件信息（如文件不存在、权限问题等），记录警告但继续处理
-        log(logId, "WARN", "检测链接文件时出错，跳过该文件", {
+        log(logId, "WARN", "Error occurred when detecting link file, skipping", {
           filePath: name,
           error: error.message,
         });
@@ -841,12 +841,12 @@ async function downloadAllFiles(userId, cId) {
   archive.on("warning", (err) => {
     // 一些非致命错误（如文件不存在）记录日志即可
     if (err.code === "ENOENT") {
-      log(logId, "WARN", "创建压缩包时遇到文件问题", {
+      log(logId, "WARN", "Encountered file problem when creating zip", {
         message: err.message,
         code: err.code,
       });
     } else {
-      log(logId, "ERROR", "创建压缩包时发生警告", {
+      log(logId, "ERROR", "Encountered warning when creating zip", {
         message: err.message,
         code: err.code,
       });
@@ -855,14 +855,14 @@ async function downloadAllFiles(userId, cId) {
   });
 
   archive.on("error", (err) => {
-    log(logId, "ERROR", "创建压缩包失败", {
+    log(logId, "ERROR", "Failed to create zip", {
       message: err.message,
       elapsedMs: Date.now() - startTime,
     });
   });
 
   archive.on("end", () => {
-    log(logId, "INFO", "工作目录压缩包创建完成", {
+    log(logId, "INFO", "Workspace directory zip created successfully", {
       targetDir,
       zipFileName,
       elapsedMs: Date.now() - startTime,

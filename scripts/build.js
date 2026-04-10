@@ -105,7 +105,7 @@ async function build() {
   const oldSrcDir = path.join(distRoot, "src");
   if (fs.existsSync(oldSrcDir)) {
     fs.rmSync(oldSrcDir, { recursive: true, force: true });
-    console.log("[build] 已删除旧 src/ 目录");
+    console.log("[build] Old src/ directory deleted");
   }
 
   // ---------- 1. 打包 CLI ----------
@@ -121,7 +121,7 @@ async function build() {
     minify: true,
     sourcemap: false,
   });
-  console.log("[build] 已输出 dist/cli.js");
+  console.log("[build] dist/cli.js output");
 
   // ---------- 2. 复制 src 下的子目录到 dist 根目录 ----------
   // appConfig/* -> dist/appConfig/*  应用配置（环境变量等）
@@ -140,7 +140,7 @@ async function build() {
     const srcPath = path.join(srcRoot, subdir);
     const destPath = path.join(distRoot, subdir);
     copyDirContentsSync(srcPath, destPath);
-    console.log(`[build] 已复制 ${subdir}/ -> dist/${subdir}/`);
+    console.log(`[build] ${subdir}/ -> dist/${subdir}/ copied`);
   }
 
   // 单独复制 src/config/ 下的 swagger 相关文件（移除遗留的 dist/config/index.js，应用配置已迁至 appConfig）
@@ -149,13 +149,13 @@ async function build() {
   const legacyConfigIndex = path.join(destConfigPath, "index.js");
   if (fs.existsSync(legacyConfigIndex)) fs.rmSync(legacyConfigIndex);
   copyDirContentsSync(srcConfigPath, destConfigPath);
-  console.log(`[build] 已复制 config/ -> dist/config/`);
+  console.log(`[build] config/ -> dist/config/ copied`);
 
   // 单独复制 server.js 到 dist 根目录（无需修改导入路径，源码已用 ./appConfig）
   const serverJsSrc = path.join(srcRoot, "server.js");
   const serverJsDest = path.join(distRoot, "server.js");
   copyFileSync(serverJsSrc, serverJsDest);
-  console.log("[build] 已复制 server.js -> dist/");
+  console.log("[build] server.js -> dist/ copied");
 
   // ---------- 3. 压缩 dist 下所有 JS 文件（CLI 除外） ----------
   const distJsFiles = findJsFiles(distRoot);
@@ -177,7 +177,7 @@ async function build() {
     totalSaved += saved;
     console.log(`[build] 压缩 ${path.relative(distRoot, file)}: ${(originalSize / 1024).toFixed(1)}KB -> ${(compressedSize / 1024).toFixed(1)}KB`);
   }
-  console.log(`[build] 压缩完成，共节省 ${(totalSaved / 1024).toFixed(1)}KB`);
+  console.log(`[build] Compression completed, saving ${(totalSaved / 1024).toFixed(1)}KB`);
 
   // ---------- 4. 复制 env 文件（从 src/ 到 dist/） ----------
   // 发布包需包含 development + production，以便 CLI --env production 能正常启动
@@ -186,7 +186,7 @@ async function build() {
     const src = path.join(srcRoot, envFile);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(distRoot, envFile));
-      console.log(`[build] 已复制 ${envFile} -> dist/`);
+      console.log(`[build] ${envFile} -> dist/ copied`);
     }
   }
 
@@ -196,7 +196,7 @@ async function build() {
     for (const envFile of envFiles) {
       if (!envToShip.includes(envFile)) {
         fs.copyFileSync(path.join(srcRoot, envFile), path.join(distRoot, envFile));
-        console.log(`[build] 已复制 ${envFile} -> dist/`);
+        console.log(`[build] ${envFile} -> dist/ copied`);
       }
     }
   }
@@ -204,10 +204,10 @@ async function build() {
   // ---------- 5. 输出启动说明 ----------
   console.log("");
   console.log("[build] =========================================");
-  console.log("[build] 构建完成！");
+  console.log("[build] Build completed!");
   console.log("[build] =========================================");
-  console.log("[build] 启动服务: cd dist && node server.js");
-  console.log("[build] 或使用 CLI: node cli.js start");
+  console.log("[build] Start service: cd dist && node server.js");
+  console.log("[build] Or use CLI: node cli.js start");
   console.log("");
 }
 

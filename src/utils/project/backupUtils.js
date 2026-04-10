@@ -52,9 +52,9 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
   await fs.promises.mkdir(tempDir, { recursive: true });
 
   try {
-    log(projectId, "DEBUG", "开始复制项目文件到临时目录", { projectPath, tempDir });
+    log(projectId, "DEBUG", "Start copying project files to temporary directory", { projectPath, tempDir });
     await copyDirectoryFiltered(projectPath, tempDir);
-    log(projectId, "DEBUG", "项目文件复制完成，开始压缩", { tempDir, outZipPath });
+    log(projectId, "DEBUG", "Project files copied, start compressing", { tempDir, outZipPath });
 
     // 使用 archiver 进行压缩，避免依赖系统 zip
     await fs.promises.mkdir(path.dirname(outZipPath), { recursive: true });
@@ -65,7 +65,7 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
       output.on("close", () => resolve());
       output.on("error", (err) =>
         reject(
-          new FileError("备份zip压缩失败", {
+          new FileError("Backup zip compression failed", {
             projectId,
             projectPath,
             outZipPath,
@@ -77,13 +77,13 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
       archive.on("warning", (err) => {
         if (err && err.code === "ENOENT") {
           // 记录告警但不失败
-          log(projectId, "WARN", `压缩告警: ${err.message}`, {
+          log(projectId, "WARN", `Compression warning: ${err.message}`, {
             projectId,
             outZipPath,
           });
         } else if (err) {
           reject(
-            new FileError("备份zip压缩失败", {
+            new FileError("Backup zip compression failed", {
               projectId,
               projectPath,
               outZipPath,
@@ -95,7 +95,7 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
 
       archive.on("error", (err) =>
         reject(
-          new FileError("备份zip压缩失败", {
+          new FileError("Backup zip compression failed", {
             projectId,
             projectPath,
             outZipPath,
@@ -109,7 +109,7 @@ async function backupProjectToZip(projectId, projectPath, outZipPath) {
       archive.finalize();
     });
 
-    log(projectId, "INFO", `项目已备份: ${outZipPath}`, {
+    log(projectId, "INFO", `Project backup completed: ${outZipPath}`, {
       projectId,
       outZipPath,
       elapsedMs: Date.now() - startTime,
@@ -140,7 +140,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
   const excludeFileNames = new Set(config.BACKUP_TRAVERSE_EXCLUDE_FILES || []);
   
   // 清空目录内容，但保留被排除的目录和文件
-  log(projectId, "DEBUG", "开始清空项目目录（保留排除项）", { projectPath });
+  log(projectId, "DEBUG", "Start clearing project directory (keep excluded items)", { projectPath });
   const entries = await fs.promises.readdir(projectPath, {
     withFileTypes: true,
   });
@@ -166,12 +166,12 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
   }
 
   // 使用 yauzl 解压 zip 到项目目录，避免依赖系统 unzip
-  log(projectId, "DEBUG", "开始从 zip 恢复项目文件", { zipPath, projectPath });
+  log(projectId, "DEBUG", "Start restoring project files from zip", { zipPath, projectPath });
   await new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: true }, (openErr, zipFile) => {
       if (openErr || !zipFile) {
         return reject(
-          new FileError("回滚解压失败", {
+          new FileError("Rollback unzip failed", {
             projectId,
             projectPath,
             zipPath,
@@ -206,7 +206,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
             .catch((e) => {
               zipFile.close();
               reject(
-                new FileError("回滚解压失败", {
+                new FileError("Rollback unzip failed", {
                   projectId,
                   projectPath,
                   zipPath,
@@ -225,7 +225,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
           if (streamErr || !readStream) {
             zipFile.close();
             return reject(
-              new FileError("回滚解压失败", {
+              new FileError("Rollback unzip failed", {
                 projectId,
                 projectPath,
                 zipPath,
@@ -243,7 +243,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
               writeStream.on("error", (e) => {
                 zipFile.close();
                 reject(
-                  new FileError("回滚解压失败", {
+                  new FileError("Rollback unzip failed", {
                     projectId,
                     projectPath,
                     zipPath,
@@ -258,7 +258,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
             .catch((e) => {
               zipFile.close();
               reject(
-                new FileError("回滚解压失败", {
+                new FileError("Rollback unzip failed", {
                   projectId,
                   projectPath,
                   zipPath,
@@ -280,7 +280,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
       zipFile.on("error", (e) => {
         zipFile.close();
         reject(
-          new FileError("回滚解压失败", {
+          new FileError("Rollback unzip failed", {
             projectId,
             projectPath,
             zipPath,
@@ -294,7 +294,7 @@ async function restoreProjectFromZip(projectId, projectPath, zipPath) {
     });
   });
 
-  log(projectId, "INFO", `项目已从备份恢复: ${zipPath}`, {
+  log(projectId, "INFO", `Project restored from backup: ${zipPath}`, {
     projectId,
     projectPath,
     zipPath,

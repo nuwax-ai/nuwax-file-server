@@ -1,8 +1,8 @@
 {
   "name": "nuwax-file-server",
   "displayName": "nuwax-file-server",
-  "version": "1.2.4",
-  "description": "跨平台的文件服务部署工具，支持 start/stop/restart 命令行操作",
+  "version": "1.2.5",
+  "description": "Cross-platform file service deployment tool with start/stop/restart CLI commands",
   "type": "module",
   "main": "index.js",
   "bin": {

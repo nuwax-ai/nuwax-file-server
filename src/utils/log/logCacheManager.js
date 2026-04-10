@@ -92,7 +92,7 @@ class LogCacheManager {
     // 检查文件大小限制（字节）
     const contentSize = Buffer.byteLength(content, 'utf8');
     if (contentSize > this.maxFileSize) {
-      console.log(`日志文件过大，不缓存: ${projectId}, 大小: ${(contentSize / 1024 / 1024).toFixed(2)}MB, 限制: ${(this.maxFileSize / 1024 / 1024).toFixed(2)}MB`);
+      console.log(`Log file too large, not cached: ${projectId}, size: ${(contentSize / 1024 / 1024).toFixed(2)}MB, limit: ${(this.maxFileSize / 1024 / 1024).toFixed(2)}MB`);
       return false;
     }
 
@@ -155,7 +155,7 @@ class LogCacheManager {
     });
 
     if (expiredKeys.length > 0) {
-      console.log(`清理了 ${expiredKeys.length} 个过期的日志缓存`);
+      console.log(`Cleaned ${expiredKeys.length} expired log caches`);
     }
   }
 
@@ -233,7 +233,7 @@ function getLogCacheManager() {
   if (!instance) {
     instance = new LogCacheManager();
     if (instance.enabled) {
-      console.log("日志缓存已启用");
+      console.log("Log cache enabled");
     }
   }
   return instance;

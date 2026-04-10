@@ -1,159 +1,151 @@
 # nuwax-file-server
 
-跨平台的文件服务部署工具，支持 Windows、Linux、macOS 操作系统。
+Cross-platform file service deployment tooling for Windows, Linux, and macOS.
 
-## 功能特性
+## Features
 
-- **CLI 命令行操作**: 支持 start / stop / restart / status 命令
-- **跨平台支持**: Windows、Linux、macOS 完美兼容
-- **环境变量配置**: 支持通过环境变量和命令行参数配置
-- **健康检查端点**: 提供 /health 接口用于服务检活
-- **PID 文件管理**: 自动管理服务进程 ID
+- **CLI**: `start`, `stop`, `restart`, `status`
+- **Cross-platform**: Windows, Linux, and macOS
+- **Configuration**: Environment variables and CLI flags
+- **Health endpoint**: `GET /health` for liveness checks
+- **PID file**: Tracks and manages the server process
 
-## 安装部署
+## Installation
 
-### 本地开发安装
+### Local development
 
 ```bash
-# 克隆项目
 git clone <repository-url>
 cd nuwax-file-server
 
-# 安装依赖
 npm install
 
-# 本地运行（开发模式）
+# Development mode
 npm run dev
 
-# 本地运行（生产模式）
+# Production mode (local)
 npm run prod
 ```
 
-### 全局安装 CLI 工具
+### Global CLI install
 
 ```bash
-# 在项目根目录执行
+# From the project root
 npm install -g .
 
-# 然后可以在任何位置使用
+# Then run from anywhere
 nuwax-file-server --help
 ```
 
-### 系统要求
+### Requirements
 
-- Node.js >= 22.0.0（ES Module 原生支持）
-- zip/unzip 工具（用于项目打包）
-- pnpm（推荐）或 npm/yarn
+- Node.js >= 22.0.0 (native ES modules)
+- zip/unzip (for project archives)
+- pnpm (recommended) or npm/yarn
 
-## CLI 命令
+## CLI
 
-nuwax-file-server 提供以下 CLI 命令：
+Available commands:
 
-### 基本命令
+### Basics
 
 ```bash
-# 启动服务（默认使用 env.production 配置）
+# Start (defaults to env.production)
 nuwax-file-server start
 
-# 启动服务（指定环境）
+# Start with a specific env
 nuwax-file-server start --env development
 nuwax-file-server start --env production
 nuwax-file-server start --env test
 
-# 停止服务
+# Stop
 nuwax-file-server stop
 
-# 强制停止服务
+# Force stop
 nuwax-file-server stop --force
 
-# 重启服务
+# Restart
 nuwax-file-server restart
 
-# 查看服务状态
+# Status
 nuwax-file-server status
 ```
 
-### 高级选项
+### Advanced
 
 ```bash
-# 指定端口启动
+# Custom port
 nuwax-file-server start --port 8080
 
-# 指定配置文件
+# Custom config file
 nuwax-file-server start --config /path/to/config.json
 
-# 组合使用
+# Combined
 nuwax-file-server start --env development --port 3000
 ```
 
-### 使用 npm scripts
+### npm scripts
 
 ```bash
-# 启动服务
 npm run cli:start
-npm run cli:start:dev    # 开发环境
-npm run cli:start:prod   # 生产环境
-npm run cli:start:test   # 测试环境
+npm run cli:start:dev    # development
+npm run cli:start:prod   # production
+npm run cli:start:test   # test
 
-# 停止服务
 npm run cli:stop
-
-# 重启服务
 npm run cli:restart
-
-# 查看状态
 npm run cli:status
 ```
 
-## 环境变量配置
+## Environment variables
 
-完整的环境变量配置说明请参考：[环境变量配置文档](./docs/ENV.md)
+Full reference: [Environment variables](./docs/ENV.md)
 
-### 快速使用示例
+### Quick example
 
 ```bash
-# 使用 env.production 默认配置（推荐）
+# Defaults from env.production (typical)
 nuwax-file-server start --env production --port 60000
 
-# 自定义路径配置（根据实际需求删减）
+# Override paths (trim to what you need)
 nuwax-file-server start --env production --port 60000 \
   PROJECT_SOURCE_DIR=/data/projects \
   DIST_TARGET_DIR=/var/www/html \
   UPLOAD_PROJECT_DIR=/data/uploads
 ```
 
-### 核心路径变量
+### Core path variables
 
-| 环境变量                 | 说明                           |
-| ------------------------ | ------------------------------ |
-| `INIT_PROJECT_DIR`       | 初始化工程目录                 |
-| `UPLOAD_PROJECT_DIR`     | 上传的项目压缩包路径           |
-| `PROJECT_SOURCE_DIR`     | 项目源文件路径                 |
-| `DIST_TARGET_DIR`        | 构建产物目标目录（nginx 加载） |
-| `LOG_BASE_DIR`           | 日志基础目录                   |
-| `COMPUTER_WORKSPACE_DIR` | computer 工作目录              |
-| `COMPUTER_LOG_DIR`       | computer 日志目录              |
+| Variable | Purpose |
+| -------- | ------- |
+| `INIT_PROJECT_DIR` | Scaffold / init project directory |
+| `UPLOAD_PROJECT_DIR` | Uploaded project archives |
+| `PROJECT_SOURCE_DIR` | Project source tree |
+| `DIST_TARGET_DIR` | Build output (e.g. nginx root) |
+| `LOG_BASE_DIR` | Log directory root |
+| `COMPUTER_WORKSPACE_DIR` | “Computer” workspace |
+| `COMPUTER_LOG_DIR` | “Computer” logs |
 
-完整配置项和场景示例请参阅：[环境变量配置文档](./docs/ENV.md)
+More options and scenarios: [Environment variables](./docs/ENV.md)
 
-### 命令行覆盖
+### CLI precedence
 
 ```bash
-# 端口优先级: 命令行 > 环境变量 > 默认值
+# Port: CLI > env > default
 nuwax-file-server start --env production --port 8080
 ```
 
-## 健康检查端点
+## Health check
 
-服务提供 `/health` 端点用于健康检查和监控。
+The server exposes `GET /health` for monitoring and probes.
 
-### 请求
+### Request
 
 ```bash
 curl http://localhost:60000/health
 ```
 
-### 响应
+### Example response
 
 ```json
 {
@@ -174,167 +166,155 @@ curl http://localhost:60000/health
 }
 ```
 
-### 响应字段说明
+### Response fields
 
-| 字段        | 类型   | 说明                              |
-| ----------- | ------ | --------------------------------- |
-| status      | string | 服务状态，ok 表示正常             |
-| timestamp   | number | 当前时间戳（毫秒）                |
-| uptime      | number | 服务运行时间（秒）                |
-| version     | string | 服务版本号                        |
-| platform    | string | 操作系统平台 (darwin/linux/win32) |
-| nodeVersion | string | Node.js 版本                      |
-| pid         | number | 进程 ID                           |
-| memory      | object | 内存使用情况（MB）                |
-| env         | string | 当前环境                          |
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| status | string | `"ok"` when healthy |
+| timestamp | number | Unix time (ms) |
+| uptime | number | Uptime in seconds |
+| version | string | Server version |
+| platform | string | `darwin` / `linux` / `win32` |
+| nodeVersion | string | Node.js version |
+| pid | number | Process ID |
+| memory | object | Memory usage (MB) |
+| env | string | Active environment name |
 
-## 跨平台说明
+## Cross-platform notes
 
 ### Windows
 
-- PID 文件存储在 `%TEMP%\nuwax-file-server\`
-- 进程停止使用 `taskkill /F /PID` 命令
-- 路径分隔符使用反斜杠 `\`
+- PID file under `%TEMP%\nuwax-file-server\`
+- Stop uses `taskkill /F /PID`
+- Paths use backslashes `\`
 
-### Linux/macOS
+### Linux / macOS
 
-- PID 文件存储在 `/tmp/nuwax-file-server/`
-- 进程停止使用 kill 信号 (SIGTERM/SIGKILL)
-- 路径分隔符使用正斜杠 `/`
+- PID file under `/tmp/nuwax-file-server/`
+- Stop uses signals (SIGTERM / SIGKILL)
+- Paths use `/`
 
-### 通用
+### General
 
-- 所有路径使用 `path.join()` 处理
-- 使用 `os.tmpdir()` 获取临时目录
-- 使用 `cross-spawn` 执行 shell 命令
-- 使用 `tree-kill` 杀死进程树
+- Paths built with `path.join()`
+- Temp dir from `os.tmpdir()`
+- Shell commands via `cross-spawn`
+- Process trees via `tree-kill`
 
-## pnpm 磁盘空间优化
+## pnpm disk usage
 
-本项目自动为所有创建、上传或复制的项目注入优化的 `.npmrc` 配置文件，以优化 pnpm 的磁盘空间使用。
+Created, uploaded, or copied projects get an optimized `.npmrc` to reduce pnpm disk footprint.
 
-### 自动优化
+### Automatic injection
 
-在以下操作中，系统会自动为项目创建 `.npmrc` 配置文件：
+`.npmrc` is applied when:
 
-- **创建项目** (`/create-project`)
-- **上传项目** (`/upload-project`)
-- **复制项目** (`/copy-project`)
+- **Create project** (`/create-project`)
+- **Upload project** (`/upload-project`)
+- **Copy project** (`/copy-project`)
 
-### 检查磁盘使用
+### Inspect disk usage
 
 ```bash
-# 自动检测当前环境配置
 npm run pnpm:check
 
-# 或指定特定环境
-npm run pnpm:check:dev   # 开发环境
-npm run pnpm:check:prod  # 生产环境
-npm run pnpm:check:test  # 测试环境
+npm run pnpm:check:dev   # development
+npm run pnpm:check:prod  # production
+npm run pnpm:check:test  # test
 
-# 或手动指定目录
 bash scripts/pnpm-check.sh /path/to/projects
 ```
 
-### 清理未使用的包
+### Prune unused packages
 
 ```bash
-# 立即清理
 npm run pnpm:prune
 
-# 查看日志的清理（推荐）
 npm run pnpm:prune:log
 ```
 
-### 定时清理（自动集成）
+### Scheduled prune (built-in)
 
-定时任务已集成到主应用，随应用启动自动运行，通过环境变量配置：
+The app can run a cron-style prune job. Configure with env vars, for example:
 
 ```yaml
-# docker-compose.yml 或 .env 文件
+# docker-compose.yml or .env
 environment:
-  PNPM_PRUNE_ENABLED: "true" # 启用定时清理（默认 true）
-  PNPM_PRUNE_SCHEDULE: "0 2 * * 0" # 每周日凌晨 2 点
-  PNPM_PRUNE_TIMEZONE: "Asia/Shanghai" # 时区（默认 Asia/Shanghai）
-  PNPM_PRUNE_RUN_ON_START: "false" # 启动时立即执行（默认 false）
+  PNPM_PRUNE_ENABLED: "true"
+  PNPM_PRUNE_SCHEDULE: "0 2 * * 0"
+  PNPM_PRUNE_TIMEZONE: "Asia/Shanghai"
+  PNPM_PRUNE_RUN_ON_START: "false"
 ```
 
-**常用时间配置：**
+**Example schedules:**
 
 ```bash
-"0 2 * * 0"    # 每周日凌晨 2 点
-"0 3 * * *"    # 每天凌晨 3 点
-"0 2 1 * *"    # 每月 1 号凌晨 2 点
-"0 */6 * * *"  # 每 6 小时
+"0 2 * * 0"    # Sunday 02:00
+"0 3 * * *"    # Daily 03:00
+"0 2 1 * *"    # 1st of month 02:00
+"0 */6 * * *"  # Every 6 hours
 ```
 
-### 预期效果
+### Expected benefits
 
-- 磁盘空间节省 50-70%（多项目共享依赖）
-- 安装速度提升（使用国内镜像）
-- 完全自动化，无需手动配置
-- 定期清理，保持 store 整洁
+- Lower disk use when many projects share dependencies (often a large share of savings vs naive installs)
+- Faster installs when using a nearby registry mirror
+- Automated `.npmrc`; periodic store maintenance when enabled
 
-## 故障排除
+## Troubleshooting
 
-### 服务无法启动
+### Server will not start
 
-1. 检查端口是否被占用
-2. 检查日志文件权限
-3. 检查环境配置文件是否存在
+1. Check the port is free
+2. Check log directory permissions
+3. Confirm env files exist
 
 ```bash
-# 查看详细日志
 nuwax-file-server start --env development
 ```
 
-### 服务无法停止
+### Server will not stop
 
 ```bash
-# 使用强制停止
 nuwax-file-server stop --force
 
-# 手动查找并停止进程
 ps aux | grep nuwax-file-server
 kill -9 <pid>
 ```
 
-### 健康检查失败
+### Health check fails
 
-1. 检查服务是否正在运行
-2. 检查端口是否正确
-3. 检查防火墙设置
+1. Confirm the process is running
+2. Confirm host/port
+3. Check firewall rules
 
 ```bash
-# 查看服务状态
 nuwax-file-server status
-
-# 测试健康检查
 curl http://localhost:60000/health
 ```
 
-## 开发指南
+## Development
 
-### 添加新命令
+### Adding a command
 
-在 `src/cli.js` 中使用 commander 定义新命令：
+In `src/cli.js`, use Commander:
 
 ```javascript
 program
   .command("newcommand")
-  .description("新命令描述")
-  .option("--option", "选项描述")
+  .description("Description of the new command")
+  .option("--option", "Option description")
   .action((options) => {
-    // 命令逻辑
+    // handler
   });
 ```
 
-### 添加新配置项
+### Adding a setting
 
-1. 在 `env.development` / `env.production` / `env.test` 中添加环境变量
-2. 在 `config/index.js` 中读取配置
-3. 在文档中说明
+1. Add variables to `src/env.development` / `src/env.production` / `src/env.test`
+2. Wire them through `src/appConfig/index.js` as needed
+3. Document the change
 
-## 许可证
+## License
 
 ISC

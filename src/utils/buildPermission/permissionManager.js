@@ -119,7 +119,7 @@ async function ensureDevBinariesExecutable(projectPath) {
     }
   } catch (e) {
     // 仅记录，不阻断启动流程
-    log(null, "WARN", "修复可执行权限时出现问题（忽略继续）", {
+    log(null, "WARN", "Problem occurred when fixing executable permissions (ignore and continue)", {
       error: e && e.message,
     });
   }

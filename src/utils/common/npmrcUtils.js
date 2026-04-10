@@ -24,14 +24,14 @@ registry=https://registry.npmmirror.com
   try {
     // 检查 .npmrc 是否已存在
     if (fs.existsSync(npmrcPath)) {
-      log(logId, "INFO", ".npmrc 文件已存在，跳过创建", {
+      log(logId, "INFO", ".npmrc file already exists, skip creation", {
         projectPath,
         npmrcPath,
       });
       return {
         success: true,
         created: false,
-        message: ".npmrc 文件已存在",
+        message: ".npmrc file already exists",
         npmrcPath,
       };
     }
@@ -39,7 +39,7 @@ registry=https://registry.npmmirror.com
     // 创建 .npmrc 文件
     await fs.promises.writeFile(npmrcPath, npmrcContent, "utf8");
 
-    log(logId, "INFO", ".npmrc 文件创建成功", {
+    log(logId, "INFO", ".npmrc file created successfully", {
       projectPath,
       npmrcPath,
     });
@@ -47,11 +47,11 @@ registry=https://registry.npmmirror.com
     return {
       success: true,
       created: true,
-      message: ".npmrc 文件创建成功",
+      message: ".npmrc file created successfully",
       npmrcPath,
     };
   } catch (error) {
-    log(logId, "WARN", `.npmrc 文件创建失败: ${error.message}`, {
+    log(logId, "WARN", `.npmrc file creation failed: ${error.message}`, {
       projectPath,
       npmrcPath,
       error: error.message,
@@ -61,7 +61,7 @@ registry=https://registry.npmmirror.com
     return {
       success: false,
       created: false,
-      message: `.npmrc 文件创建失败: ${error.message}`,
+      message: `.npmrc file creation failed: ${error.message}`,
       error: error.message,
     };
   }

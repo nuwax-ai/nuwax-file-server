@@ -25,7 +25,7 @@ const upload = multer({
         const baseDir = config.COMPUTER_WORKSPACE_DIR;
         if (!baseDir) {
           return cb(
-            new Error("COMPUTER_WORKSPACE_DIR 未配置，无法确定上传临时目录")
+            new Error("COMPUTER_WORKSPACE_DIR is not configured, cannot determine upload temporary directory")
           );
         }
 
@@ -79,7 +79,7 @@ const routes = [
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
 
-      log(logId, "INFO", "创建工作空间请求", {
+      log(logId, "INFO", "Create workspace request", {
         userId,
         cId,
         hasFile: !!file,
@@ -137,7 +137,7 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { userId, cId, files } = req.body || {};
       const logId = `computer:${userId}:${cId}`;
-      log(logId, "INFO", "文件更新", {
+      log(logId, "INFO", "Files update", {
         userId,
         cId,
         filesCount: files ? files.length : 0,
@@ -153,7 +153,7 @@ const routes = [
             try {
               fileOp.contents = decodeURIComponent(fileOp.contents);
             } catch (err) {
-              log(logId, "WARN", "解码文件内容失败", {
+              log(logId, "WARN", "Decode file content failed", {
                 fileName: fileOp.name,
                 error: err.message,
               });
@@ -176,7 +176,7 @@ const routes = [
       const file = req.file; // 从 multer 中间件获取上传的文件
       const logId = `computer:${userId}:${cId}`;
 
-      log(logId, "INFO", "上传单个文件", {
+      log(logId, "INFO", "Upload single file", {
         userId,
         cId,
         filePath,
@@ -220,7 +220,7 @@ const routes = [
         ? [filePaths]
         : filePaths;
 
-      log(logId, "INFO", "批量上传文件请求", {
+      log(logId, "INFO", "Batch upload files request", {
         userId,
         cId,
         filesCount: files.length,
@@ -253,7 +253,7 @@ const routes = [
             try {
               await fs.promises.unlink(tempPath);
             } catch (error) {
-              log(logId, "WARN", "清理临时文件失败", {
+              log(logId, "WARN", "Clean temporary file failed", {
                 tempPath,
                 error: error.message,
               });
@@ -270,7 +270,7 @@ const routes = [
       const { userId, cId } = req.query || {};
       const logId = `computer:${userId}:${cId}`;
 
-      log(logId, "INFO", "下载全部文件请求", {
+      log(logId, "INFO", "Download all files request", {
         userId,
         cId,
       });

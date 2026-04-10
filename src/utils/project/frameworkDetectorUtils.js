@@ -33,7 +33,7 @@ function detectFrontendFramework(projectPath) {
 
     return "other";
   } catch (error) {
-    log(null, "WARN", `检测前端框架失败: ${error.message}`, {
+    log(null, "WARN", `Detect frontend framework failed: ${error.message}`, {
       projectPath,
       error: error.message,
     });
@@ -80,7 +80,7 @@ function detectDevFramework(projectPath) {
 
     return "other";
   } catch (error) {
-    log(null, "WARN", `检测开发框架失败: ${error.message}`, {
+    log(null, "WARN", `Detect development framework failed: ${error.message}`, {
       projectPath,
       error: error.message,
     });

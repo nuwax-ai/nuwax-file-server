@@ -10,15 +10,15 @@ import { promisify } from "util";
 const execPromise = promisify(exec);
 
 console.log("========================================");
-console.log("pnpm Store 使用情况检查");
+console.log("pnpm Store usage check");
 console.log("========================================\n");
 
 async function checkPnpmConfig() {
-  console.log("1. 检查 pnpm 配置:");
+  console.log("1. Check pnpm configuration:");
   console.log("----------------------------------------");
 
   try {
-    console.log("📦 当前 Node.js 进程的 pnpm 相关环境变量:");
+    console.log("📦 Current Node.js process pnpm related environment variables:");
     const pnpmEnvVars = Object.keys(process.env)
       .filter(
         (key) =>
@@ -29,19 +29,19 @@ async function checkPnpmConfig() {
       .sort();
 
     if (pnpmEnvVars.length === 0) {
-      console.log("   (没有发现 pnpm 相关环境变量)");
+      console.log("   (No pnpm related environment variables found)");
     } else {
       pnpmEnvVars.forEach((key) => {
         const value = process.env[key];
         const displayValue =
           value.length > 100 ? value.substring(0, 100) + "..." : value;
-        console.log(`   ${key} = ${displayValue}`);
+        console.log(` ${key} = ${displayValue}`);
       });
     }
     console.log("");
 
     console.log(
-      "📦 通过 spawn 方式获取 pnpm 配置 (继承 process.env):"
+      "📦 Get pnpm configuration through spawn (inherit process.env):"
     );
     await new Promise((resolve, reject) => {
       const child = spawn("sh", ["-c", "pnpm config list"], {
@@ -64,7 +64,7 @@ async function checkPnpmConfig() {
       });
     });
 
-    console.log("📦 通过 spawn 方式获取 pnpm 配置 (不传 env):");
+    console.log("📦 Get pnpm configuration through spawn (no env):");
     await new Promise((resolve, reject) => {
       const child = spawn("sh", ["-c", "pnpm config list"], {
         stdio: ["ignore", "pipe", "pipe"],
@@ -110,15 +110,15 @@ async function checkStoreLocation() {
       console.log("💾 Store 大小: 无法计算");
     }
   } catch (error) {
-    console.log(`   ❌ 错误: ${error.message}`);
+    console.log(`❌ Error: ${error.message}`);
   }
 }
 
 async function testSpawnWithEnv() {
-  console.log("\n3. 测试 spawn 环境变量传递:");
+  console.log("\n3. Test spawn environment variable passing:");
   console.log("----------------------------------------");
 
-  console.log("✅ 测试1: spawn 传递 env: process.env");
+  console.log("✅ Test 1: spawn pass env: process.env");
   await new Promise((resolve) => {
     const child = spawn(
       "sh",
@@ -136,7 +136,7 @@ async function testSpawnWithEnv() {
     child.on("exit", () => resolve());
   });
 
-  console.log("\n❌ 测试2: spawn 不传递 env");
+  console.log("\n❌ Test 2: spawn no env");
   await new Promise((resolve) => {
     const child = spawn(
       "sh",
@@ -155,28 +155,28 @@ async function testSpawnWithEnv() {
 }
 
 async function analyzeInstallProgress() {
-  console.log("\n4. pnpm install 进度指标说明:");
+  console.log("\n4. pnpm install progress indicator description:");
   console.log("----------------------------------------");
 
   console.log(`
-📊 进度指标含义:
-   - resolved: 解析的依赖总数（确定了版本号和依赖关系）
-   - reused:   从 store 通过硬链接复用的包数量
-   - downloaded: 从中央仓库下载的包数量
-   - added:    已添加到 node_modules 的包数量
+📊 Progress indicator meaning:
+   - resolved: Total number of resolved dependencies (determined version number and dependency relationship)
+   - reused:   Number of packages reused through hard links from the store
+   - downloaded: Number of packages downloaded from the central repository
+   - added:    Number of packages added to node_modules
 
-✅ 理想状态: downloaded = 0，说明完全使用本地 store
+✅ Ideal state: downloaded = 0, means completely using local store
 
-❓ 为什么 resolved != reused?
-   差异包可能是:
-   1. 虚拟包 (peer dependencies 的虚拟引用)
-   2. 符号链接 (指向其他包的链接)
-   3. 本地包 (workspace 中的包)
-   4. 可选依赖 (根据平台条件跳过的包)
+❓ Why resolved != reused?
+   Different packages may be:
+   1. Virtual packages (virtual references of peer dependencies)
+   2. Symbolic links (links to other packages)
+   3. Local packages (packages in workspace)
+   4. Optional dependencies (packages skipped based on platform conditions)
 
-💡 关键指标:
-   - downloaded = 0  → ✅ 环境变量生效，使用 store
-   - downloaded > 0  → ❌ 部分包从网络下载
+💡 Key indicators:
+   - downloaded = 0  → ✅ Environment variables take effect, using store
+   - downloaded > 0  → ❌ Some packages downloaded from the network
 `);
 }
 
@@ -188,10 +188,10 @@ async function main() {
     await analyzeInstallProgress();
 
     console.log("\n========================================");
-    console.log("检查完成!");
+    console.log("Check completed!");
     console.log("========================================\n");
   } catch (error) {
-    console.error("执行出错:", error);
+    console.error("Execution error:", error);
     process.exit(1);
   }
 }

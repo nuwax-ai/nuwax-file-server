@@ -2,14 +2,14 @@
  * @swagger
  * tags:
  *   name: Code
- *   description: 代码文件管理相关接口
+ *   description: Code file management APIs
  */
 
 /**
  * @swagger
  * /api/project/submit-files-update:
  *   post:
- *     summary: 提交文件更新并重启开发服务器
+ *     summary: Submit file updates and restart the dev server
  *     tags: [Code]
  *     requestBody:
  *       required: true
@@ -24,13 +24,13 @@
  *             properties:
  *               projectId:
  *                 type: string
- *                 description: 项目ID
+ *                 description: Project ID
  *               codeVersion:
  *                 type: string
- *                 description: 代码版本号
+ *                 description: Code version
  *               files:
  *                 type: array
- *                 description: 文件列表
+ *                 description: Files to update
  *                 items:
  *                   type: object
  *                   properties:
@@ -44,13 +44,13 @@
  *                       type: boolean
  *               basePath:
  *                 type: string
- *                 description: 基础路径(可选)
+ *                 description: Base path (optional)
  *               pid:
  *                 type: number
- *                 description: 进程ID(可选)
+ *                 description: Process ID (optional)
  *     responses:
  *       200:
- *         description: 提交成功
+ *         description: Submitted successfully
  *         content:
  *           application/json:
  *             schema:
@@ -69,7 +69,7 @@
  *                 restarted:
  *                   type: boolean
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:
@@ -80,7 +80,7 @@
  * @swagger
  * /api/project/upload-single-file:
  *   post:
- *     summary: 上传单个文件
+ *     summary: Upload a single file
  *     tags: [Code]
  *     requestBody:
  *       required: true
@@ -96,20 +96,20 @@
  *             properties:
  *               projectId:
  *                 type: string
- *                 description: 项目ID
+ *                 description: Project ID
  *               codeVersion:
  *                 type: string
- *                 description: 代码版本号
+ *                 description: Code version
  *               filePath:
  *                 type: string
- *                 description: 文件在项目中的相对路径
+ *                 description: Relative path of the file inside the project
  *               file:
  *                 type: string
  *                 format: binary
- *                 description: 文件内容
+ *                 description: File contents
  *     responses:
  *       200:
- *         description: 上传成功
+ *         description: Upload successful
  *         content:
  *           application/json:
  *             schema:
@@ -124,7 +124,7 @@
  *                 restarted:
  *                   type: boolean
  *       400:
- *         description: 参数错误
+ *         description: Invalid parameters
  *         content:
  *           application/json:
  *             schema:

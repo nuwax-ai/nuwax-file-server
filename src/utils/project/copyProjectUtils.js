@@ -18,10 +18,10 @@ import { createPnpmNpmrc } from "../common/npmrcUtils.js";
  */
 async function copyProject(sourceProjectId, targetProjectId) {
   if (!sourceProjectId) {
-    throw new ValidationError("源项目ID不能为空", {field: "sourceProjectId",});
+    throw new ValidationError("Source project ID cannot be empty", {field: "sourceProjectId",});
   }
   if (!targetProjectId) {
-    throw new ValidationError("目标项目ID不能为空", {field: "targetProjectId",});
+    throw new ValidationError("Target project ID cannot be empty", {field: "targetProjectId",});
   }
 
   const projectSourceDir = config.PROJECT_SOURCE_DIR;
@@ -30,7 +30,7 @@ async function copyProject(sourceProjectId, targetProjectId) {
 
   // 检查源项目是否存在
   if (!fs.existsSync(sourceProjectPath)) {
-    throw new BusinessError(`源项目 ${sourceProjectId} 不存在`, {
+    throw new BusinessError(`Source project ${sourceProjectId} does not exist`, {
       sourceProjectId,
       sourceProjectPath,
     });
@@ -38,21 +38,21 @@ async function copyProject(sourceProjectId, targetProjectId) {
 
   // 检查目标项目是否已存在
   if (fs.existsSync(targetProjectPath)) {
-    throw new BusinessError(`目标项目 ${targetProjectId} 已存在`, {
+    throw new BusinessError(`Target project ${targetProjectId} already exists`, {
       targetProjectId,
       targetProjectPath,
     });
   }
 
   try {
-    log(targetProjectId, "INFO", `开始复制项目从 ${sourceProjectId} 到 ${targetProjectId}`, {
+    log(targetProjectId, "INFO", `Start copying project from ${sourceProjectId} to ${targetProjectId}`, {
       sourceProjectId,
       targetProjectId,
     });
 
     // 创建目标项目目录
     fs.mkdirSync(targetProjectPath, { recursive: true });
-    log(targetProjectId, "INFO", `目标项目目录创建成功: ${targetProjectPath}`, {
+    log(targetProjectId, "INFO", `Target project directory created successfully: ${targetProjectPath}`, {
       targetProjectId,
     });
 
@@ -75,7 +75,7 @@ async function copyProject(sourceProjectId, targetProjectId) {
       }
     }
 
-    log(targetProjectId, "INFO", `项目复制成功: ${targetProjectId}`, {
+    log(targetProjectId, "INFO", `Project copied successfully: ${targetProjectId}`, {
       sourceProjectId,
       targetProjectId,
     });
@@ -85,13 +85,13 @@ async function copyProject(sourceProjectId, targetProjectId) {
 
     return {
       success: true,
-      message: `项目 ${sourceProjectId} 已成功复制到 ${targetProjectId}`,
+      message: `Project ${sourceProjectId} successfully copied to ${targetProjectId}`,
       sourceProjectId,
       targetProjectId,
       targetProjectPath,
     };
   } catch (error) {
-    log(targetProjectId, "ERROR", `复制项目失败: ${error.message}`, {
+    log(targetProjectId, "ERROR", `Copy project failed: ${error.message}`, {
       sourceProjectId,
       targetProjectId,
     });
@@ -100,11 +100,11 @@ async function copyProject(sourceProjectId, targetProjectId) {
     if (fs.existsSync(targetProjectPath)) {
       try {
         await fs.promises.rm(targetProjectPath, { recursive: true, force: true });
-        log(targetProjectId, "INFO", "复制失败，目标项目目录已清理", {
+        log(targetProjectId, "INFO", "Copy failed, target project directory cleaned", {
           targetProjectId,
         });
       } catch (cleanupError) {
-        log(targetProjectId, "ERROR", `清理目标项目目录失败: ${cleanupError.message}`, {
+        log(targetProjectId, "ERROR", `Clean target project directory failed: ${cleanupError.message}`, {
           targetProjectId,
           originalError: cleanupError.message,
         });
@@ -113,7 +113,7 @@ async function copyProject(sourceProjectId, targetProjectId) {
 
     // 如果错误不是自定义的错误类型，包装为系统错误
     if (!error.isOperational) {
-      throw new SystemError(`复制项目失败: ${error.message}`, {
+      throw new SystemError(`Copy project failed: ${error.message}`, {
         sourceProjectId,
         targetProjectId,
         sourceProjectPath,

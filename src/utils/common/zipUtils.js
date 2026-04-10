@@ -52,7 +52,7 @@ function extractZip(zipPath, extractPath) {
           zipfile.openReadStream(entry, (err, readStream) => {
             if (err) {
               return reject(
-                new FileError(`读取压缩包条目失败: ${err.message}`, {
+                new FileError(`Failed to read zip entry: ${err.message}`, {
                   entry: entry.fileName,
                   originalError: err.message,
                 })
@@ -90,7 +90,7 @@ function extractZip(zipPath, extractPath) {
               }
             } catch (statErr) {
               return reject(
-                new FileError(`检查文件状态失败: ${statErr.message}`, {
+                new FileError(`Failed to check file status: ${statErr.message}`, {
                   filePath,
                   originalError: statErr.message,
                 })
@@ -106,7 +106,7 @@ function extractZip(zipPath, extractPath) {
 
             writeStream.on("error", (err) => {
               reject(
-                new FileError(`写入文件失败: ${err.message}`, {
+                new FileError(`Failed to write file: ${err.message}`, {
                   filePath,
                   originalError: err.message,
                 })
@@ -122,7 +122,7 @@ function extractZip(zipPath, extractPath) {
 
       zipfile.on("error", (err) => {
         reject(
-          new FileError(`解压过程中发生错误: ${err.message}`, {
+          new FileError(`Error occurred during unzip: ${err.message}`, {
             zipPath,
             originalError: err.message,
           })

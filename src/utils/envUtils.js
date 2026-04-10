@@ -105,7 +105,7 @@ function getNumberEnv(name, defaultValue = undefined) {
   const parsed = Number(value);
   
   if (Number.isNaN(parsed)) {
-    console.warn(`环境变量 ${name} 值 "${value}" 不是有效的数字`);
+    console.warn(`Environment variable ${name} value "${value}" is not a valid number`);
     return defaultValue;
   }
   
@@ -179,19 +179,19 @@ function loadEnvFile(env, options = {}) {
         });
         
         if (parsed.error) {
-          console.warn(`加载环境文件 ${fileName} 失败: ${parsed.error.message}`);
+          console.warn(`Load environment file ${fileName} failed: ${parsed.error.message}`);
         } else {
           loadedFiles.push(filePath);
           result.loaded = true;
         }
       } catch (err) {
-        console.warn(`加载环境文件 ${fileName} 出错: ${err.message}`);
+        console.warn(`Load environment file ${fileName} failed: ${err.message}`);
       }
     }
   }
   
   if (loadedFiles.length > 0) {
-    console.log(`已加载环境文件: ${loadedFiles.join(', ')}`);
+    console.log(`Loaded environment files: ${loadedFiles.join(', ')}`);
   }
   
   return result;
@@ -217,7 +217,7 @@ function loadCustomConfigFile(configPath) {
   }
   
   if (!fs.existsSync(configPath)) {
-    console.warn(`配置文件不存在: ${configPath}`);
+    console.warn(`Configuration file does not exist: ${configPath}`);
     return result;
   }
   
@@ -247,9 +247,9 @@ function loadCustomConfigFile(configPath) {
       console.warn(`不支持的配置文件格式: ${ext}`);
     }
     
-    console.log(`已加载配置文件: ${configPath}`);
+    console.log(`Loaded configuration file: ${configPath}`);
   } catch (err) {
-    console.error(`加载配置文件失败: ${err.message}`);
+    console.error(`Load configuration file failed: ${err.message}`);
   }
   
   return result;
@@ -393,9 +393,9 @@ export {
 
 // 如果直接运行此文件，显示当前环境配置
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").replace(/^.*[\/\\]/, ""))) {
-  console.log('\n当前环境配置:\n');
+  console.log('\nCurrent environment configuration:\n');
   console.log(createEnvSummary());
-  console.log('\n详细环境变量:\n');
+  console.log('\nDetailed environment variables:\n');
   console.log('NODE_ENV:', process.env.NODE_ENV);
   console.log('PORT:', process.env.PORT);
   console.log('CONFIG_FILE:', process.env.CONFIG_FILE);

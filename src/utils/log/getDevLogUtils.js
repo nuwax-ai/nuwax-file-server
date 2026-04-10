@@ -59,7 +59,7 @@ function readLogFileWithCache(projectId, logFileName, arrayStartIndex, startInde
 
     return {
       success: true,
-      message: cacheHit ? "获取日志成功（缓存）" : fileTooLarge ? "获取日志成功（文件过大，未缓存）" : "获取日志成功",
+      message: cacheHit ? "Get log successfully (cache)" : fileTooLarge ? "Get log successfully (file too large, not cached)" : "Get log successfully",
       logs: logs,
       totalLines: lines.length,
       startIndex: startIndex,
@@ -68,7 +68,7 @@ function readLogFileWithCache(projectId, logFileName, arrayStartIndex, startInde
       logFileName: logFileName, // 日志文件名
     };
   } catch (error) {
-    throw new SystemError("读取日志文件失败", {
+    throw new SystemError("Failed to read log file", {
       projectId,
       logFileName: logFileName,
       error: error.message,
@@ -92,7 +92,7 @@ async function getDevLogFromMainLog(projectId, startIndex = 1) {
   if (!fs.existsSync(logDir)) {
     return {
       success: true,
-      message: "日志目录不存在",
+      message: "Log directory does not exist",
       logs: [],
       totalLines: 0,
       startLine: startIndex,
@@ -108,7 +108,7 @@ async function getDevLogFromMainLog(projectId, startIndex = 1) {
   if (mainFiles.length === 0) {
     return {
       success: true,
-      message: "未找到主日志文件",
+      message: "Main log file not found",
       logs: [],
       totalLines: 0,
       startLine: startIndex,
@@ -145,7 +145,7 @@ async function getDevLogFromTempLog(projectId, startIndex = 1) {
   if (!fs.existsSync(logDir)) {
     return {
       success: true,
-      message: "日志目录不存在",
+      message: "Log directory does not exist",
       logs: [],
       totalLines: 0,
       startLine: startIndex,
@@ -161,7 +161,7 @@ async function getDevLogFromTempLog(projectId, startIndex = 1) {
   if (tempFiles.length === 0) {
     return {
       success: true,
-      message: "未找到临时日志文件",
+      message: "Temporary log file not found",
       logs: [],
       totalLines: 0,
       startLine: startIndex,

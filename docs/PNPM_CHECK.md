@@ -1,107 +1,106 @@
-# pnpm-check 使用说明
+# pnpm-check usage
 
-## 功能说明
+## Overview
 
-`pnpm-check` 脚本用于检查和分析 pnpm 的磁盘空间使用情况，支持多环境配置。
+The `pnpm-check` script inspects and analyzes pnpm disk usage. It supports multiple environment configurations.
 
-## 使用方法
+## How to run
 
-### 方法 1: 使用 npm 脚本（推荐）
+### Option 1: npm scripts (recommended)
 
-脚本会自动从当前 NODE_ENV 环境配置中读取项目目录。
+The script reads the project directory from the current `NODE_ENV` configuration.
 
 ```bash
-# 自动检测当前环境（默认 development）
+# Auto-detect current environment (defaults to development)
 npm run pnpm:check
 
-# 指定开发环境
+# Development
 npm run pnpm:check:dev
 
-# 指定生产环境
+# Production
 npm run pnpm:check:prod
 
-# 指定测试环境
+# Test
 npm run pnpm:check:test
 ```
 
-### 方法 2: 直接调用包装脚本
+### Option 2: Wrapper script
 
 ```bash
-# 使用当前环境变量
+# Use current environment variables
 node scripts/pnpm-check-wrapper.js
 
-# 指定环境
+# Pin environment
 NODE_ENV=production node scripts/pnpm-check-wrapper.js
 ```
 
-### 方法 3: 直接调用 bash 脚本
+### Option 3: Bash script directly
 
 ```bash
-# 手动指定项目目录
+# Pass project directory explicitly
 bash scripts/pnpm-check.sh /path/to/projects
 
-# 使用环境变量
+# Via environment variable
 PROJECT_SOURCE_DIR=/path/to/projects bash scripts/pnpm-check.sh
 ```
 
-## 输出说明
+## Output
 
-### 1. pnpm 版本信息
-
-```
-✅ pnpm 版本: 10.18.2
-```
-
-显示当前安装的 pnpm 版本。
-
-### 2. pnpm Store 信息
+### 1. pnpm version
 
 ```
-📁 pnpm Store 路径:
+✅ pnpm version: 10.18.2
+```
+
+Shows the installed pnpm version.
+
+### 2. pnpm store
+
+```
+📁 pnpm Store path:
    /Users/xxx/.pnpm-store
-   Store 大小: 2.5G
+   Store size: 2.5G
 ```
 
-- **Store 路径**: pnpm 全局依赖包存储位置
-- **Store 大小**: 这是**真实的磁盘占用**，所有项目共享这个 store
+- **Store path**: Global content-addressable store location
+- **Store size**: **Actual disk usage**; all projects share this store
 
-### 3. Store 状态
+### 3. Store status
 
 ```
-📊 pnpm Store 状态:
+📊 pnpm Store status:
 Packages in the store are untouched
 ```
 
-显示 store 中的包使用情况。
+Shows how packages in the store are used (`pnpm store status`).
 
-### 4. 项目 node_modules 占用
-
-```
-📦 各项目 node_modules 占用（表面大小）:
-   ⚠️  注意：du 命令会重复计算硬链接，实际占用远小于此
-   [project-a] 500MB (包含硬链接重复计算)
-   [project-b] 500MB (包含硬链接重复计算)
-```
-
-⚠️ **重要**: 这里显示的是 `du` 命令的输出，会**重复计算硬链接**！
-
-### 5. .pnpm 文件夹占用
+### 4. Per-project `node_modules` size
 
 ```
-🗂️  各项目 .pnpm 文件夹占用（表面大小）:
-   ⚠️  注意：.pnpm 中都是硬链接，实际不占额外空间
-   [project-a] 400MB (硬链接，实际共享)
-   [project-b] 400MB (硬链接，实际共享)
+📦 Per-project node_modules (apparent size):
+   ⚠️  Note: du double-counts hard links; real usage is much lower
+   [project-a] 500MB (includes hard-link double counting)
+   [project-b] 500MB (includes hard-link double counting)
 ```
 
-⚠️ **重要**: `.pnpm` 文件夹中的文件都是硬链接，实际只占用一份空间！
+⚠️ **Important**: Figures come from `du` and **double-count hard links**; real usage is usually much lower.
 
-### 6. 实际磁盘占用
+### 5. `.pnpm` folder size
 
 ```
-💾 实际磁盘占用情况:
-   使用 df 命令查看整个文件系统（更准确）:
-   文件系统: /dev/disk1 | 已用: 150GB | 可用: 200GB | 使用率: 43%
+🗂️  Per-project .pnpm folders (apparent size):
+   ⚠️  Note: entries in .pnpm are hard links; little extra space per project
+   [project-a] 400MB (hard links, shared in store)
+   [project-b] 400MB (hard links, shared in store)
 ```
 
-这是查看真实磁盘占用的最准确方法。
+⚠️ **Important**: Files under `.pnpm` are hard links; they do not each consume separate space on disk.
+
+### 6. Real disk usage
+
+```
+💾 Filesystem usage (df):
+   Filesystem: /dev/disk1 | Used: 150GB | Avail: 200GB | Use%: 43%
+```
+
+Using `df` on the filesystem is the most reliable way to see actual free space.
