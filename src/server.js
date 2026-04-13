@@ -127,8 +127,8 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
   const allowOrigin = origin || "*";
   res.header("Access-Control-Allow-Origin", allowOrigin);
   res.header("Access-Control-Allow-Methods", "HEAD,GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control");
-  res.header("Access-Control-Expose-Headers", "Content-Type");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Range, If-Range");
+  res.header("Access-Control-Expose-Headers", "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified");
   if (origin) {
     res.header("Access-Control-Allow-Credentials", "true");
     res.header("Vary", "Origin");
@@ -155,7 +155,8 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "HEAD,GET,POST,PUT,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control",
+    "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Range, If-Range",
+    "Access-Control-Expose-Headers": "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified",
   };
   if (origin) {
     corsHeaders["Access-Control-Allow-Credentials"] = "true";
