@@ -69,6 +69,9 @@ const config = {
   UPLOAD_SINGLE_FILE_SIZE_BYTES: process.env.UPLOAD_SINGLE_FILE_SIZE_BYTES
     ? parseInt(process.env.UPLOAD_SINGLE_FILE_SIZE_BYTES, 10)
     : undefined,
+  DOWNLOAD_MAX_FILE_SIZE_BYTES: process.env.DOWNLOAD_MAX_FILE_SIZE_BYTES
+    ? parseInt(process.env.DOWNLOAD_MAX_FILE_SIZE_BYTES, 10)
+    : undefined,
   REQUEST_BODY_LIMIT: process.env.REQUEST_BODY_LIMIT,
   TRAVERSE_EXCLUDE_DIRS: process.env.TRAVERSE_EXCLUDE_DIRS
     ? process.env.TRAVERSE_EXCLUDE_DIRS.split(",")

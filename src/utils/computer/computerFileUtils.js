@@ -5,6 +5,10 @@ import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { ValidationError, SystemError } from "../error/errorHandler.js";
 
+const DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const DOWNLOAD_MAX_FILE_SIZE_BYTES =
+  config.DOWNLOAD_MAX_FILE_SIZE_BYTES || DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES;
+
 async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
   const files = [];
   const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
@@ -74,6 +78,83 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
   }
 
   return files;
+}
+
+/**
+ * 计算目录中允许打包下载的文件总大小（字节）
+ * 过滤规则与 downloadAllFiles 保持一致
+ * @param {string} targetDir 目标目录绝对路径
+ * @param {string[]} excludeFiles 需排除的文件名列表
+ * @param {string[]} excludeDirs 需排除的目录名列表
+ * @param {string} logId 日志ID
+ * @param {string} relativeDir 相对目录（递归内部使用）
+ * @returns {Promise<number>} 允许下载的总字节数
+ */
+async function calculateDownloadableDirectorySize(
+  targetDir,
+  excludeFiles,
+  excludeDirs,
+  logId,
+  relativeDir = ""
+) {
+  const entries = await fs.promises.readdir(path.join(targetDir, relativeDir), {
+    withFileTypes: true,
+  });
+  let totalSize = 0;
+
+  for (const entry of entries) {
+    const nextRelativePath = relativeDir
+      ? path.join(relativeDir, entry.name)
+      : entry.name;
+    const segments = nextRelativePath.split(path.sep).filter(Boolean);
+
+    // 1. 任一路径片段以 "." 开头，则忽略（隐藏文件/目录）
+    if (segments.some((seg) => seg.startsWith("."))) {
+      continue;
+    }
+
+    // 2. 检查文件名是否在排除列表中
+    const fileName = segments[segments.length - 1];
+    if (excludeFiles.includes(fileName)) {
+      continue;
+    }
+
+    // 3. 检查任一路径片段是否为排除的目录
+    if (segments.some((seg) => excludeDirs.includes(seg))) {
+      continue;
+    }
+
+    const fullPath = path.join(targetDir, nextRelativePath);
+    let stats;
+    try {
+      stats = await fs.promises.lstat(fullPath);
+    } catch (error) {
+      log(logId, "WARN", "Error occurred when getting file stats, skipping", {
+        filePath: nextRelativePath.replace(/\\/g, "/"),
+        error: error.message,
+      });
+      continue;
+    }
+
+    // 4. 跳过符号链接和硬链接
+    if (stats.isSymbolicLink() || stats.nlink > 1) {
+      continue;
+    }
+
+    if (stats.isDirectory()) {
+      totalSize += await calculateDownloadableDirectorySize(
+        targetDir,
+        excludeFiles,
+        excludeDirs,
+        logId,
+        nextRelativePath
+      );
+    } else if (stats.isFile()) {
+      totalSize += stats.size;
+    }
+  }
+
+  return totalSize;
 }
 
 /**
@@ -786,6 +867,29 @@ async function downloadAllFiles(userId, cId) {
   // 获取排除配置
   const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
   const excludeDirs = config.TRAVERSE_EXCLUDE_DIRS || [];
+  const downloadableSize = await calculateDownloadableDirectorySize(
+    targetDir,
+    excludeFiles,
+    excludeDirs,
+    logId
+  );
+  if (downloadableSize > DOWNLOAD_MAX_FILE_SIZE_BYTES) {
+    const maxSizeMb = DOWNLOAD_MAX_FILE_SIZE_BYTES / 1024 / 1024;
+    const currentSizeMb = (downloadableSize / 1024 / 1024).toFixed(2);
+    log(logId, "WARN", "Download rejected due to oversized workspace", {
+      targetDir,
+      downloadableSize,
+      maxSizeBytes: DOWNLOAD_MAX_FILE_SIZE_BYTES,
+    });
+    throw new ValidationError(
+      `Download failed: total file size ${currentSizeMb}MB exceeds limit ${maxSizeMb}MB`,
+      {
+        field: "downloadSize",
+        downloadableSize,
+        maxSizeBytes: DOWNLOAD_MAX_FILE_SIZE_BYTES,
+      }
+    );
+  }
 
   // 过滤文件/目录，与 get-file-list 路由保持一致
   archive.directory(
