@@ -45,7 +45,8 @@ Files under `src/` are selected based on `NODE_ENV`:
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `INIT_PROJECT_NAME` | `react-vite-template` | Built-in scaffold project name |
+| `INIT_PROJECT_NAME_REACT` | `react-vite-template` | Built-in scaffold name for React projects |
+| `INIT_PROJECT_NAME_VUE3` | `vue3-vite-template` | Built-in scaffold name for Vue3 projects |
 | `INIT_PROJECT_DIR` | — | Scaffold / init project directory |
 | `UPLOAD_PROJECT_DIR` | — | Directory for uploaded project archives |
 | `PROJECT_SOURCE_DIR` | — | Unpacked / working project sources |
@@ -216,7 +217,8 @@ nuwax-file-server start \
 nuwax-file-server start \
   --env production \
   --port 60000 \
-  INIT_PROJECT_NAME=react-vite-template \
+  INIT_PROJECT_NAME_REACT=react-vite-template \
+  INIT_PROJECT_NAME_VUE3=vue3-vite-template \
   INIT_PROJECT_DIR=/app/project_init \
   UPLOAD_PROJECT_DIR=/app/project_zips \
   PROJECT_SOURCE_DIR=/app/project_workspace \
@@ -230,7 +232,8 @@ nuwax-file-server start \
 
 | Variable | Example default | Description |
 | -------- | --------------- | ----------- |
-| `INIT_PROJECT_NAME` | `react-vite-template` | Built-in scaffold name |
+| `INIT_PROJECT_NAME_REACT` | `react-vite-template` | Built-in scaffold name for React projects |
+| `INIT_PROJECT_NAME_VUE3` | `vue3-vite-template` | Built-in scaffold name for Vue3 projects |
 | `INIT_PROJECT_DIR` | `/app/project_init` | Init project directory |
 | `UPLOAD_PROJECT_DIR` | `/app/project_zips` | Uploaded zips |
 | `PROJECT_SOURCE_DIR` | `/app/project_workspace` | Project workspace |
@@ -260,7 +263,8 @@ nuwax-file-server start \
 nuwax-file-server start \
   --env production \
   --port 60000 \
-  INIT_PROJECT_NAME=my-template \
+  INIT_PROJECT_NAME_REACT=my-react-template \
+  INIT_PROJECT_NAME_VUE3=my-vue3-template \
   INIT_PROJECT_DIR=/data/init \
   UPLOAD_PROJECT_DIR=/data/zips \
   PROJECT_SOURCE_DIR=/data/workspace \
@@ -413,7 +417,8 @@ LOG_PREFIX_API=api
 LOG_PREFIX_BUILD=build
 
 # ==================== Paths ====================
-INIT_PROJECT_NAME=react-vite-template
+INIT_PROJECT_NAME_REACT=react-vite-template
+INIT_PROJECT_NAME_VUE3=vue3-vite-template
 INIT_PROJECT_DIR=/app/project_init
 UPLOAD_PROJECT_DIR=/app/project_zips
 PROJECT_SOURCE_DIR=/app/project_workspace
@@ -476,7 +481,8 @@ LOG_PREFIX_API=api
 LOG_PREFIX_BUILD=build
 
 # ==================== Paths ====================
-INIT_PROJECT_NAME=react-vite-template
+INIT_PROJECT_NAME_REACT=react-vite-template
+INIT_PROJECT_NAME_VUE3=vue3-vite-template
 INIT_PROJECT_DIR=./project_init
 UPLOAD_PROJECT_DIR=./project_zips
 PROJECT_SOURCE_DIR=./project_workspace

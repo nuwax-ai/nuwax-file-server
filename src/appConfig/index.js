@@ -47,7 +47,10 @@ loadEnvFile(env);
 const config = {
   NODE_ENV: env,
   PORT: parseInt(process.env.PORT),
-  INIT_PROJECT_NAME: process.env.INIT_PROJECT_NAME,
+  INIT_PROJECT_NAME_REACT:
+    process.env.INIT_PROJECT_NAME_REACT || "react-vite-template",
+  INIT_PROJECT_NAME_VUE3:
+    process.env.INIT_PROJECT_NAME_VUE3 || "vue3-vite-template",
   INIT_PROJECT_DIR: process.env.INIT_PROJECT_DIR,
   PROJECT_SOURCE_DIR: process.env.PROJECT_SOURCE_DIR,
   DIST_TARGET_DIR: process.env.DIST_TARGET_DIR,

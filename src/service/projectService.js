@@ -24,13 +24,27 @@ import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
 /**
  * 创建项目目录
  * @param {string} projectId - 项目ID
+ * @param {string} templateType - 模板类型(react|vue3)
  * @returns {Promise<Object>} 创建结果
  */
-async function createProject(projectId) {
+async function createProject(projectId, templateType = "react") {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
+  const allowedTemplateTypes = ["react", "vue3"];
+  if (!allowedTemplateTypes.includes(templateType)) {
+    throw new ValidationError("Template type is invalid, only supports react or vue3", {
+      field: "templateType",
+      templateType,
+      allowedValues: allowedTemplateTypes,
+    });
+  }
+  const templateNameMap = {
+    react: config.INIT_PROJECT_NAME_REACT || "react-vite-template",
+    vue3: config.INIT_PROJECT_NAME_VUE3 || "vue3-vite-template",
+  };
+  const templateName = templateNameMap[templateType];
 
   //项目源文件所在目录
   const projectSourceDir = config.PROJECT_SOURCE_DIR;
@@ -52,9 +66,9 @@ async function createProject(projectId) {
     const initDir = config.INIT_PROJECT_DIR;
     const templateZipPath = path.join(
       initDir,
-      `${config.INIT_PROJECT_NAME}.zip`
+      `${templateName}.zip`
     );
-    const templateDir = path.join(initDir, config.INIT_PROJECT_NAME);
+    const templateDir = path.join(initDir, templateName);
 
     log(projectId, "DEBUG", "Start checking template directory", { templateDir, templateZipPath });
 

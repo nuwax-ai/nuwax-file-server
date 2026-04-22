@@ -48,29 +48,47 @@ async function deleteInitProjectFolder(initProjectDir, initProjectName) {
  */
 async function cleanupInitProjectOnStartup(config) {
   try {
-    const { INIT_PROJECT_DIR, INIT_PROJECT_NAME } = config;
+    const {
+      INIT_PROJECT_DIR,
+      INIT_PROJECT_NAME_REACT,
+      INIT_PROJECT_NAME_VUE3,
+    } = config;
 
-    if (!INIT_PROJECT_DIR || !INIT_PROJECT_NAME) {
-      log("default", "WARN", "INIT_PROJECT_DIR or INIT_PROJECT_NAME configuration missing");
+    if (!INIT_PROJECT_DIR) {
+      log("default", "WARN", "INIT_PROJECT_DIR configuration missing");
+      return false;
+    }
+
+    const templateNameSet = new Set(
+      [
+        INIT_PROJECT_NAME_REACT,
+        INIT_PROJECT_NAME_VUE3,
+      ].filter(Boolean)
+    );
+    if (templateNameSet.size === 0) {
+      log("default", "WARN", "Initialization template name configuration missing");
       return false;
     }
 
     log("default", "INFO", "Start cleaning initialization project directory...");
     log("default", "INFO", `Target directory: ${INIT_PROJECT_DIR}`);
-    log("default", "INFO", `Project name: ${INIT_PROJECT_NAME}`);
+    log("default", "INFO", `Template names: ${Array.from(templateNameSet).join(", ")}`);
 
-    const success = await deleteInitProjectFolder(
-      INIT_PROJECT_DIR,
-      INIT_PROJECT_NAME
-    );
+    let allSuccess = true;
+    for (const templateName of templateNameSet) {
+      const success = await deleteInitProjectFolder(INIT_PROJECT_DIR, templateName);
+      if (!success) {
+        allSuccess = false;
+      }
+    }
 
-    if (success) {
+    if (allSuccess) {
       log("default", "INFO", "Initialization project directory cleanup completed");
     } else {
       log("default", "ERROR", "Initialization project directory cleanup failed");
     }
 
-    return success;
+    return allSuccess;
   } catch (error) {
     log("default", "ERROR", `Clean initialization project directory failed: ${error.message}`);
     return false;

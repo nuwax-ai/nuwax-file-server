@@ -176,13 +176,16 @@ const routes = [
     path: "/create-project",
     method: "post",
     handler: asyncHandler(async (req, res) => {
-      const { projectId } = req.body;
+      const { projectId, templateType } = req.body;
 
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
-      const result = await projectService.createProject(String(projectId));
+      const result = await projectService.createProject(
+        String(projectId),
+        templateType
+      );
       res.status(200).json(result);
     }),
   },
