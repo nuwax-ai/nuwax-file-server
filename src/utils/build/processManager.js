@@ -378,7 +378,10 @@ async function startDev_NonBlocking({
     // 组合为单个子进程内串行执行：先 dev-inject，再 vite-plugin-design-mode
     // 使用 set +e 忽略错误，确保两个命令都会执行，无论第一个是否成功
     // 注意：即使预处理命令失败，也不会阻塞后续依赖安装和 dev 启动，仅做“尽力而为”的处理
-    const preCmd = "set +e ; pnpm dlx @xagi/dev-inject@latest install --framework ; pnpm dlx @xagi/vite-plugin-design-mode@1.1.0-beta.1 install ; set -e";
+    const preCmd = "set +e ; pnpm dlx @xagi/dev-inject@latest install --framework ; pnpm dlx @xagi/vite-plugin-design-mode@next install ; set -e";
+
+    safeWrite(outStream, preCmd, "Main log");
+    safeWrite(tempOutStream, preCmd, "Temp log");
 
     // 在安装依赖之前先执行预处理命令（失败不影响后续流程）
     await new Promise((resolve) => {
