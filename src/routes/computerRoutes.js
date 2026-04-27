@@ -75,9 +75,20 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId } = req.body || {};
+      const { userId, cId, skillUrls } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
+
+      // multipart/form-data 中数组可能被序列化成 JSON 字符串
+      let normalizedSkillUrls = skillUrls;
+      if (typeof skillUrls === "string") {
+        try {
+          const parsed = JSON.parse(skillUrls);
+          normalizedSkillUrls = Array.isArray(parsed) ? parsed : [skillUrls];
+        } catch {
+          normalizedSkillUrls = [skillUrls];
+        }
+      }
 
       log(logId, "INFO", "Create workspace request", {
         userId,
@@ -85,9 +96,10 @@ const routes = [
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
+        skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
       });
 
-      const result = await createWorkspace(userId, cId, file);
+      const result = await createWorkspace(userId, cId, file, normalizedSkillUrls);
 
       res.status(200).json({
         success: true,
@@ -101,9 +113,20 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId } = req.body || {};
+      const { userId, cId, skillUrls } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
+
+      // multipart/form-data 中数组可能被序列化成 JSON 字符串
+      let normalizedSkillUrls = skillUrls;
+      if (typeof skillUrls === "string") {
+        try {
+          const parsed = JSON.parse(skillUrls);
+          normalizedSkillUrls = Array.isArray(parsed) ? parsed : [skillUrls];
+        } catch {
+          normalizedSkillUrls = [skillUrls];
+        }
+      }
 
       log(logId, "INFO", "推送技能到工作空间请求", {
         userId,
@@ -111,9 +134,10 @@ const routes = [
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
+        skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
       });
 
-      const result = await pushSkillsToWorkspace(userId, cId, file);
+      const result = await pushSkillsToWorkspace(userId, cId, file, normalizedSkillUrls);
 
       res.status(200).json({
         success: true,

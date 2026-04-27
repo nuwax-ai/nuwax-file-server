@@ -14,9 +14,7 @@ import config from "../appConfig/index.js";
 import { log } from "../utils/log/logUtils.js";
 import {
   ValidationError,
-  BusinessError,
   SystemError,
-  FileError,
   asyncHandler,
 } from "../utils/error/errorHandler.js";
 
@@ -172,6 +170,26 @@ function decodeFileNameMiddleware(req, res, next) {
 
 // 路由配置
 const routes = [
+  {
+    path: "/push-skills-to-workspace",
+    method: "post",
+    handler: upload.single("file"),
+    customHandler: asyncHandler(async (req, res) => {
+      const { projectId, skillUrls } = req.body || {};
+      const file = req.file || null;
+
+      if (!projectId) {
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
+      }
+
+      const result = await projectService.pushSkillsToWorkspace(
+        String(projectId),
+        file,
+        skillUrls
+      );
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
   {
     path: "/create-project",
     method: "post",

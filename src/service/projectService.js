@@ -503,6 +503,360 @@ async function handleFileUpload(projectId, codeVersion, file) {
 }
 
 /**
+ * 规范化 skillUrls 参数，兼容数组/JSON 字符串/单字符串
+ * @param {unknown} skillUrls
+ * @returns {string[]}
+ */
+function normalizeSkillUrls(skillUrls) {
+  if (!skillUrls) return [];
+  if (Array.isArray(skillUrls)) {
+    return skillUrls
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof skillUrls === "string") {
+    const trimmed = skillUrls.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean);
+      }
+    } catch {
+      // 非 JSON 字符串，按单个 URL 处理
+    }
+    return [trimmed];
+  }
+  return [];
+}
+
+/**
+ * 删除目录（如果存在）
+ * @param {string} targetDir
+ */
+async function removeDirIfExists(targetDir) {
+  if (!fs.existsSync(targetDir)) return;
+  await fs.promises.rm(targetDir, { recursive: true, force: true });
+}
+
+/**
+ * 安全移动目录（跨设备时回退为 copy）
+ * @param {string} srcDir
+ * @param {string} destDir
+ */
+async function moveDirectory(srcDir, destDir) {
+  try {
+    await fs.promises.rename(srcDir, destDir);
+  } catch (err) {
+    if (err.code === "EXDEV") {
+      async function copyRecursive(src, dest) {
+        const stat = await fs.promises.lstat(src);
+        if (stat.isDirectory()) {
+          await fs.promises.mkdir(dest, { recursive: true });
+          const items = await fs.promises.readdir(src);
+          for (const item of items) {
+            await copyRecursive(path.join(src, item), path.join(dest, item));
+          }
+        } else {
+          await fs.promises.copyFile(src, dest);
+        }
+      }
+
+      await copyRecursive(srcDir, destDir);
+      await fs.promises.rm(srcDir, { recursive: true, force: true });
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
+ * 递归查找指定目录（优先根目录，再查一层子目录）
+ * @param {string} rootDir
+ * @param {string} dirName
+ * @returns {Promise<string|null>}
+ */
+async function findDir(rootDir, dirName) {
+  const directDir = path.join(rootDir, dirName);
+  if (fs.existsSync(directDir) && (await fs.promises.lstat(directDir)).isDirectory()) {
+    return directDir;
+  }
+
+  const entries = await fs.promises.readdir(rootDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const candidate = path.join(rootDir, entry.name, dirName);
+    if (fs.existsSync(candidate) && (await fs.promises.lstat(candidate)).isDirectory()) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 下载 URL 到本地文件
+ * @param {string} url
+ * @param {string} destinationPath
+ * @param {string} logId
+ */
+async function downloadUrlToFile(url, destinationPath, logId) {
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new FileError(`Failed to download skill zip from url: ${url}`, {
+      url,
+      reason: error.message,
+    });
+  }
+
+  if (!response.ok) {
+    throw new FileError(`Failed to download skill zip from url: ${url}`, {
+      url,
+      status: response.status,
+      statusText: response.statusText,
+    });
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (
+    contentType &&
+    !contentType.includes("zip") &&
+    !contentType.includes("octet-stream")
+  ) {
+    log(logId, "WARN", "Downloaded skill url content-type is not typical zip", {
+      url,
+      contentType,
+    });
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  await fs.promises.writeFile(destinationPath, buffer);
+}
+
+/**
+ * 推送技能到项目工作空间（.claude/skills）
+ * @param {string|number} projectId
+ * @param {Object|null} file multer 文件对象（zip）
+ * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
+ * @returns {Promise<{message:string, projectPath:string, updatedSkills:string[]}>}
+ */
+async function pushSkillsToWorkspace(projectId, file, skillUrls) {
+  const logId = String(projectId);
+  const startTime = Date.now();
+  const normalizedSkillUrls = normalizeSkillUrls(skillUrls);
+  const downloadedZipPaths = [];
+  const extractRoots = [];
+
+  if (!projectId) {
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
+  }
+  if (!file && normalizedSkillUrls.length === 0) {
+    throw new ValidationError("file or skillUrls cannot both be empty", {
+      field: "file|skillUrls",
+    });
+  }
+  if (file) {
+    if (!file.path) {
+      throw new ValidationError("Uploaded file has no valid path", { field: "file.path" });
+    }
+    const ext = path.extname(file.originalname || file.filename || "").toLowerCase();
+    if (ext !== ".zip") {
+      throw new ValidationError("Only zip files are supported", {
+        field: "file",
+        originalName: file?.originalname,
+      });
+    }
+  }
+
+  const projectPath = path.join(config.PROJECT_SOURCE_DIR, String(projectId));
+  if (!fs.existsSync(projectPath)) {
+    throw new ValidationError("Project does not exist", { field: "projectId" });
+  }
+
+  const claudeDir = path.join(projectPath, ".claude");
+  const targetSkillsDir = path.join(claudeDir, "skills");
+  const tempRoot = path.join(config.UPLOAD_PROJECT_DIR, "temp");
+
+  try {
+    await fs.promises.mkdir(claudeDir, { recursive: true });
+    await fs.promises.mkdir(targetSkillsDir, { recursive: true });
+    await fs.promises.mkdir(tempRoot, { recursive: true });
+
+    const updatedSkillSet = new Set();
+
+    // 处理上传 zip（与 computerRoutes 行为对齐：期望存在 skills 目录）
+    if (file) {
+      const extractRoot = path.join(
+        tempRoot,
+        `project_skill_push_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+      );
+      extractRoots.push(extractRoot);
+      await fs.promises.mkdir(extractRoot, { recursive: true });
+      await extractZip(file.path, extractRoot);
+
+      const skillsDir = await findDir(extractRoot, "skills");
+      if (!skillsDir) {
+        log(logId, "WARN", "skills directory not found in uploaded zip", {
+          projectId,
+          extractRoot,
+        });
+      } else {
+        const skillEntries = await fs.promises.readdir(skillsDir, { withFileTypes: true });
+        const skillDirs = skillEntries.filter(
+          (entry) => entry.isDirectory() && !entry.name.startsWith(".")
+        );
+        for (const skillDir of skillDirs) {
+          const srcSkillPath = path.join(skillsDir, skillDir.name);
+          const destSkillPath = path.join(targetSkillsDir, skillDir.name);
+          if (fs.existsSync(destSkillPath)) {
+            await removeDirIfExists(destSkillPath);
+          }
+          await moveDirectory(srcSkillPath, destSkillPath);
+          updatedSkillSet.add(skillDir.name);
+        }
+      }
+    }
+
+    // 处理技能 URL（结构兼容 skills/<skillName> 或直接 <skillName>）
+    for (let i = 0; i < normalizedSkillUrls.length; i += 1) {
+      const skillUrl = normalizedSkillUrls[i];
+      const downloadedZipPath = path.join(
+        tempRoot,
+        `project_skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
+      );
+      downloadedZipPaths.push(downloadedZipPath);
+      const extractRoot = path.join(
+        tempRoot,
+        `project_skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
+      );
+      extractRoots.push(extractRoot);
+
+      await fs.promises.mkdir(extractRoot, { recursive: true });
+      await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
+      await extractZip(downloadedZipPath, extractRoot);
+
+      const rootEntries = await fs.promises.readdir(extractRoot, { withFileTypes: true });
+      const rootDirs = rootEntries.filter(
+        (entry) => entry.isDirectory() && !entry.name.startsWith(".")
+      );
+      const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
+      const skillCandidates = skillsRootDir
+        ? (await fs.promises.readdir(path.join(extractRoot, "skills"), {
+            withFileTypes: true,
+          }))
+            .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+            .map((entry) => ({
+              name: entry.name,
+              sourcePath: path.join(extractRoot, "skills", entry.name),
+            }))
+        : rootDirs.map((entry) => ({
+            name: entry.name,
+            sourcePath: path.join(extractRoot, entry.name),
+          }));
+
+      if (skillCandidates.length === 0) {
+        log(logId, "WARN", "No skill directory found after extracting skill url zip", {
+          projectId,
+          skillUrl,
+          extractRoot,
+        });
+        continue;
+      }
+
+      for (const skillDir of skillCandidates) {
+        const destSkillPath = path.join(targetSkillsDir, skillDir.name);
+        if (fs.existsSync(destSkillPath)) {
+          await removeDirIfExists(destSkillPath);
+        }
+        await moveDirectory(skillDir.sourcePath, destSkillPath);
+        updatedSkillSet.add(skillDir.name);
+      }
+    }
+
+    const updatedSkills = Array.from(updatedSkillSet);
+    const message =
+      updatedSkills.length > 0
+        ? `Pushed ${updatedSkills.length} skills: ${updatedSkills.join(", ")}`
+        : "No valid skill directories found in file or skillUrls";
+
+    log(logId, "INFO", "Push skills to project workspace completed", {
+      projectId,
+      updatedSkills,
+      skillUrlsCount: normalizedSkillUrls.length,
+      hasFile: !!file,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    return {
+      message,
+      projectPath,
+      updatedSkills,
+    };
+  } catch (error) {
+    log(logId, "ERROR", "Push skills to project workspace failed", {
+      projectId,
+      error: error.message,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    if (
+      error instanceof ValidationError ||
+      error instanceof FileError ||
+      error instanceof BusinessError ||
+      error instanceof SystemError
+    ) {
+      throw error;
+    }
+
+    throw new SystemError(`Failed to push skills to project workspace: ${error.message}`, {
+      projectId,
+    });
+  } finally {
+    for (const extractRoot of extractRoots) {
+      try {
+        if (fs.existsSync(extractRoot)) {
+          await fs.promises.rm(extractRoot, { recursive: true, force: true });
+        }
+      } catch (e) {
+        log(logId, "WARN", "Failed to clean extracted skill temp dir", {
+          extractRoot,
+          error: e.message,
+        });
+      }
+    }
+
+    for (const zipPath of downloadedZipPaths) {
+      try {
+        if (fs.existsSync(zipPath)) {
+          await fs.promises.unlink(zipPath);
+        }
+      } catch (e) {
+        log(logId, "WARN", "Failed to clean downloaded skill zip", {
+          zipPath,
+          error: e.message,
+        });
+      }
+    }
+
+    try {
+      if (file?.path && fs.existsSync(file.path)) {
+        await fs.promises.unlink(file.path);
+      }
+    } catch (e) {
+      log(logId, "WARN", "Failed to clean uploaded skill zip", {
+        tempZipPath: file?.path,
+        error: e.message,
+      });
+    }
+  }
+}
+
+/**
  * 删除项目
  * @param {string} projectId - 项目ID
  * @param {string|number} pid - 进程ID（可选）
@@ -793,6 +1147,7 @@ export {
   backupProjectOfVersion,
   cleanupProjectDirectory,
   handleFileUpload,
+  pushSkillsToWorkspace,
   deleteProject,
 };
 export default {
@@ -803,5 +1158,6 @@ export default {
   backupProjectOfVersion,
   cleanupProjectDirectory,
   handleFileUpload,
+  pushSkillsToWorkspace,
   deleteProject,
 };
