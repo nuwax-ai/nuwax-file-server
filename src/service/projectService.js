@@ -22,7 +22,8 @@ import {
 import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
 import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 import {
-  ensureAgentWorkspaceLinks,
+  ensurePrimaryAgentDirs,
+  syncAgents,
 } from "../utils/common/AgentWorkspaceUtils.js";
 
 /**
@@ -640,7 +641,7 @@ async function downloadUrlToFile(url, destinationPath, logId) {
 }
 
 /**
- * 推送技能到项目工作空间（统一写入 .nuwax/skills）
+ * 推送技能到项目工作空间
  * @param {string|number} projectId
  * @param {Object|null} file multer 文件对象（zip）
  * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
@@ -685,7 +686,7 @@ async function pushSkillsToWorkspace(
   }
 
   const { skillsDir: targetSkillsDir, agentTypes: normalizedAgentTypes } =
-    await ensureAgentWorkspaceLinks(projectPath);
+    await ensurePrimaryAgentDirs(projectPath);
   const tempRoot = path.join(config.UPLOAD_PROJECT_DIR, "temp");
 
   try {
@@ -797,6 +798,7 @@ async function pushSkillsToWorkspace(
       agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
+    await syncAgents(projectPath);
 
     return {
       message,

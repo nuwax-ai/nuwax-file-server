@@ -7,6 +7,7 @@ const AGENT_ROOT_MAP = {
 };
 
 const ALL_AGENT_TYPES = Object.keys(AGENT_ROOT_MAP);
+const PRIMARY_AGENT_TYPE = "claudecode";
 
 async function removePathIfExists(targetPath) {
   if (!fs.existsSync(targetPath)) return;
@@ -18,47 +19,77 @@ async function ensureDir(dirPath) {
   await fs.promises.mkdir(dirPath, { recursive: true });
 }
 
-/**
- * 确保工作区存在统一的 .nuwax 存储目录
- * @param {string} workspaceRoot
- * @returns {Promise<{nuwaxDir:string, skillsDir:string, agentsDir:string}>}
- */
-async function ensureNuwaxDirs(workspaceRoot) {
-  const nuwaxDir = path.join(workspaceRoot, ".nuwax");
-  const skillsDir = path.join(nuwaxDir, "skills");
-  const agentsDir = path.join(nuwaxDir, "agents");
-  await ensureDir(nuwaxDir);
-  await ensureDir(skillsDir);
-  await ensureDir(agentsDir);
-  return { nuwaxDir, skillsDir, agentsDir };
+async function copyDirectory(srcDir, destDir) {
+  const stat = await fs.promises.lstat(srcDir);
+  if (stat.isDirectory()) {
+    await ensureDir(destDir);
+    const entries = await fs.promises.readdir(srcDir);
+    for (const entry of entries) {
+      await copyDirectory(path.join(srcDir, entry), path.join(destDir, entry));
+    }
+  } else {
+    await ensureDir(path.dirname(destDir));
+    await fs.promises.copyFile(srcDir, destDir);
+  }
 }
 
 /**
- * 对每一种 agent 建立 skills/agents 软链接映射
- * @param {string} workspaceRoot
- * @returns {Promise<{agentTypes:string[], skillsDir:string, agentsDir:string}>}
+ * 仅确保主 agent（.claude）目录存在，业务逻辑只写这一份
  */
-async function ensureAgentWorkspaceLinks(workspaceRoot) {
-  const { skillsDir, agentsDir } = await ensureNuwaxDirs(workspaceRoot);
+async function ensurePrimaryAgentDirs(workspaceRoot) {
+  const rootDir = path.join(workspaceRoot, AGENT_ROOT_MAP[PRIMARY_AGENT_TYPE]);
+  const skillsDir = path.join(rootDir, "skills");
+  const agentsDir = path.join(rootDir, "agents");
+  await ensureDir(rootDir);
+  await ensureDir(skillsDir);
+  await ensureDir(agentsDir);
+  return { rootDir, skillsDir, agentsDir, agentTypes: ALL_AGENT_TYPES };
+}
+
+/**
+ * 将主 agent 目录内容同步到其他 agent 目录
+ */
+async function syncAgents(workspaceRoot) {
+  const primary = await ensurePrimaryAgentDirs(workspaceRoot);
 
   for (const agentType of ALL_AGENT_TYPES) {
-    const agentRootDir = path.join(workspaceRoot, AGENT_ROOT_MAP[agentType]);
-    const skillsLinkPath = path.join(agentRootDir, "skills");
-    const agentsLinkPath = path.join(agentRootDir, "agents");
+    if (agentType === PRIMARY_AGENT_TYPE) continue;
+    const targetRoot = path.join(workspaceRoot, AGENT_ROOT_MAP[agentType]);
+    const targetSkills = path.join(targetRoot, "skills");
+    const targetAgents = path.join(targetRoot, "agents");
+    await ensureDir(targetRoot);
 
-    await ensureDir(agentRootDir);
-    await removePathIfExists(skillsLinkPath);
-    await removePathIfExists(agentsLinkPath);
+    await removePathIfExists(targetSkills);
+    await ensureDir(targetSkills);
+    if (fs.existsSync(primary.skillsDir)) {
+      const entries = await fs.promises.readdir(primary.skillsDir, {
+        withFileTypes: true,
+      });
+      for (const entry of entries) {
+        const srcPath = path.join(primary.skillsDir, entry.name);
+        const dstPath = path.join(targetSkills, entry.name);
+        await copyDirectory(srcPath, dstPath);
+      }
+    }
 
-    const symlinkType = process.platform === "win32" ? "junction" : "dir";
-    await fs.promises.symlink(skillsDir, skillsLinkPath, symlinkType);
-    await fs.promises.symlink(agentsDir, agentsLinkPath, symlinkType);
+    await removePathIfExists(targetAgents);
+    await ensureDir(targetAgents);
+    if (fs.existsSync(primary.agentsDir)) {
+      const entries = await fs.promises.readdir(primary.agentsDir, {
+        withFileTypes: true,
+      });
+      for (const entry of entries) {
+        const srcPath = path.join(primary.agentsDir, entry.name);
+        const dstPath = path.join(targetAgents, entry.name);
+        await copyDirectory(srcPath, dstPath);
+      }
+    }
   }
 
-  return { agentTypes: ALL_AGENT_TYPES, skillsDir, agentsDir };
+  return { agentTypes: ALL_AGENT_TYPES };
 }
 
 export {
-  ensureNuwaxDirs,
-  ensureAgentWorkspaceLinks,
+  ensurePrimaryAgentDirs,
+  syncAgents,
 };

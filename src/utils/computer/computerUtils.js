@@ -9,7 +9,8 @@ import {
 } from "../error/errorHandler.js";
 import { log } from "../log/logUtils.js";
 import {
-  ensureAgentWorkspaceLinks,
+  ensurePrimaryAgentDirs,
+  syncAgents,
 } from "../common/AgentWorkspaceUtils.js";
 
 /**
@@ -229,9 +230,9 @@ async function createWorkspace(userId, cId, file, skillUrls) {
     agentsDir: targetAgentsDir,
     agentTypes: normalizedAgentTypes,
   } =
-    await ensureAgentWorkspaceLinks(userWorkspaceRoot);
+    await ensurePrimaryAgentDirs(userWorkspaceRoot);
 
-  // 始终：保证工作空间目录存在，并清空（删除）现有 .nuwax 下的 skills 和 agents 目录
+  // 始终：保证工作空间目录存在，并清空（删除）现有 skills 和 agents 目录
   if (!fs.existsSync(userWorkspaceRoot)) {
     await fs.promises.mkdir(userWorkspaceRoot, { recursive: true });
   }
@@ -265,7 +266,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
   }
   await removeDirIfExists(targetSkillsDir);
   await removeDirIfExists(targetAgentsDir);
-  // 清空后立即重建空目录，确保符号链接目标始终存在
+  // 清空后立即重建空目录
   await fs.promises.mkdir(targetSkillsDir, { recursive: true });
   await fs.promises.mkdir(targetAgentsDir, { recursive: true });
 
@@ -286,7 +287,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
 
   const skillsExistsAfter = fs.existsSync(targetSkillsDir);
   const agentsExistsAfter = fs.existsSync(targetAgentsDir);
-  log(logId, "INFO", "Deleted old .nuwax skills and agents directories completed", {
+  log(logId, "INFO", "Deleted old skills and agents directories completed", {
     userId,
     cId,
     targetSkillsDir,
@@ -298,6 +299,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
 
   // 如果没有上传文件也没有 URL：不写入 skills 和 agents
   if (!file && normalizedSkillUrls.length === 0) {
+    await syncAgents(userWorkspaceRoot);
     log(logId, "INFO", "Created workspace (no uploaded file, no skills and agents)", {
       userId,
       cId,
@@ -521,6 +523,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
       agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
+    await syncAgents(userWorkspaceRoot);
 
     return {
       message,
@@ -642,7 +645,7 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
     String(cId)
   );
   const { skillsDir: targetSkillsDir, agentTypes: normalizedAgentTypes } =
-    await ensureAgentWorkspaceLinks(userWorkspaceRoot);
+    await ensurePrimaryAgentDirs(userWorkspaceRoot);
 
   try {
     if (!fs.existsSync(userWorkspaceRoot)) {
@@ -798,6 +801,7 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
       agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
+    await syncAgents(userWorkspaceRoot);
 
     return {
       message,
