@@ -13,6 +13,10 @@ import { copyProject } from "../utils/project/copyProjectUtils.js";
 import config from "../appConfig/index.js";
 import { log } from "../utils/log/logUtils.js";
 import {
+  extractIsolationContext,
+  resolveProjectPath,
+} from "../utils/common/projectPathUtils.js";
+import {
   ValidationError,
   SystemError,
   asyncHandler,
@@ -182,10 +186,12 @@ const routes = [
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
+      const isolationContext = extractIsolationContext(req.body || {});
       const result = await projectService.pushSkillsToWorkspace(
         String(projectId),
         file,
-        skillUrls
+        skillUrls,
+        isolationContext
       );
       res.status(200).json({ success: true, ...result });
     }),
@@ -195,6 +201,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, templateType } = req.body;
+      const isolationContext = extractIsolationContext(req.body || {});
 
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -202,7 +209,8 @@ const routes = [
 
       const result = await projectService.createProject(
         String(projectId),
-        templateType
+        templateType,
+        isolationContext
       );
       res.status(200).json(result);
     }),
@@ -213,6 +221,7 @@ const routes = [
     handler: upload.single("file"),
     customHandler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, pid, basePath } = req.body;
+      const isolationContext = extractIsolationContext(req.body || {});
 
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -241,13 +250,17 @@ const routes = [
           req,
           codeVersion,
           pid,
-          basePath
+          basePath,
+          isolationContext
         );
         res.status(200).json(result);
       } catch (err) {
         // 失败时清理项目目录（uploadProject内部已经处理，这里作为额外保障）
         try {
-          await projectService.cleanupProjectDirectory(String(projectId));
+          await projectService.cleanupProjectDirectory(
+            String(projectId),
+            isolationContext
+          );
         } catch (cleanupErr) {
           log(projectId, "ERROR", "Route layer cleanup project directory failed", {
             projectId,
@@ -275,12 +288,13 @@ const routes = [
     method: "get",
     handler: asyncHandler(async (req, res) => {
       const { projectId, command, proxyPath } = req.query;
+      const isolationContext = extractIsolationContext(req.query || {});
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
 
       // 构建项目路径
-      const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+      const projectPath = resolveProjectPath(projectId, isolationContext);
 
       // 检查项目目录是否存在
       if (!fs.existsSync(projectPath)) {
@@ -306,6 +320,7 @@ const routes = [
     method: "get",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, command, proxyPath } = req.query;
+      const isolationContext = extractIsolationContext(req.query || {});
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
       }
@@ -317,7 +332,8 @@ const routes = [
           String(projectId),
           codeVersion,
           command,
-          proxyPath
+          proxyPath,
+          isolationContext
         );
         res.status(200).json({ success: true, ...result });
       } catch (err) {
@@ -331,10 +347,12 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion } = req.body;
+      const isolationContext = extractIsolationContext(req.body || {});
 
       const result = await projectService.backupCurrentVersion(
         String(projectId),
-        codeVersion
+        codeVersion,
+        isolationContext
       );
       res.status(200).json({ success: true, ...result });
     }),
@@ -344,12 +362,14 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, exportType, config } = req.body;
+      const isolationContext = extractIsolationContext(req.body || {});
 
       const result = await projectService.exportProject(
         String(projectId),
         codeVersion,
         exportType,
-        config
+        config,
+        isolationContext
       );
 
       // 检查zip文件是否存在
@@ -391,6 +411,7 @@ const routes = [
     method: "get",
     handler: asyncHandler(async (req, res) => {
       const { projectId, pid } = req.query;
+      const isolationContext = extractIsolationContext(req.query || {});
 
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -399,7 +420,8 @@ const routes = [
       const result = await projectService.deleteProject(
         String(projectId),
         pid,
-        req
+        req,
+        isolationContext
       );
       res.status(200).json(result);
     }),
@@ -411,6 +433,7 @@ const routes = [
     decodeMiddleware: decodeFileNameMiddleware,
     customHandler: asyncHandler(async (req, res) => {
       const { projectId, fileName } = req.body;
+      const isolationContext = extractIsolationContext(req.body || {});
 
       if (!projectId) {
         throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -423,7 +446,8 @@ const routes = [
         const result = await uploadAttachmentFile(
           String(projectId),
           req.file,
-          fileName
+          fileName,
+          isolationContext
         );
         res.status(200).json({ success: true, ...result });
       } catch (err) {
@@ -447,6 +471,16 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { sourceProjectId, targetProjectId } = req.body;
+      const sourceIsolationContext = extractIsolationContext({
+        tenantId: req.body?.sourceTenantId || req.body?.tenantId,
+        spaceId: req.body?.sourceSpaceId || req.body?.spaceId,
+        isolationType: req.body?.sourceIsolationType || req.body?.isolationType,
+      });
+      const targetIsolationContext = extractIsolationContext({
+        tenantId: req.body?.targetTenantId || req.body?.tenantId,
+        spaceId: req.body?.targetSpaceId || req.body?.spaceId,
+        isolationType: req.body?.targetIsolationType || req.body?.isolationType,
+      });
 
       if (!sourceProjectId) {
         throw new ValidationError("Source project ID cannot be empty", {
@@ -461,7 +495,11 @@ const routes = [
 
       const result = await copyProject(
         String(sourceProjectId),
-        String(targetProjectId)
+        String(targetProjectId),
+        {
+          sourceIsolationContext,
+          targetIsolationContext,
+        }
       );
       res.status(200).json(result);
     }),

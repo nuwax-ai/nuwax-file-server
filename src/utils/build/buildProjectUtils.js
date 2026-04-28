@@ -11,9 +11,11 @@ import {
   ResourceError,
 } from "../error/errorHandler.js";
 import { installDependencies } from "../buildDependency/dependencyManager.js";
+import {
+  extractIsolationContext,
+  resolveProjectPath,
+} from "../common/projectPathUtils.js";
 
-//项目源文件所在目录
-const projectSourceDir = config.PROJECT_SOURCE_DIR;
 const distTargetDir = config.DIST_TARGET_DIR;
 
 // 构建并发控制（无队列）
@@ -137,7 +139,8 @@ function runBuildScript(projectId, projectPath, scriptName, extraArgs = []) {
  * @returns {Promise<Object>} 构建结果
  */
 async function buildProject(req, projectId) {
-  const projectPath = path.join(projectSourceDir, projectId);
+  const isolationContext = extractIsolationContext(req?.query || {});
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   const jsonFilePath = path.join(projectPath, "package.json");
 
   const exists = fs.existsSync(jsonFilePath);

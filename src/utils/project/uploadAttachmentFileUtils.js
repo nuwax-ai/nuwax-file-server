@@ -3,6 +3,7 @@ import path from "path";
 import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { ValidationError, SystemError, FileError } from "../error/errorHandler.js";
+import { resolveProjectPath } from "../common/projectPathUtils.js";
 
 /**
  * 上传附件文件到项目的 .attachments 目录
@@ -11,7 +12,12 @@ import { ValidationError, SystemError, FileError } from "../error/errorHandler.j
  * @param {string} fileName 可选，指定存储的文件名
  * @returns {Object} 包含fileName和relativePath的结果对象
  */
-async function uploadAttachmentFile(projectId, file, fileName = null) {
+async function uploadAttachmentFile(
+  projectId,
+  file,
+  fileName = null,
+  isolationContext = {}
+) {
   try {
     // 验证参数
     if (!projectId) {
@@ -32,7 +38,7 @@ async function uploadAttachmentFile(projectId, file, fileName = null) {
     });
 
     // 构建项目目录路径
-    const projectDir = path.join(config.PROJECT_SOURCE_DIR, projectId);
+    const projectDir = resolveProjectPath(projectId, isolationContext);
 
     // 检查项目目录是否存在
     if (!fs.existsSync(projectDir)) {

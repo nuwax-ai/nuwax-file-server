@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { copyDirectoryFiltered } from "./backupUtils.js";
 import {
@@ -9,6 +8,7 @@ import {
   SystemError,
 } from "../error/errorHandler.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
+import { resolveProjectPath } from "../common/projectPathUtils.js";
 
 /**
  * 复制项目
@@ -16,7 +16,11 @@ import { createPnpmNpmrc } from "../common/npmrcUtils.js";
  * @param {string} targetProjectId - 目标项目ID
  * @returns {Promise<Object>} 复制结果
  */
-async function copyProject(sourceProjectId, targetProjectId) {
+async function copyProject(
+  sourceProjectId,
+  targetProjectId,
+  isolationContexts = {}
+) {
   if (!sourceProjectId) {
     throw new ValidationError("Source project ID cannot be empty", {field: "sourceProjectId",});
   }
@@ -24,9 +28,16 @@ async function copyProject(sourceProjectId, targetProjectId) {
     throw new ValidationError("Target project ID cannot be empty", {field: "targetProjectId",});
   }
 
-  const projectSourceDir = config.PROJECT_SOURCE_DIR;
-  const sourceProjectPath = path.join(projectSourceDir, sourceProjectId);
-  const targetProjectPath = path.join(projectSourceDir, targetProjectId);
+  const sourceIsolationContext = isolationContexts.sourceIsolationContext || {};
+  const targetIsolationContext = isolationContexts.targetIsolationContext || {};
+  const sourceProjectPath = resolveProjectPath(
+    sourceProjectId,
+    sourceIsolationContext
+  );
+  const targetProjectPath = resolveProjectPath(
+    targetProjectId,
+    targetIsolationContext
+  );
 
   // 检查源项目是否存在
   if (!fs.existsSync(sourceProjectPath)) {

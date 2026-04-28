@@ -1,7 +1,6 @@
 import path from "path";
 import fs from "fs";
 import { log } from "../log/logUtils.js";
-import config from "../../appConfig/index.js";
 import { BusinessError, FileError, ResourceError } from "../error/errorHandler.js";
 import ERROR_CODES from "../error/errorCodes.js";
 import {
@@ -12,9 +11,10 @@ import {
   startDev_NonBlocking,
 } from "./processManager.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
-
-//项目源文件所在目录
-const projectSourceDir = config.PROJECT_SOURCE_DIR;
+import {
+  extractIsolationContext,
+  resolveProjectPath,
+} from "../common/projectPathUtils.js";
 
 // 启动开发服务器
 async function startDevServer(req, projectId) {
@@ -32,7 +32,8 @@ async function startDevServer(req, projectId) {
       projectId,
       requestId: req.requestId,
     });
-    const projectPath = path.join(projectSourceDir, projectId);
+    const isolationContext = extractIsolationContext(req?.query || {});
+    const projectPath = resolveProjectPath(projectId, isolationContext);
     const jsonFilePath = path.join(projectPath, "package.json");
 
     const exists = fs.existsSync(jsonFilePath);

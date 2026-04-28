@@ -9,6 +9,10 @@ import {
 } from "../error/errorHandler.js";
 import { extractZip } from "../common/zipUtils.js";
 import { getFrameworkInfo } from "./frameworkDetectorUtils.js";
+import {
+  resolveProjectPath,
+  shouldUseIsolationPath,
+} from "../common/projectPathUtils.js";
 
 /**
  * 检查文件是否为二进制文件
@@ -110,7 +114,7 @@ async function traverseDirectory(targetDir, basePath, projectId, proxyPath) {
         const stats = await fs.promises.stat(fullPath);
         // 使用传入的 basePath 或默认的 PROJECT_SOURCE_DIR + projectId
         const referencePath =
-          basePath || path.join(config.PROJECT_SOURCE_DIR, projectId);
+          basePath || resolveProjectPath(projectId);
         const relativePath = path.relative(referencePath, fullPath);
 
         const isBinary = await isBinaryFile(fullPath);
@@ -178,7 +182,12 @@ async function getProjectContent(projectPath, command, proxyPath) {
     log(projectId, "INFO", "Start getting project content", { projectPath, command });
 
     log(projectId, "DEBUG", "Start traversing project directory", { projectPath });
-    const files = await traverseDirectory(projectPath, null, projectId, proxyPath);
+    const files = await traverseDirectory(
+      projectPath,
+      projectPath,
+      projectId,
+      proxyPath
+    );
     log(projectId, "DEBUG", "Project directory traversal completed", { projectPath, fileCount: files.length });
 
     // 根据 command 参数过滤 cpage_config.json
@@ -230,7 +239,13 @@ async function getProjectContent(projectPath, command, proxyPath) {
  * @param {string} command 命令参数，如果为 'cpage_config' 则返回 cpage_config.json，否则过滤掉它
  * @returns {Object} 包含文件列表的结果对象
  */
-async function getProjectContentByVersion(projectId, codeVersion, command, proxyPath) {
+async function getProjectContentByVersion(
+  projectId,
+  codeVersion,
+  command,
+  proxyPath,
+  isolationContext = {}
+) {
   const startTime = Date.now();
   const versionNum = Number(codeVersion);
   if (!Number.isFinite(versionNum)) {
@@ -251,7 +266,15 @@ async function getProjectContentByVersion(projectId, codeVersion, command, proxy
   }
 
   // 创建临时解压目录
-  const tempExtractDir = path.join(config.PROJECT_SOURCE_DIR, "_his", projectId);
+  const tempExtractDir = shouldUseIsolationPath(isolationContext)
+    ? path.join(
+        config.PROJECT_SOURCE_DIR,
+        String(isolationContext.tenantId),
+        String(isolationContext.spaceId),
+        "_his",
+        projectId
+      )
+    : path.join(config.PROJECT_SOURCE_DIR, "_his", projectId);
 
   try {
     // 清理临时目录（如果存在）

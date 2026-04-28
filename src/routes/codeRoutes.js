@@ -4,6 +4,7 @@ import { asyncHandler, ValidationError } from "../utils/error/errorHandler.js";
 import codeService from "../service/codeService.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
+import { extractIsolationContext } from "../utils/common/projectPathUtils.js";
 
 const codeRouter = express.Router();
 
@@ -22,6 +23,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, files } = req.body || {};
+      const isolationContext = extractIsolationContext(req.body || {});
       log(projectId, "INFO", "Partial files update", {
         projectId,
         codeVersion,
@@ -52,7 +54,8 @@ const routes = [
         String(projectId),
         String(codeVersion),
         files,
-        req
+        req,
+        isolationContext
       );
       res.status(200).json(result);
     }),
@@ -62,6 +65,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, files, basePath, pid } = req.body || {};
+      const isolationContext = extractIsolationContext(req.body || {});
       log(projectId, "INFO", "Submit files", {
         projectId,
         codeVersion,
@@ -102,7 +106,8 @@ const routes = [
         String(projectId),
         String(codeVersion),
         files,
-        req
+        req,
+        isolationContext
       );
       res.status(200).json(result);
     }),
@@ -113,6 +118,7 @@ const routes = [
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, filePath } = req.body || {};
+      const isolationContext = extractIsolationContext(req.body || {});
       const file = req.file; // 从 multer 中间件获取上传的文件
 
       log(projectId, "INFO", "上传单个文件", {
@@ -158,7 +164,8 @@ const routes = [
         String(codeVersion),
         fileObj,
         filePath,
-        req
+        req,
+        isolationContext
       );
       res.status(200).json(result);
     }),
@@ -168,6 +175,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion, rollbackTo } = req.body || {};
+      const isolationContext = extractIsolationContext(req.body || {});
       log(projectId, "INFO", "Rollback version", {
         projectId,
         codeVersion,
@@ -192,7 +200,8 @@ const routes = [
         String(projectId),
         String(codeVersion),
         String(rollbackTo),
-        req
+        req,
+        isolationContext
       );
       res.status(200).json(result);
     }),

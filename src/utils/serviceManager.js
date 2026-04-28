@@ -19,8 +19,12 @@ import fs from "fs-extra";
 import { spawn } from "cross-spawn";
 import treeKill from "tree-kill";
 import { fileURLToPath } from "url";
+import { execFileSync } from "child_process";
+import http from "http";
+import { createRequire } from "module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const esmRequire = createRequire(import.meta.url);
 
 // 服务配置
 const SERVICE_CONFIG = {
@@ -30,8 +34,13 @@ const SERVICE_CONFIG = {
   pidDir: path.join(os.tmpdir(), 'nuwax-file-server'),
   // PID 文件名
   pidFileName: 'server.pid',
+  lockFileName: 'start.lock',
   // 默认停止超时时间（毫秒）
   defaultStopTimeout: 30000,
+  // 默认启动健康检查超时时间（毫秒）
+  defaultStartTimeout: 30000,
+  // 启动锁陈旧超时时间（毫秒）
+  staleLockTimeout: 120000,
   // 检查进程间隔（毫秒）
   checkInterval: 500,
 };
@@ -45,6 +54,60 @@ const SERVICE_CONFIG = {
  */
 function getPidFilePath() {
   return path.join(SERVICE_CONFIG.pidDir, SERVICE_CONFIG.pidFileName);
+}
+
+/**
+ * 获取启动锁文件完整路径
+ *
+ * @returns {string} 锁文件路径
+ */
+function getLockFilePath() {
+  return path.join(SERVICE_CONFIG.pidDir, SERVICE_CONFIG.lockFileName);
+}
+
+/**
+ * 解析服务入口脚本路径（兼容 src 与 dist）
+ *
+ * @returns {string} server.js 完整路径
+ */
+function resolveServerScriptPath() {
+  const candidates = [
+    path.join(__dirname, '..', 'server.js'),
+    path.join(__dirname, 'server.js'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
+/**
+ * 读取 package 版本号（兼容 src 与 dist）
+ *
+ * @returns {string} 版本号
+ */
+function resolvePackageVersion() {
+  const candidates = [
+    '../../package.json',
+    '../package.json',
+  ];
+
+  for (const relPath of candidates) {
+    try {
+      const pkg = esmRequire(relPath);
+      if (pkg?.version) {
+        return pkg.version;
+      }
+    } catch (err) {
+      // 尝试下一个候选路径
+    }
+  }
+
+  return 'unknown';
 }
 
 /**
@@ -161,12 +224,239 @@ function isProcessRunning(pid) {
 }
 
 /**
+ * 获取进程命令行（跨平台）
+ *
+ * @param {number} pid - 进程 ID
+ * @returns {string} 进程命令行，读取失败时返回空字符串
+ */
+function getProcessCommand(pid) {
+  try {
+    if (isWindows()) {
+      const command = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+      );
+      return command.trim();
+    }
+
+    const command = execFileSync(
+      'ps',
+      ['-p', String(pid), '-o', 'command='],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    return command.trim();
+  } catch (err) {
+    return '';
+  }
+}
+
+/**
+ * 校验进程是否为当前服务进程
+ *
+ * @param {number} pid - 进程 ID
+ * @returns {boolean} 是否为目标服务进程
+ */
+function isTargetServiceProcess(pid) {
+  if (!isProcessRunning(pid)) {
+    return false;
+  }
+
+  const command = getProcessCommand(pid);
+  if (!command) {
+    // 无法读取命令行时不判定为目标进程，避免误杀非目标进程
+    return false;
+  }
+
+  const lower = command.toLowerCase();
+  const serviceScriptName = path.basename(path.join(__dirname, '..', 'server.js')).toLowerCase();
+  const serviceName = SERVICE_CONFIG.name.toLowerCase();
+  return lower.includes(serviceScriptName) || lower.includes(serviceName);
+}
+
+/**
+ * 获取启动锁，防止并发启动导致竞态
+ *
+ * @returns {number} 锁文件描述符
+ */
+function acquireStartLock() {
+  fs.ensureDirSync(SERVICE_CONFIG.pidDir);
+  const lockPath = getLockFilePath();
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const payload = JSON.stringify(
+    { pid: process.pid, token, createdAt: new Date().toISOString() },
+    null,
+    2
+  );
+
+  try {
+    const fd = fs.openSync(lockPath, 'wx');
+    fs.writeSync(fd, payload);
+    return { fd, token };
+  } catch (err) {
+    if (err.code !== 'EEXIST') {
+      throw err;
+    }
+
+    // 无人值守场景下自动清理陈旧锁，避免永远阻塞启动
+    try {
+      const raw = fs.readFileSync(lockPath, 'utf8');
+      const lockInfo = JSON.parse(raw);
+      const holderPid = Number(lockInfo?.pid);
+      const createdAt = lockInfo?.createdAt ? new Date(lockInfo.createdAt).getTime() : 0;
+      const lockAge = Date.now() - createdAt;
+      const holderAlive = Number.isFinite(holderPid) && holderPid > 0 && isProcessRunning(holderPid);
+      const expired = !createdAt || Number.isNaN(lockAge) || lockAge > SERVICE_CONFIG.staleLockTimeout;
+
+      if (!holderAlive || expired) {
+        fs.removeSync(lockPath);
+        const fd = fs.openSync(lockPath, 'wx');
+        fs.writeSync(fd, payload);
+        console.warn('Detected stale start lock, auto cleaned');
+        return { fd, token };
+      }
+    } catch (parseErr) {
+      // 锁文件损坏时直接重建
+      fs.removeSync(lockPath);
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.writeSync(fd, payload);
+      console.warn('Detected invalid start lock, auto cleaned');
+      return { fd, token };
+    }
+
+    throw err;
+  }
+}
+
+/**
+ * 释放启动锁
+ *
+ * @param {Object|null} lockHandle - 锁信息对象
+ */
+function releaseStartLock(lockHandle) {
+  const lockFd = lockHandle?.fd;
+  const lockToken = lockHandle?.token;
+
+  try {
+    if (lockFd !== null && lockFd !== undefined) {
+      fs.closeSync(lockFd);
+    }
+  } catch (err) {
+    // 忽略关闭错误
+  }
+
+  try {
+    const lockPath = getLockFilePath();
+    if (fs.existsSync(lockPath)) {
+      let shouldRemove = false;
+
+      if (!lockToken) {
+        shouldRemove = true;
+      } else {
+        try {
+          const raw = fs.readFileSync(lockPath, 'utf8');
+          const lockInfo = JSON.parse(raw);
+          shouldRemove = lockInfo?.token === lockToken;
+        } catch (err) {
+          // 无法解析时保守清理，避免锁残留
+          shouldRemove = true;
+        }
+      }
+
+      if (shouldRemove) {
+        fs.removeSync(lockPath);
+      }
+    }
+  } catch (err) {
+    // 忽略清理错误
+  }
+}
+
+/**
  * 检测当前操作系统是否为 Windows
  * 
  * @returns {boolean} 是否为 Windows 系统
  */
 function isWindows() {
   return process.platform === 'win32';
+}
+
+/**
+ * 启动前确保没有旧服务进程残留
+ *
+ * 处理策略：
+ * 1. 若 PID 文件不存在或进程已退出：直接清理并返回
+ * 2. 若进程存在：先尝试优雅停止，再尝试强制停止
+ * 3. 最终统一清理 PID 文件，避免后续启动被旧状态阻塞
+ *
+ * @param {number} [timeout=SERVICE_CONFIG.defaultStopTimeout] - 停止等待超时（毫秒）
+ * @returns {Promise<Object>} 处理结果
+ * @property {boolean} success - 是否成功
+ * @property {string} message - 处理结果消息
+ */
+async function ensureNoRunningServiceBeforeStart(timeout = SERVICE_CONFIG.defaultStopTimeout) {
+  const pidInfo = readPidFile();
+
+  // 无 PID 文件，无需处理
+  if (!pidInfo) {
+    return {
+      success: true,
+      message: 'No existing service process',
+    };
+  }
+
+  // PID 对应进程不存在，清理残留 PID 文件
+  if (!isTargetServiceProcess(pidInfo.pid)) {
+    console.log(`Found stale PID file (PID: ${pidInfo.pid}), clean it...`);
+    deletePidFile();
+    return {
+      success: true,
+      message: 'Stale PID file cleaned',
+    };
+  }
+
+  console.log(`Existing service process detected (PID: ${pidInfo.pid}), stopping before start...`);
+
+  // 先尝试优雅停止
+  const gracefulStopped = await stopProcess(pidInfo.pid, false);
+  if (gracefulStopped) {
+    const exited = await waitForProcessStop(pidInfo.pid, timeout);
+    if (exited) {
+      deletePidFile();
+      return {
+        success: true,
+        message: `Existing process ${pidInfo.pid} stopped gracefully`,
+      };
+    }
+  }
+
+  // 优雅停止失败后，强制停止
+  console.warn(`Graceful stop timeout or failed for PID ${pidInfo.pid}, force stop...`);
+  const forceStopped = await stopProcess(pidInfo.pid, true);
+  if (!forceStopped) {
+    return {
+      success: false,
+      message: `Failed to stop existing process ${pidInfo.pid}`,
+    };
+  }
+
+  const forceExited = await waitForProcessStop(pidInfo.pid, timeout);
+  if (!forceExited) {
+    return {
+      success: false,
+      message: `Existing process ${pidInfo.pid} did not exit after force stop`,
+    };
+  }
+
+  deletePidFile();
+  return {
+    success: true,
+    message: `Existing process ${pidInfo.pid} stopped forcibly`,
+  };
 }
 
 /**
@@ -284,6 +574,54 @@ async function waitForProcessStop(pid, timeout = SERVICE_CONFIG.defaultStopTimeo
 }
 
 /**
+ * 等待服务健康检查通过
+ *
+ * 轮询访问 /health，直到返回 2xx 或超时
+ *
+ * @param {string|number} port - 服务端口
+ * @param {number} [timeout=SERVICE_CONFIG.defaultStartTimeout] - 超时时间（毫秒）
+ * @returns {Promise<boolean>} 是否在超时前通过健康检查
+ */
+async function waitForServiceHealth(port, timeout = SERVICE_CONFIG.defaultStartTimeout) {
+  const targetPort = Number(port);
+  if (!Number.isFinite(targetPort) || targetPort <= 0) {
+    return false;
+  }
+
+  const startTime = Date.now();
+  while (Date.now() - startTime <= timeout) {
+    const healthy = await new Promise((resolve) => {
+      const req = http.get(
+        {
+          host: '127.0.0.1',
+          port: targetPort,
+          path: '/health',
+          timeout: Math.min(2000, SERVICE_CONFIG.checkInterval * 4),
+        },
+        (res) => {
+          resolve(res.statusCode >= 200 && res.statusCode < 300);
+          res.resume();
+        }
+      );
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.on('error', () => resolve(false));
+    });
+
+    if (healthy) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, SERVICE_CONFIG.checkInterval));
+  }
+
+  return false;
+}
+
+/**
  * 启动服务
  * 
  * 启动 nuwax-file-server 服务进程
@@ -299,97 +637,135 @@ async function waitForProcessStop(pid, timeout = SERVICE_CONFIG.defaultStopTimeo
  */
 async function startService(options = {}) {
   const { env, port, config } = options;
+  let lockHandle = null;
   
   console.log(`Start service ${SERVICE_CONFIG.name}...`);
-  
-  // 检查服务是否已在运行
-  const existingPidInfo = readPidFile();
-  if (existingPidInfo && isProcessRunning(existingPidInfo.pid)) {
-    return {
-      success: false,
-      pid: existingPidInfo.pid,
-      message: `Service is already running (PID: ${existingPidInfo.pid})`,
-    };
-  }
-  
-  // 构建环境变量
-  const envVars = { ...process.env };
-  
-  if (env) {
-    envVars.NODE_ENV = env;
-    console.log(`Environment: ${env}`);
-  }
-  
-  if (port) {
-    envVars.PORT = port;
-    console.log(`Port: ${port}`);
-  }
-  
-  if (config) {
-    envVars.CONFIG_FILE = config;
-    console.log(`Configuration file: ${config}`);
-  }
-  
-  // 构建启动参数
-  const serverScript = path.join(__dirname, '..', 'server.js');
-  const args = [];
-  
-  // 使用 cross-spawn 确保跨平台兼容性
-  const child = spawn('node', [serverScript, ...args], {
-    env: envVars,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: true,
-    cwd: process.cwd(),
-  });
-  
-  // 处理子进程输出
-  child.stdout.on('data', (data) => {
-    process.stdout.write(data);
-  });
-  
-  child.stderr.on('data', (data) => {
-    process.stderr.write(data);
-  });
-  
-  child.on('error', (err) => {
-    console.error(`Start service failed: ${err.message}`);
-  });
-  
-  // 等待服务启动
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-  
-  // 检查服务是否成功启动
-  if (!isProcessRunning(child.pid)) {
+
+  try {
+    lockHandle = acquireStartLock();
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      return {
+        success: false,
+        pid: null,
+        message: 'Another start operation is in progress, please retry later',
+      };
+    }
+
     return {
       success: false,
       pid: null,
-      message: 'Service start failed',
+      message: `Acquire start lock failed: ${err.message}`,
     };
   }
   
-  // 写入 PID 文件
-  const pidInfo = {
-    pid: child.pid,
-    startedAt: new Date().toISOString(),
-    env: env || process.env.NODE_ENV || 'production',
-    port: port || process.env.PORT || '60000',
-    version: require('../../package.json').version,
-    platform: process.platform,
-  };
+  try {
+    // 启动前先清理/停止历史进程，确保本次启动可继续进行
+    const stopTimeout = Number(options.timeout) || SERVICE_CONFIG.defaultStopTimeout;
+    const preStartResult = await ensureNoRunningServiceBeforeStart(stopTimeout);
+    if (!preStartResult.success) {
+      return {
+        success: false,
+        pid: null,
+        message: `Service start blocked: ${preStartResult.message}`,
+      };
+    }
   
-  writePidFile(pidInfo);
+    // 构建环境变量
+    const envVars = { ...process.env };
   
-  // 解除子进程关联，使其独立运行
-  child.unref();
+    if (env) {
+      envVars.NODE_ENV = env;
+      console.log(`Environment: ${env}`);
+    }
   
-  console.log(`Service started (PID: ${child.pid})`);
-  console.log(`Service address: http://localhost:${pidInfo.port}`);
+    if (port) {
+      envVars.PORT = port;
+      console.log(`Port: ${port}`);
+    }
   
-  return {
-    success: true,
-    pid: child.pid,
-    message: 'Service started successfully',
-  };
+    if (config) {
+      envVars.CONFIG_FILE = config;
+      console.log(`Configuration file: ${config}`);
+    }
+  
+    // 构建启动参数
+    const serverScript = resolveServerScriptPath();
+    const args = [];
+  
+    // 使用 cross-spawn 确保跨平台兼容性
+    const child = spawn('node', [serverScript, ...args], {
+      env: envVars,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+      cwd: process.cwd(),
+    });
+  
+    // 处理子进程输出
+    child.stdout.on('data', (data) => {
+      process.stdout.write(data);
+    });
+  
+    child.stderr.on('data', (data) => {
+      process.stderr.write(data);
+    });
+  
+    child.on('error', (err) => {
+      console.error(`Start service failed: ${err.message}`);
+    });
+  
+    // 等待服务启动
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  
+    // 检查服务是否成功启动
+    if (!isProcessRunning(child.pid)) {
+      return {
+        success: false,
+        pid: null,
+        message: 'Service start failed',
+      };
+    }
+  
+    // 写入 PID 文件
+    const pidInfo = {
+      pid: child.pid,
+      startedAt: new Date().toISOString(),
+      env: env || process.env.NODE_ENV || 'production',
+      port: port || process.env.PORT || '60000',
+      version: resolvePackageVersion(),
+      platform: process.platform,
+    };
+  
+    writePidFile(pidInfo);
+
+    // 健康检查通过后再认定启动成功
+    const healthTimeout = Number(options.startTimeout) || SERVICE_CONFIG.defaultStartTimeout;
+    const healthy = await waitForServiceHealth(pidInfo.port, healthTimeout);
+    if (!healthy) {
+      console.error(`Service health check timeout (${healthTimeout}ms), stop failed instance...`);
+      await stopProcess(child.pid, true);
+      deletePidFile();
+      return {
+        success: false,
+        pid: null,
+        message: `Service health check timeout (${healthTimeout}ms)`,
+      };
+    }
+  
+    // 解除子进程关联，使其独立运行
+    child.unref();
+  
+    console.log(`Service started (PID: ${child.pid})`);
+    console.log(`Service address: http://localhost:${pidInfo.port}`);
+  
+    return {
+      success: true,
+      pid: child.pid,
+      message: 'Service started successfully',
+    };
+  } finally {
+    releaseStartLock(lockHandle);
+  }
 }
 
 /**
@@ -573,12 +949,20 @@ function formatUptime(startedAt) {
 export {
   SERVICE_CONFIG,
   getPidFilePath,
+  getLockFilePath,
+  resolveServerScriptPath,
+  resolvePackageVersion,
   readPidFile,
   writePidFile,
   deletePidFile,
   isProcessRunning,
+  isTargetServiceProcess,
+  acquireStartLock,
+  releaseStartLock,
+  ensureNoRunningServiceBeforeStart,
   stopProcess,
   waitForProcessStop,
+  waitForServiceHealth,
   startService,
   stopService,
   restartService,
@@ -587,21 +971,3 @@ export {
   formatUptime,
 };
 
-// 如果直接运行此文件，显示服务状态
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").replace(/^.*[\/\\]/, ""))) {
-  const status = getServiceStatus();
-  console.log(`\n${SERVICE_CONFIG.name} Service status:\n`);
-  console.log(`  Running status: ${status.running ? 'Running' : 'Stopped'}`);
-  if (status.pidInfo) {
-    console.log(`  Process ID: ${status.pidInfo.pid}`);
-    console.log(`  Environment: ${status.pidInfo.env || 'Unknown'}`);
-    console.log(`  Port: ${status.pidInfo.port || 'Unknown'}`);
-    console.log(`  Version: ${status.pidInfo.version || 'Unknown'}`);
-    console.log(`  Platform: ${status.pidInfo.platform || 'Unknown'}`);
-    console.log(`  Started at: ${status.pidInfo.startedAt || 'Unknown'}`);
-    console.log(`  Uptime: ${formatUptime(status.pidInfo.startedAt)}`);
-  }
-  console.log(`  PID file: ${getPidFilePath()}`);
-  console.log('');
-  process.exit(status.running ? 0 : 1);
-}

@@ -21,6 +21,7 @@ import {
   shouldRestartForSingleFile,
   shouldRestartDevServer,
 } from "../utils/buildJudge/restartJudgeUtils.js";
+import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 
 /**
  * 按行对比旧内容与新内容，返回合并后的内容和变更行数
@@ -89,7 +90,13 @@ function replaceContentDirectly(existingContent, newContentStr) {
  * @param {Object} req 请求对象
  * @returns {Object} 更新结果
  */
-async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
+async function specifiedFilesUpdate(
+  projectId,
+  codeVersion,
+  files,
+  req,
+  isolationContext = {}
+) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -150,7 +157,7 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
     }
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   if (!fs.existsSync(projectPath)) {
     log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
     throw new ResourceError("Project does not exist", { projectId });
@@ -357,7 +364,13 @@ async function specifiedFilesUpdate(projectId, codeVersion, files, req) {
   }
 }
 
-async function allFilesUpdate(projectId, codeVersion, files, req) {
+async function allFilesUpdate(
+  projectId,
+  codeVersion,
+  files,
+  req,
+  isolationContext = {}
+) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -372,7 +385,7 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
     throw new ValidationError("files must be an array", { field: "files" });
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   if (!fs.existsSync(projectPath)) {
     log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
     throw new ResourceError("Project does not exist", { projectId });
@@ -531,7 +544,14 @@ async function allFilesUpdate(projectId, codeVersion, files, req) {
  * @param {Object} req 请求对象
  * @returns {Object} 上传结果
  */
-async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
+async function uploadSingleFile(
+  projectId,
+  codeVersion,
+  file,
+  filePath,
+  req,
+  isolationContext = {}
+) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -549,7 +569,7 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
     throw new ValidationError("File path cannot be empty", { field: "filePath" });
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   if (!fs.existsSync(projectPath)) {
     log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
     throw new ResourceError("Project does not exist", { projectId });
@@ -691,7 +711,13 @@ async function uploadSingleFile(projectId, codeVersion, file, filePath, req) {
  * @param {Object} req 请求对象
  * @returns {Object} 回滚结果
  */
-async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
+async function rollbackVersion(
+  projectId,
+  codeVersion,
+  rollbackTo,
+  req,
+  isolationContext = {}
+) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -719,7 +745,7 @@ async function rollbackVersion(projectId, codeVersion, rollbackTo, req) {
     });
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   if (!fs.existsSync(projectPath)) {
     log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
     throw new ResourceError("Project does not exist", { projectId });

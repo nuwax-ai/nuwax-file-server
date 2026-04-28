@@ -1,7 +1,6 @@
 import path from "path";
 import fs from "fs";
 import { log } from "../log/logUtils.js";
-import config from "../../appConfig/index.js";
 import { BusinessError, FileError, ResourceError } from "../error/errorHandler.js";
 import {
   isProjectStarting,
@@ -13,9 +12,10 @@ import ERROR_CODES from "../error/errorCodes.js";
 import { stopDevServer } from "./stopDevUtils.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
-
-//项目源文件所在目录
-const projectSourceDir = config.PROJECT_SOURCE_DIR;
+import {
+  extractIsolationContext,
+  resolveProjectPath,
+} from "../common/projectPathUtils.js";
 
 // 重启开发服务器
 async function restartDevServer(req, projectId) {
@@ -25,7 +25,8 @@ async function restartDevServer(req, projectId) {
   });
 
   // 检查项目是否存在
-  const projectPath = path.join(projectSourceDir, projectId);
+  const isolationContext = extractIsolationContext(req?.query || {});
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   const jsonFilePath = path.join(projectPath, "package.json");
   const exists = fs.existsSync(jsonFilePath);
   if (!exists) {

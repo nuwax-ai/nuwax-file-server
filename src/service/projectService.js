@@ -20,6 +20,7 @@ import {
   copyDirectoryFiltered,
 } from "../utils/project/backupUtils.js";
 import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
+import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 
 /**
  * 创建项目目录
@@ -27,7 +28,7 @@ import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
  * @param {string} templateType - 模板类型(react|vue3)
  * @returns {Promise<Object>} 创建结果
  */
-async function createProject(projectId, templateType = "react") {
+async function createProject(projectId, templateType = "react", isolationContext = {}) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -46,9 +47,7 @@ async function createProject(projectId, templateType = "react") {
   };
   const templateName = templateNameMap[templateType];
 
-  //项目源文件所在目录
-  const projectSourceDir = config.PROJECT_SOURCE_DIR;
-  const projectPath = path.join(projectSourceDir, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
 
   // 检查目录是否已存在
   if (fs.existsSync(projectPath)) {
@@ -195,12 +194,12 @@ async function removeTopLevelFolder(projectPath) {
  * @param {string} projectId - 项目ID
  * @returns {Promise<void>}
  */
-async function cleanupProjectDirectory(projectId) {
+async function cleanupProjectDirectory(projectId, isolationContext = {}) {
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
 
   if (fs.existsSync(projectPath)) {
     try {
@@ -259,12 +258,11 @@ async function uploadProject(
   req,
   codeVersion,
   pid,
-  basePath
+  basePath,
+  isolationContext = {}
 ) {
   const startTime = Date.now();
-  // 项目源文件所在目录
-  const projectSourceDir = config.PROJECT_SOURCE_DIR;
-  const projectPath = path.join(projectSourceDir, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
 
   try {
     // 检查项目目录是否为空
@@ -285,7 +283,7 @@ async function uploadProject(
       if (!fs.existsSync(backupZipPath)) {
         // 备份当前项目
         try {
-          await backupProjectOfVersion(projectId, prevVersion);
+          await backupProjectOfVersion(projectId, prevVersion, isolationContext);
           log(projectId, "INFO", `Current version backed up: ${backupZipPath}`, {
             projectId,
           });
@@ -372,7 +370,7 @@ async function uploadProject(
 
     // 上传失败时清理项目目录
     try {
-      await cleanupProjectDirectory(projectId);
+      await cleanupProjectDirectory(projectId, isolationContext);
       log(projectId, "INFO", "Failed to upload project, project directory cleaned up", { projectId });
     } catch (cleanupError) {
       log(projectId, "ERROR", `Failed to clean project directory: ${cleanupError.message}`, {
@@ -402,7 +400,7 @@ async function uploadProject(
  * @param {number|string} codeVersion 版本号
  * @returns {Promise<string>} zip文件路径
  */
-async function backupProjectOfVersion(projectId, codeVersion) {
+async function backupProjectOfVersion(projectId, codeVersion, isolationContext = {}) {
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
   }
@@ -418,7 +416,7 @@ async function backupProjectOfVersion(projectId, codeVersion) {
     });
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   if (!fs.existsSync(projectPath)) {
     throw new ResourceError("Project does not exist", { projectId });
   }
@@ -645,7 +643,12 @@ async function downloadUrlToFile(url, destinationPath, logId) {
  * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
  * @returns {Promise<{message:string, projectPath:string, updatedSkills:string[]}>}
  */
-async function pushSkillsToWorkspace(projectId, file, skillUrls) {
+async function pushSkillsToWorkspace(
+  projectId,
+  file,
+  skillUrls,
+  isolationContext = {}
+) {
   const logId = String(projectId);
   const startTime = Date.now();
   const normalizedSkillUrls = normalizeSkillUrls(skillUrls);
@@ -673,7 +676,7 @@ async function pushSkillsToWorkspace(projectId, file, skillUrls) {
     }
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, String(projectId));
+  const projectPath = resolveProjectPath(String(projectId), isolationContext);
   if (!fs.existsSync(projectPath)) {
     throw new ValidationError("Project does not exist", { field: "projectId" });
   }
@@ -862,7 +865,7 @@ async function pushSkillsToWorkspace(projectId, file, skillUrls) {
  * @param {string|number} pid - 进程ID（可选）
  * @returns {Promise<Object>} 删除结果
  */
-async function deleteProject(projectId, pid, req) {
+async function deleteProject(projectId, pid, req, isolationContext = {}) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -905,7 +908,7 @@ async function deleteProject(projectId, pid, req) {
     // 2. 删除项目相关目录
     const directoriesToDelete = [
       path.join(config.UPLOAD_PROJECT_DIR, projectId),
-      path.join(config.PROJECT_SOURCE_DIR, projectId),
+      resolveProjectPath(projectId, isolationContext),
       path.join(config.DIST_TARGET_DIR, projectId),
       path.join(config.LOG_BASE_DIR, projectId),
     ];
@@ -989,7 +992,13 @@ async function deleteProject(projectId, pid, req) {
  * @param {Object} configParam 配置数据
  * @returns {Promise<{success:boolean, projectId:string, zipPath:string}>}
  */
-async function exportProject(projectId, codeVersion, exportType, configParam) {
+async function exportProject(
+  projectId,
+  codeVersion,
+  exportType,
+  configParam,
+  isolationContext = {}
+) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -1006,7 +1015,7 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
     });
   }
 
-  const projectPath = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const projectPath = resolveProjectPath(projectId, isolationContext);
   if (!fs.existsSync(projectPath)) {
     throw new ResourceError("Project does not exist", { projectId });
   }
@@ -1061,7 +1070,11 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
 
     // 执行导出（不管有没有现成的zip包，都直接打zip包）
     log(projectId, "DEBUG", "Start executing export and packaging", { projectId, codeVersion });
-    const outZipPath = await backupProjectOfVersion(projectId, codeVersion);
+    const outZipPath = await backupProjectOfVersion(
+      projectId,
+      codeVersion,
+      isolationContext
+    );
     log(projectId, "INFO", `Project exported successfully: ${outZipPath}`, {
       projectId,
       zipPath: outZipPath,
@@ -1104,7 +1117,7 @@ async function exportProject(projectId, codeVersion, exportType, configParam) {
 /**
  * 备份当前项目为指定版本zip
  */
-async function backupCurrentVersion(projectId, codeVersion) {
+async function backupCurrentVersion(projectId, codeVersion, isolationContext = {}) {
   const startTime = Date.now();
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -1116,7 +1129,11 @@ async function backupCurrentVersion(projectId, codeVersion) {
   }
 
   try {
-    const zipPath = await backupProjectOfVersion(projectId, codeVersion);
+    const zipPath = await backupProjectOfVersion(
+      projectId,
+      codeVersion,
+      isolationContext
+    );
     log(projectId, "INFO", `Current version backed up successfully: ${zipPath}`, {
       projectId,
       zipPath,
