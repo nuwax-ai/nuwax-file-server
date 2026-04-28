@@ -21,6 +21,9 @@ import {
 } from "../utils/project/backupUtils.js";
 import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
 import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
+import {
+  ensureAgentWorkspaceLinks,
+} from "../utils/common/AgentWorkspaceUtils.js";
 
 /**
  * 创建项目目录
@@ -637,7 +640,7 @@ async function downloadUrlToFile(url, destinationPath, logId) {
 }
 
 /**
- * 推送技能到项目工作空间（.claude/skills）
+ * 推送技能到项目工作空间（统一写入 .nuwax/skills）
  * @param {string|number} projectId
  * @param {Object|null} file multer 文件对象（zip）
  * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
@@ -681,12 +684,11 @@ async function pushSkillsToWorkspace(
     throw new ValidationError("Project does not exist", { field: "projectId" });
   }
 
-  const claudeDir = path.join(projectPath, ".claude");
-  const targetSkillsDir = path.join(claudeDir, "skills");
+  const { skillsDir: targetSkillsDir, agentTypes: normalizedAgentTypes } =
+    await ensureAgentWorkspaceLinks(projectPath);
   const tempRoot = path.join(config.UPLOAD_PROJECT_DIR, "temp");
 
   try {
-    await fs.promises.mkdir(claudeDir, { recursive: true });
     await fs.promises.mkdir(targetSkillsDir, { recursive: true });
     await fs.promises.mkdir(tempRoot, { recursive: true });
 
@@ -792,6 +794,7 @@ async function pushSkillsToWorkspace(
       updatedSkills,
       skillUrlsCount: normalizedSkillUrls.length,
       hasFile: !!file,
+      agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
 

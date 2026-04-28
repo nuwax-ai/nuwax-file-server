@@ -8,6 +8,9 @@ import {
   FileError,
 } from "../error/errorHandler.js";
 import { log } from "../log/logUtils.js";
+import {
+  ensureAgentWorkspaceLinks,
+} from "../common/AgentWorkspaceUtils.js";
 
 /**
  * 规范化 skillUrls 参数，兼容数组/JSON 字符串/单字符串
@@ -221,16 +224,16 @@ async function createWorkspace(userId, cId, file, skillUrls) {
     String(userId),
     String(cId)
   );
-  const claudeDir = path.join(userWorkspaceRoot, ".claude");
-  const targetSkillsDir = path.join(claudeDir, "skills");
-  const targetAgentsDir = path.join(claudeDir, "agents");
+  const {
+    skillsDir: targetSkillsDir,
+    agentsDir: targetAgentsDir,
+    agentTypes: normalizedAgentTypes,
+  } =
+    await ensureAgentWorkspaceLinks(userWorkspaceRoot);
 
-  // 始终：保证工作空间目录、.claude 目录存在，并清空（删除）现有 skills 和 agents 目录
+  // 始终：保证工作空间目录存在，并清空（删除）现有 .nuwax 下的 skills 和 agents 目录
   if (!fs.existsSync(userWorkspaceRoot)) {
     await fs.promises.mkdir(userWorkspaceRoot, { recursive: true });
-  }
-  if (!fs.existsSync(claudeDir)) {
-    await fs.promises.mkdir(claudeDir, { recursive: true });
   }
   
   // 清除工作目录中的 skills 和 agents 目录
@@ -262,10 +265,12 @@ async function createWorkspace(userId, cId, file, skillUrls) {
   }
   await removeDirIfExists(targetSkillsDir);
   await removeDirIfExists(targetAgentsDir);
+  // 清空后立即重建空目录，确保符号链接目标始终存在
+  await fs.promises.mkdir(targetSkillsDir, { recursive: true });
+  await fs.promises.mkdir(targetAgentsDir, { recursive: true });
 
   // 恢复保留的 skills
   if (fs.existsSync(preservedSkillsTemp)) {
-    await fs.promises.mkdir(targetSkillsDir, { recursive: true });
     const preserved = await fs.promises.readdir(preservedSkillsTemp, {
       withFileTypes: true,
     });
@@ -281,11 +286,12 @@ async function createWorkspace(userId, cId, file, skillUrls) {
 
   const skillsExistsAfter = fs.existsSync(targetSkillsDir);
   const agentsExistsAfter = fs.existsSync(targetAgentsDir);
-  log(logId, "INFO", "Deleted old skills and agents directories completed", {
+  log(logId, "INFO", "Deleted old .nuwax skills and agents directories completed", {
     userId,
     cId,
     targetSkillsDir,
     targetAgentsDir,
+    agentTypes: normalizedAgentTypes,
     skillsExists: skillsExistsAfter,
     agentsExists: agentsExistsAfter,
   });
@@ -296,9 +302,9 @@ async function createWorkspace(userId, cId, file, skillUrls) {
       userId,
       cId,
       workspaceRoot,
-      claudeDir,
       skillsDir: null,
       agentsDir: null,
+      agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
 
@@ -378,8 +384,8 @@ async function createWorkspace(userId, cId, file, skillUrls) {
           userId,
           cId,
           workspaceRoot,
-          claudeDir,
           targetSkillsDir,
+          agentTypes: normalizedAgentTypes,
         });
       } else {
         log(logId, "INFO", "skills directory not found in uploaded zip, skipping", {
@@ -397,8 +403,8 @@ async function createWorkspace(userId, cId, file, skillUrls) {
           userId,
           cId,
           workspaceRoot,
-          claudeDir,
           targetAgentsDir,
+          agentTypes: normalizedAgentTypes,
         });
       } else {
         log(logId, "INFO", "agents directory not found in uploaded zip, skipping", {
@@ -512,6 +518,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
       cId,
       updatedDirs,
       updatedSkills,
+      agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
 
@@ -634,15 +641,12 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
     String(userId),
     String(cId)
   );
-  const claudeDir = path.join(userWorkspaceRoot, ".claude");
-  const targetSkillsDir = path.join(claudeDir, "skills");
+  const { skillsDir: targetSkillsDir, agentTypes: normalizedAgentTypes } =
+    await ensureAgentWorkspaceLinks(userWorkspaceRoot);
 
   try {
     if (!fs.existsSync(userWorkspaceRoot)) {
       await fs.promises.mkdir(userWorkspaceRoot, { recursive: true });
-    }
-    if (!fs.existsSync(claudeDir)) {
-      await fs.promises.mkdir(claudeDir, { recursive: true });
     }
     if (!fs.existsSync(targetSkillsDir)) {
       await fs.promises.mkdir(targetSkillsDir, { recursive: true });
@@ -791,6 +795,7 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
       userId,
       cId,
       updatedSkills,
+      agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
 
