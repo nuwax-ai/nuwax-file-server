@@ -2,12 +2,14 @@ import fs from "fs";
 import path from "path";
 
 const AGENT_ROOT_MAP = {
+  agents: ".agents",
   claudecode: ".claude",
   opencode: ".opencode",
+  codex: ".codex",
 };
 
 const ALL_AGENT_TYPES = Object.keys(AGENT_ROOT_MAP);
-const PRIMARY_AGENT_TYPE = "claudecode";
+const PRIMARY_AGENT_TYPE = "agents";
 
 async function removePathIfExists(targetPath) {
   if (!fs.existsSync(targetPath)) return;
