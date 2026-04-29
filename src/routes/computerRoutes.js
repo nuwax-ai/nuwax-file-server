@@ -75,6 +75,33 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
+      const { userId, cId } = req.body || {};
+      const file = req.file || null;
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Create workspace request", {
+        userId,
+        cId,
+        hasFile: !!file,
+        fileName: file?.originalname,
+        fileSize: file?.size,
+      });
+
+      // 兼容老逻辑：仅处理上传 file，不处理 skillUrls
+      const result = await createWorkspace(userId, cId, file);
+
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+    }),
+  },
+
+  {
+    path: "/create-workspace-v2",
+    method: "post",
+    middleware: upload.single("file"),
+    handler: asyncHandler(async (req, res) => {
       const { userId, cId, skillUrls } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
@@ -90,7 +117,7 @@ const routes = [
         }
       }
 
-      log(logId, "INFO", "Create workspace request", {
+      log(logId, "INFO", "Create workspace v2 request", {
         userId,
         cId,
         hasFile: !!file,
@@ -113,6 +140,33 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
+      const { userId, cId } = req.body || {};
+      const file = req.file || null;
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "推送技能到工作空间请求", {
+        userId,
+        cId,
+        hasFile: !!file,
+        fileName: file?.originalname,
+        fileSize: file?.size,
+      });
+
+      // 兼容老逻辑：仅处理上传 file，不处理 skillUrls
+      const result = await pushSkillsToWorkspace(userId, cId, file);
+
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+    }),
+  },
+
+  {
+    path: "/push-skills-to-workspace-v2",
+    method: "post",
+    middleware: upload.single("file"),
+    handler: asyncHandler(async (req, res) => {
       const { userId, cId, skillUrls } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
@@ -128,7 +182,7 @@ const routes = [
         }
       }
 
-      log(logId, "INFO", "推送技能到工作空间请求", {
+      log(logId, "INFO", "推送技能到工作空间请求(v2)", {
         userId,
         cId,
         hasFile: !!file,
