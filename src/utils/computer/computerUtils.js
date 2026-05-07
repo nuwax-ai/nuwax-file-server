@@ -398,7 +398,9 @@ async function createWorkspace(userId, cId, file, skillUrls) {
       }
 
       // 如果压缩包中有 agents 目录，就写入
+      // Windows：目标路径若已存在目录（此前 mkdir 建过空目录），rename 会 EPERM，须先删除
       if (agentsDir) {
+        await removeDirIfExists(targetAgentsDir);
         await moveDirectory(agentsDir, targetAgentsDir);
         updatedDirs.push("agents");
         log(logId, "INFO", "agents updated to workspace", {
