@@ -3,8 +3,13 @@ name: Publish Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'    # v1.3.0
-      - '[0-9]+.[0-9]+.[0-9]+'     # 1.3.0
+      - 'v*.*.*'
+      - '*.*.*'
+    tags-ignore:
+      - '*beta*'
+      - '*alpha*'
+      - '*rc*'
+      - '*-*'              # 排除所有预发布版本
 
 jobs:
   publish:
@@ -70,8 +75,8 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          # 找到上一个 tag
-          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
+          # 找到上一个 tag（排除 beta/alpha/rc）
+          PREV_TAG=$(git tag --sort=-v:refname | grep -vE 'beta|alpha|rc' | grep -v "^${GITHUB_REF_NAME}$" | head -1)
 
           if [ -n "$PREV_TAG" ]; then
             echo "## Changes since $PREV_TAG" > CHANGELOG.md

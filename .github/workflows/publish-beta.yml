@@ -1,22 +1,15 @@
 name: Publish Beta
 
 on:
-  # 手动触发（推荐，可控制何时发布 beta）
-  workflow_dispatch:
+  push:
+    tags:
+      - '*beta*'        # 1.3.0-beta.1, v1.3.0-beta.20260527, etc.
+  workflow_dispatch:     # 保留手动触发作为备选
     inputs:
-      version_type:
-        description: 'Beta version type'
-        required: true
-        default: 'timestamp'
-        type: choice
-        options:
-          - timestamp   # 1.3.0-beta.20260527123456
-          - sha         # 1.3.0-beta.abc1234
-          - counter     # 1.3.0-beta.1, .2, .3...
-  # 推送到 feat/* 分支时自动触发（可选，取消注释启用）
-  # push:
-  #   branches:
-  #     - 'feat/**'
+      version:
+        description: 'Beta version (e.g. 1.3.0-beta.1), leave empty to auto-generate'
+        required: false
+        type: string
 
 jobs:
   publish-beta:
@@ -28,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 需要完整历史用于 counter 模式
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,59 +29,71 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Determine beta version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # 从 tag 提取版本号
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+
+            # 校验包含 beta 关键字
+            if ! echo "$VERSION" | grep -qE 'beta'; then
+              echo "ERROR: Tag '$TAG' does not contain 'beta', skipping"
+              exit 1
+            fi
+
+            # 校验基本格式: X.Y.Z-beta.xxx
+            if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-beta'; then
+              echo "ERROR: Invalid beta version format: $VERSION (expected: X.Y.Z-beta.xxx)"
+              exit 1
+            fi
+          else
+            # 手动触发: 使用输入的版本或自动生成
+            INPUT_VERSION="${{ github.event.inputs.version }}"
+            if [ -n "$INPUT_VERSION" ]; then
+              VERSION="${INPUT_VERSION#v}"
+            else
+              CURRENT_VERSION=$(node -p "require('./package.json').version")
+              MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+              MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+              BUMPED_MINOR=$((MINOR + 1))
+              SUFFIX=$(date -u +%Y%m%d%H%M%S)
+              VERSION="${MAJOR}.${BUMPED_MINOR}.0-beta.${SUFFIX}"
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Beta version: $VERSION"
+
+          # 写入 package.json
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
       - name: Install dependencies
         run: npm install
 
       - name: Build
         run: npm run build
 
-      - name: Generate beta version
-        id: version
-        run: |
-          # 读取当前版本（如 1.2.9），自动 bump minor → 1.3.0
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
-          MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
-          BUMPED_MINOR=$((MINOR + 1))
-          BASE_VERSION="${MAJOR}.${BUMPED_MINOR}.0"
-
-          # 根据选择的版本类型生成后缀
-          VERSION_TYPE="${{ github.event.inputs.version_type || 'timestamp' }}"
-
-          if [ "$VERSION_TYPE" = "sha" ]; then
-            SUFFIX=$(git rev-parse --short HEAD)
-          elif [ "$VERSION_TYPE" = "counter" ]; then
-            # 统计当前分支的提交数作为计数器
-            SUFFIX=$(git rev-list --count HEAD)
-          else
-            # 默认：时间戳 YYYYMMDDHHMMSS
-            SUFFIX=$(date -u +%Y%m%d%H%M%S)
-          fi
-
-          BETA_VERSION="${BASE_VERSION}-beta.${SUFFIX}"
-          echo "version=$BETA_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Beta version: $BETA_VERSION"
-
-          # 写入 package.json（不提交，仅用于本次发布）
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '$BETA_VERSION';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
       - name: Publish to npm (beta tag)
         run: npm publish --tag beta
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Verify publish
+      - name: Summary
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          echo "Published: nuwax-file-server@$VERSION"
-          echo ""
-          echo "Install command:"
-          echo "  npm i -g nuwax-file-server@beta"
-          echo ""
-          echo "Check beta tag:"
-          npm dist-tag ls nuwax-file-server
+          echo "## Beta Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **npm:** nuwax-file-server@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **npm tag:** beta" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "npm i -g nuwax-file-server@beta" >> "$GITHUB_STEP_SUMMARY"
+          echo "npm i -g nuwax-file-server@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
