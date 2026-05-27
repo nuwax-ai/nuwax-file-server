@@ -116,6 +116,11 @@ async function removeNodeModules(projectPath, projectId = null) {
 function installDependencies(req, projectId, projectPath, options = {}) {
   const { outStream, tempOutStream, safeWrite } = options;
 
+  // 检测 node_modules 是否已存在（可能从模板缓存复制而来）
+  // 如果已存在，pnpm install 只做增量验证和安装，速度更快
+  const nodeModulesPath = path.join(projectPath, "node_modules");
+  const isIncremental = fs.existsSync(nodeModulesPath);
+
   // 如果提供了日志流，使用 spawn 获取实时输出
   if (outStream && tempOutStream && safeWrite) {
     return new Promise((resolve, reject) => {
@@ -127,9 +132,10 @@ function installDependencies(req, projectId, projectPath, options = {}) {
 
       // 记录开始时间
       const startTime = Date.now();
-      
+
       // 写入开始安装的日志（safeWrite 会自动添加时间戳）
-      const startMessage = `Start installing dependencies\nCommand: pnpm install --prefer-offline\n`;
+      const installMode = isIncremental ? "incremental (node_modules from cache)" : "full install";
+      const startMessage = `Start installing dependencies (${installMode})\nCommand: pnpm install --prefer-offline\n`;
       safeWrite(outStream, startMessage, "Main log");
       safeWrite(tempOutStream, startMessage, "Temp log");
       
@@ -237,6 +243,7 @@ function installDependencies(req, projectId, projectPath, options = {}) {
     log(projectId, "INFO", "Start executing dependency installation command", {
       command,
       projectPath,
+      installMode: isIncremental ? "incremental" : "full",
     });
 
     exec(

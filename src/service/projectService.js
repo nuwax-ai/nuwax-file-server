@@ -20,6 +20,7 @@ import {
   copyDirectoryFiltered,
 } from "../utils/project/backupUtils.js";
 import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
+import { copyNodeModulesFromCache } from "../utils/common/templateCacheUtils.js";
 import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 import {
   ensurePrimaryAgentDirs,
@@ -118,7 +119,16 @@ async function createProject(projectId, templateType = "react", isolationContext
       }
     }
 
-    // 为项目创建 .npmrc 配置文件
+    // 尝试从模板缓存复制 node_modules（加速项目初始化）
+    log(projectId, "DEBUG", "Try copying node_modules from template cache", { projectPath });
+    const cacheResult = await copyNodeModulesFromCache(projectPath, projectId);
+    if (cacheResult.cached) {
+      log(projectId, "INFO", `node_modules copied from cache: ${cacheResult.templateType}`, {
+        elapsed: cacheResult.elapsed,
+      });
+    }
+
+    // 为项目创建 .npmrc 配置文件（根据文件系统自动选择 import-method）
     log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectPath });
     await createPnpmNpmrc(projectPath, projectId);
 
@@ -356,6 +366,10 @@ async function uploadProject(
     // 检查并删除 node_modules 文件夹
     log(projectId, "DEBUG", "Check and remove node_modules folder", { projectId });
     await removeNodeModules(projectPath);
+
+    // 尝试从模板缓存复制 node_modules（加速项目初始化）
+    log(projectId, "DEBUG", "Try copying node_modules from template cache", { projectId });
+    await copyNodeModulesFromCache(projectPath, projectId);
 
     // 为项目创建 .npmrc 配置文件
     log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectId });

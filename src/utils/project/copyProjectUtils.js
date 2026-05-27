@@ -8,6 +8,7 @@ import {
   SystemError,
 } from "../error/errorHandler.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
+import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
 import { resolveProjectPath } from "../common/projectPathUtils.js";
 
 /**
@@ -90,6 +91,9 @@ async function copyProject(
       sourceProjectId,
       targetProjectId,
     });
+
+    // 尝试从模板缓存复制 node_modules（加速项目初始化）
+    await copyNodeModulesFromCache(targetProjectPath, targetProjectId);
 
     // 为目标项目创建 .npmrc 配置文件
     await createPnpmNpmrc(targetProjectPath, targetProjectId);

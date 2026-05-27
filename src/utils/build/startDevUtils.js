@@ -18,13 +18,13 @@ import {
 
 // 启动开发服务器
 async function startDevServer(req, projectId) {
-  
-  // if (isProjectStarting(projectId)) {
-  //   throw new BusinessError("该项目正在启动中，请稍后重试", {
-  //     projectId,
-  //     code: ERROR_CODES.PROJECT_STARTING,
-  //   });
-  // }
+
+  if (isProjectStarting(projectId)) {
+    throw new BusinessError("该项目正在启动中，请稍后重试", {
+      projectId,
+      code: ERROR_CODES.PROJECT_STARTING,
+    });
+  }
 
   addStartingProject(projectId);
   try {

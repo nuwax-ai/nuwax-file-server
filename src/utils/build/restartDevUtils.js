@@ -12,6 +12,7 @@ import ERROR_CODES from "../error/errorCodes.js";
 import { stopDevServer } from "./stopDevUtils.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
+import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
 import {
   extractIsolationContext,
   resolveProjectPath,
@@ -61,13 +62,13 @@ async function restartDevServer(req, projectId) {
     throw new BusinessError("Project missing dev script", { projectId });
   }
 
-  // 如果项目正在启动中，等待完成
-  // if (isProjectStarting(projectId)) {
-  //   throw new BusinessError("Project is starting, please try again later", {
-  //     projectId,
-  //     code: ERROR_CODES.PROJECT_STARTING,
-  //   });
-  // }
+  // 如果项目正在启动中，拒绝并发请求
+  if (isProjectStarting(projectId)) {
+    throw new BusinessError("该项目正在重启中，请稍后重试", {
+      projectId,
+      code: ERROR_CODES.PROJECT_STARTING,
+    });
+  }
 
   addStartingProject(projectId);
 
@@ -87,14 +88,21 @@ async function restartDevServer(req, projectId) {
     });
     await removeNodeModules(projectPath, projectId);
 
-    // 3. 创建.npmrc文件
+    // 3. 尝试从模板缓存复制 node_modules（加速重启）
+    log(projectId, "INFO", "Try copying node_modules from template cache", {
+      projectId,
+      requestId: req.requestId,
+    });
+    await copyNodeModulesFromCache(projectPath, projectId);
+
+    // 4. 创建.npmrc文件
     log(projectId, "INFO", "Create .npmrc file", {
       projectId,
       requestId: req.requestId,
     });
     await createPnpmNpmrc(projectPath, projectId);
 
-    // 4. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行）
+    // 5. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行）
     log(projectId, "INFO", "Start starting dev server", {
       projectId,
       requestId: req.requestId,
