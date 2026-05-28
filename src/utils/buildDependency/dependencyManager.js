@@ -44,6 +44,11 @@ function shouldInstallDeps(projectPath) {
 
 /**
  * 检查并删除 node_modules 文件夹和 lock 文件
+ *
+ * 支持 symlink 优化：如果 node_modules 是 symlink（指向本地磁盘），
+ * 则先 unlink symlink（1 次 JuiceFS 元数据操作），再 rm -rf 本地目标（本地磁盘，快）。
+ * 避免在 JuiceFS FUSE 上遍历删除 3000+ 文件（10+ 秒）。
+ *
  * @param {string} projectPath - 项目路径
  * @param {string} projectId - 项目ID（可选，用于日志）
  * @returns {Promise<void>}
@@ -52,24 +57,82 @@ async function removeNodeModules(projectPath, projectId = null) {
   const nodeModulesPath = path.join(projectPath, "node_modules");
   const logId = projectId || path.basename(projectPath);
 
-  if (fs.existsSync(nodeModulesPath)) {
-    log(logId, "INFO", "Found node_modules folder, deleting", {
-      projectPath,
-      nodeModulesPath,
-    });
+  // 检查 node_modules 是否存在（包括 symlink）
+  let exists = false;
+  let isSymlink = false;
+  let symlinkTarget = null;
 
-    try {
-      await fs.promises.rm(nodeModulesPath, { recursive: true, force: true });
-      log(logId, "INFO", "node_modules folder deleted successfully", {
+  try {
+    const lstat = await fs.promises.lstat(nodeModulesPath);
+    exists = true;
+    isSymlink = lstat.isSymbolicLink();
+    if (isSymlink) {
+      symlinkTarget = await fs.promises.readlink(nodeModulesPath);
+    }
+  } catch (_) {
+    // 不存在，跳过
+  }
+
+  if (exists) {
+    if (isSymlink) {
+      // symlink 策略：先删除 symlink（快），再删除本地目标（快）
+      log(logId, "INFO", "Found node_modules symlink, using fast removal", {
+        projectPath,
+        symlink: nodeModulesPath,
+        target: symlinkTarget,
+      });
+
+      try {
+        // 1. 删除 symlink（1 次 JuiceFS 元数据操作，< 5ms）
+        await fs.promises.unlink(nodeModulesPath);
+        log(logId, "INFO", "Symlink removed", { nodeModulesPath });
+
+        // 2. 删除本地磁盘上的目标目录（本地文件系统，快）
+        if (symlinkTarget) {
+          // 解析绝对路径
+          const absoluteTarget = path.isAbsolute(symlinkTarget)
+            ? symlinkTarget
+            : path.resolve(path.dirname(nodeModulesPath), symlinkTarget);
+
+          if (fs.existsSync(absoluteTarget)) {
+            await fs.promises.rm(absoluteTarget, { recursive: true, force: true });
+            log(logId, "INFO", "Local node_modules target removed", { absoluteTarget });
+
+            // 清理父目录（如果为空）
+            try {
+              const parentDir = path.dirname(absoluteTarget);
+              await fs.promises.rmdir(parentDir);
+              log(logId, "INFO", "Empty parent directory removed", { parentDir });
+            } catch (_) {
+              // 目录不为空或删除失败，忽略
+            }
+          }
+        }
+      } catch (error) {
+        log(logId, "WARN", `Failed to remove node_modules symlink: ${error.message}`, {
+          error: error.message,
+        });
+      }
+    } else {
+      // 普通目录：直接删除（JuiceFS 上较慢，但必须这样做）
+      log(logId, "INFO", "Found node_modules folder, deleting", {
         projectPath,
         nodeModulesPath,
       });
-    } catch (error) {
-      log(logId, "WARN", `Failed to delete node_modules folder: ${error.message}`, {
-        projectPath,
-        nodeModulesPath,
-        error: error.message,
-      });
+
+      try {
+        await fs.promises.rm(nodeModulesPath, { recursive: true, force: true });
+        log(logId, "INFO", "node_modules folder deleted successfully", {
+          projectPath,
+          nodeModulesPath,
+        });
+      } catch (error) {
+        log(logId, "WARN", `Failed to delete node_modules folder: ${error.message}`, {
+          projectPath,
+          nodeModulesPath,
+          error: error.message,
+        });
+      }
     }
   }
 

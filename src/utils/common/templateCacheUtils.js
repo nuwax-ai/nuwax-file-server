@@ -201,10 +201,22 @@ registry=https://registry.npmmirror.com
 }
 
 /**
+ * 获取项目的本地 node_modules 路径（在本地磁盘上，非 JuiceFS）
+ *
+ * @param {string} projectId - 项目 ID
+ * @returns {string} 本地 node_modules 路径
+ */
+function getLocalNodeModulesPath(projectId) {
+  // 优先使用环境变量指定的目录
+  const baseDir = process.env.NODE_MODULES_LOCAL_DIR || "/local-cache/node-modules";
+  return path.join(baseDir, projectId, "node_modules");
+}
+
+/**
  * 从缓存复制 node_modules 到项目
  *
- * 使用 cp -a 保留权限和链接结构，从本地磁盘复制到项目目录。
- * 失败时返回 cached: false，调用方应 fallback 到全量 pnpm install。
+ * JuiceFS 环境：复制到本地磁盘 + 创建 symlink（避免 FUSE 慢）
+ * 本地磁盘环境：直接 cp -a（已经很快）
  *
  * @param {string} projectPath - 项目路径
  * @param {string} projectId - 项目 ID（用于日志）
@@ -234,42 +246,120 @@ async function copyNodeModulesFromCache(projectPath, projectId) {
     return { cached: false, reason: "cache-not-ready" };
   }
 
-  // 如果 node_modules 已存在，跳过
   const targetNodeModules = path.join(projectPath, "node_modules");
-  if (fs.existsSync(targetNodeModules)) {
-    log(logId, "INFO", "node_modules already exists, skip cache copy");
-    return { cached: false, reason: "already-exists" };
+
+  // 检查 node_modules 状态（区分正常存在、断链、不存在）
+  let targetExists = false;
+  let isBrokenSymlink = false;
+
+  try {
+    const lstat = fs.lstatSync(targetNodeModules);
+    if (lstat.isSymbolicLink()) {
+      // 是 symlink，检查目标是否存在
+      if (fs.existsSync(targetNodeModules)) {
+        // symlink 有效，跳过
+        log(logId, "INFO", "node_modules is a valid symlink, skip cache copy");
+        return { cached: false, reason: "already-exists" };
+      } else {
+        // symlink 断链（可能 Pod 迁移到了新节点，旧 symlink 指向的本地路径不存在）
+        isBrokenSymlink = true;
+        log(logId, "WARN", "node_modules is a broken symlink (pod may have migrated to new node), will recreate", {
+          symlink: targetNodeModules,
+        });
+      }
+    } else {
+      // 普通目录，已存在
+      log(logId, "INFO", "node_modules already exists, skip cache copy");
+      return { cached: false, reason: "already-exists" };
+    }
+  } catch (_) {
+    // 不存在，继续
   }
 
   const startTime = Date.now();
-  log(logId, "INFO", `Copying node_modules from cache: ${templateType}`, {
-    source: cacheNodeModules,
-    target: targetNodeModules,
-  });
 
-  try {
-    // cp -a 保留权限和链接结构
-    execSync(`cp -a "${cacheNodeModules}" "${targetNodeModules}"`, {
-      timeout: 60000, // 1 分钟超时
-      stdio: "pipe",
+  // 检测文件系统类型，决定是否使用 symlink 策略
+  const fsType = detectFilesystemType(projectPath);
+  const useSymlink = fsType === "fuse";
+
+  if (useSymlink) {
+    // JuiceFS 环境：复制到本地磁盘 + 创建 symlink
+    const localNodeModules = getLocalNodeModulesPath(projectId);
+    const localProjectDir = path.dirname(localNodeModules);
+
+    log(logId, "INFO", `JuiceFS detected, using symlink strategy: ${templateType}`, {
+      source: cacheNodeModules,
+      localTarget: localNodeModules,
+      symlink: targetNodeModules,
     });
 
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    log(logId, "INFO", `node_modules copied from cache successfully`, {
-      templateType,
-      elapsed: `${elapsed}s`,
-    });
-
-    return { cached: true, templateType, elapsed };
-  } catch (error) {
-    log(logId, "WARN", `Failed to copy node_modules from cache: ${error.message}`, {
-      templateType,
-    });
-    // 清理不完整的复制
     try {
-      fs.rmSync(targetNodeModules, { recursive: true, force: true });
-    } catch (_) {}
-    return { cached: false, reason: "copy-failed", error: error.message };
+      // 创建本地目录
+      fs.mkdirSync(localProjectDir, { recursive: true });
+
+      // 复制到本地磁盘（快！）
+      execSync(`cp -a "${cacheNodeModules}" "${localNodeModules}"`, {
+        timeout: 60000,
+        stdio: "pipe",
+      });
+
+      // 如果是断链（Pod 迁移到新节点），先删除旧 symlink
+      if (isBrokenSymlink) {
+        try {
+          fs.unlinkSync(targetNodeModules);
+          log(logId, "INFO", "Removed broken symlink before creating new one");
+        } catch (unlinkErr) {
+          log(logId, "WARN", `Failed to remove broken symlink: ${unlinkErr.message}`);
+        }
+      }
+
+      // 创建 symlink: {projectPath}/node_modules → /local-cache/node-modules/{projectId}/node_modules
+      fs.symlinkSync(localNodeModules, targetNodeModules, "dir");
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      log(logId, "INFO", `node_modules ready via symlink`, {
+        templateType,
+        elapsed: `${elapsed}s`,
+        symlink: `${targetNodeModules} → ${localNodeModules}`,
+      });
+
+      return { cached: true, templateType, elapsed, strategy: "symlink" };
+    } catch (error) {
+      log(logId, "WARN", `Failed to setup node_modules symlink: ${error.message}`, {
+        templateType,
+      });
+      // 清理
+      try { fs.rmSync(localNodeModules, { recursive: true, force: true }); } catch (_) {}
+      try { fs.unlinkSync(targetNodeModules); } catch (_) {}
+      return { cached: false, reason: "symlink-failed", error: error.message };
+    }
+  } else {
+    // 本地磁盘环境：直接 cp -a
+    log(logId, "INFO", `Local filesystem, using direct copy: ${templateType}`, {
+      source: cacheNodeModules,
+      target: targetNodeModules,
+    });
+
+    try {
+      execSync(`cp -a "${cacheNodeModules}" "${targetNodeModules}"`, {
+        timeout: 60000,
+        stdio: "pipe",
+      });
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      log(logId, "INFO", `node_modules copied from cache successfully`, {
+        templateType,
+        elapsed: `${elapsed}s`,
+      });
+
+      return { cached: true, templateType, elapsed, strategy: "copy" };
+    } catch (error) {
+      log(logId, "WARN", `Failed to copy node_modules from cache: ${error.message}`, {
+        templateType,
+      });
+      try { fs.rmSync(targetNodeModules, { recursive: true, force: true }); } catch (_) {}
+      return { cached: false, reason: "copy-failed", error: error.message };
+    }
   }
 }
 
@@ -313,6 +403,7 @@ function removeTopLevelDir(dirPath) {
 
 export {
   getCacheBaseDir,
+  getLocalNodeModulesPath,
   detectFilesystemType,
   detectTemplateType,
   warmupTemplateCache,

@@ -11,6 +11,7 @@ import {
   startDev_NonBlocking,
 } from "./processManager.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
+import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
 import {
   extractIsolationContext,
   resolveProjectPath,
@@ -106,6 +107,47 @@ async function startDevServer(req, projectId) {
       process.env.ROLLUP_WASM = process.env.ROLLUP_WASM || "1";
       process.env.ROLLUP_DISABLE_NATIVE = process.env.ROLLUP_DISABLE_NATIVE || "1";
     } catch (_) {}
+
+    // 确保 node_modules 存在且有效（处理 Pod 迁移到新节点后 symlink 断链的情况）
+    try {
+      const nodeModulesPath = path.join(projectPath, "node_modules");
+      let needCopy = false;
+
+      try {
+        const lstat = fs.lstatSync(nodeModulesPath);
+        if (lstat.isSymbolicLink()) {
+          // symlink 存在，检查目标是否可达
+          if (!fs.existsSync(nodeModulesPath)) {
+            log(projectId, "WARN", "node_modules symlink is broken (pod may have migrated), will restore from cache", {
+              projectId,
+              requestId: req.requestId,
+            });
+            needCopy = true;
+          }
+        }
+      } catch (e) {
+        // node_modules 不存在
+        log(projectId, "INFO", "node_modules not found, will try to copy from cache", {
+          projectId,
+          requestId: req.requestId,
+        });
+        needCopy = true;
+      }
+
+      if (needCopy) {
+        log(projectId, "INFO", "Attempting to restore node_modules from template cache", {
+          projectId,
+          requestId: req.requestId,
+        });
+        await copyNodeModulesFromCache(projectPath, projectId);
+      }
+    } catch (e) {
+      log(projectId, "WARN", "Failed to check/restore node_modules, will proceed anyway", {
+        projectId,
+        requestId: req.requestId,
+        error: e && e.message,
+      });
+    }
 
     // 如果已在运行，则直接返回信息
     // if (getRunningProcess(projectId)) {
