@@ -166,6 +166,73 @@ async function removeNodeModules(projectPath, projectId = null) {
 }
 
 /**
+ * 预检：检测会导致 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY 的条件
+ * 如果检测到，主动清理 node_modules（我们有 TTY 控制权，pnpm 没有）
+ *
+ * 触发场景：
+ * - Pod 重启后，emptyDir 销毁，但 JuiceFS 上的 node_modules 引用旧的 store 路径
+ * - pnpm store 从 JuiceFS 迁移到本地磁盘后，旧项目的 .modules.yaml 记录旧路径
+ * - pnpm 检测到 store 不匹配，想清理但非 TTY 模式下直接中止
+ *
+ * @param {string} projectPath - 项目路径
+ * @param {string} projectId - 项目ID（用于日志）
+ * @returns {Promise<void>}
+ */
+async function preflightCleanNodeModules(projectPath, projectId) {
+  const nodeModulesPath = path.join(projectPath, "node_modules");
+  const logId = projectId || path.basename(projectPath);
+
+  // 检查 node_modules 是否存在
+  if (!fs.existsSync(nodeModulesPath)) {
+    return; // 不存在，无需清理
+  }
+
+  // 检查 1: 断链 symlink（Pod 迁移后常见）
+  try {
+    const lstat = await fs.promises.lstat(nodeModulesPath);
+    if (lstat.isSymbolicLink() && !fs.existsSync(nodeModulesPath)) {
+      log(logId, "WARN", "Broken node_modules symlink detected, removing before install", {
+        projectPath,
+        nodeModulesPath,
+      });
+      await fs.promises.unlink(nodeModulesPath);
+      return;
+    }
+  } catch (e) {
+    log(logId, "WARN", `Failed to check node_modules symlink: ${e.message}`);
+  }
+
+  // 检查 2: store 路径不匹配（主要触发原因）
+  // pnpm 在 node_modules/.modules.yaml 中记录 store 路径
+  // 如果当前 PNPM_STORE_DIR 与记录的不一致，pnpm 会尝试清理
+  try {
+    const modulesYamlPath = path.join(nodeModulesPath, ".modules.yaml");
+    if (fs.existsSync(modulesYamlPath)) {
+      const content = await fs.promises.readFile(modulesYamlPath, "utf8");
+      const storeMatch = content.match(/storeDir:\s*(.+)/);
+
+      if (storeMatch) {
+        const recordedStore = storeMatch[1].trim();
+        const currentStore = process.env.PNPM_STORE_DIR || "";
+
+        if (currentStore && recordedStore !== currentStore) {
+          log(logId, "WARN",
+            `Store path mismatch detected (node_modules from different store), ` +
+            "removing node_modules to prevent ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY", {
+              projectPath,
+              recordedStoreDir: recordedStore,
+              currentStoreDir: currentStore,
+            });
+          await removeNodeModules(projectPath, projectId);
+        }
+      }
+    }
+  } catch (e) {
+    log(logId, "WARN", `Pre-flight store check failed: ${e.message}`);
+  }
+}
+
+/**
  * 安装项目依赖
  * @param {Object} req 请求对象
  * @param {string} projectId 项目ID
@@ -176,7 +243,10 @@ async function removeNodeModules(projectPath, projectId = null) {
  * @param {Function} options.safeWrite 安全写入函数（可选）
  * @returns {Promise<string>} 安装输出
  */
-function installDependencies(req, projectId, projectPath, options = {}) {
+async function installDependencies(req, projectId, projectPath, options = {}) {
+  // 预检清理：检测并修复会导致 TTY abort 的条件
+  await preflightCleanNodeModules(projectPath, projectId);
+
   const { outStream, tempOutStream, safeWrite } = options;
 
   // 检测 node_modules 是否已存在（可能从模板缓存复制而来）
@@ -346,4 +416,4 @@ function installDependencies(req, projectId, projectPath, options = {}) {
   });
 }
 
-export { getFileMtime, shouldInstallDeps, installDependencies, removeNodeModules };
+export { getFileMtime, shouldInstallDeps, installDependencies, removeNodeModules, preflightCleanNodeModules };

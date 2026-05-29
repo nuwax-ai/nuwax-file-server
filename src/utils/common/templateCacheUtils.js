@@ -123,6 +123,7 @@ function detectTemplateType(projectPath) {
 async function warmupTemplateCache(templateDir) {
   const cacheBase = getCacheBaseDir();
   log("CACHE", "INFO", `Template cache base dir: ${cacheBase}`);
+  log("CACHE", "INFO", `pnpm store dir: ${process.env.PNPM_STORE_DIR || "(default: ~/.local/share/pnpm/store)"}`);
 
   const templates = [
     { name: "vue3", zip: "vue3-vite-template.zip" },

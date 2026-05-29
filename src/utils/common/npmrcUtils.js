@@ -26,6 +26,7 @@ async function createPnpmNpmrc(projectPath, projectId = null) {
   const npmrcContent = `# pnpm 优化配置
 # 自动生成于 ${getCSTDateTimeString()}
 # 文件系统类型: ${fsType}
+# pnpm store: ${process.env.PNPM_STORE_DIR || "(default)"}
 package-import-method=${importMethod}
 auto-install-peers=true
 registry=https://registry.npmmirror.com
