@@ -3,16 +3,12 @@ name: Publish Release
 on:
   push:
     tags:
-      - 'v*.*.*'
-      - '*.*.*'
-    tags-ignore:
-      - '*beta*'
-      - '*alpha*'
-      - '*rc*'
-      - '*-*'              # 排除所有预发布版本
+      - 'v*'               # 仅支持 v 开头的正式版本 tag (如 v1.3.0)
 
 jobs:
   publish:
+    # 安全阀：v* 会匹配 v1.3.0-beta.7，这里排除 beta tag
+    if: ${{ !contains(github.ref_name, 'beta') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write   # 创建 GitHub Release
