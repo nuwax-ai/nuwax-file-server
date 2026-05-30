@@ -4,18 +4,34 @@ import { execSync } from "child_process";
 import { log } from "../log/logUtils.js";
 
 /**
- * 模板预构建缓存工具
+ * 模板缓存工具
  *
  * 核心功能：
  * 1. 检测项目路径所在的文件系统类型（JuiceFS FUSE vs 本地 ext4）
- * 2. 预热模板缓存（解压 zip + pnpm install），服务启动时调用一次
- * 3. 新项目创建时从缓存复制 node_modules，避免全量 pnpm install
+ * 2. 预热模板缓存（解压 zip），服务启动时调用一次
+ *    - docker-compose 模式：解压 zip + pnpm install（预构建 node_modules 缓存）
+ *    - k8s 模式：仅解压 zip（node_modules 由 pnpm install 在项目目录中直接创建）
+ * 3. 从缓存复制 node_modules（仅 docker-compose 模式有效）
+ *    - docker-compose 模式：JuiceFS→symlink→本地磁盘 / 本地→直接 cp
+ *    - k8s 模式：no-op（node_modules 直接放 JuiceFS，所有 Pod 可见）
+ *
+ * 部署模式通过环境变量 DEPLOYMENT_MODE 控制：
+ *   - "docker-compose"（默认）：symlink + 缓存策略
+ *   - "k8s"：node_modules 直接放 workspace
  *
  * 缓存目录优先级：
  *   1. TEMPLATE_CACHE_DIR 环境变量（K8s emptyDir 挂载点）
  *   2. /local-cache/templates（K8s 默认挂载点）
  *   3. project_workspace 同级的 .template-cache（Docker Compose 宿主机目录）
  */
+
+/**
+ * 检测当前是否为 K8s 部署模式
+ * @returns {boolean} true = K8s 模式，false = docker-compose 模式
+ */
+function isK8sMode() {
+  return process.env.DEPLOYMENT_MODE === "k8s";
+}
 
 /**
  * 获取缓存基础目录
@@ -115,14 +131,18 @@ function detectTemplateType(projectPath) {
 /**
  * 预热模板缓存
  *
- * 解压模板 zip 到缓存目录，执行 pnpm install，写入 .cache-ready 标记。
+ * 解压模板 zip 到缓存目录，写入 .cache-ready 标记。
  * 如果 .cache-ready 已存在则跳过（幂等）。
+ *
+ * docker-compose 模式：解压 zip + pnpm install（预构建 node_modules 缓存）
+ * k8s 模式：仅解压 zip（node_modules 由 pnpm install 在项目目录中直接创建）
  *
  * @param {string} templateDir - 模板 zip 所在目录（如 /app/project_init）
  */
 async function warmupTemplateCache(templateDir) {
   const cacheBase = getCacheBaseDir();
-  log("CACHE", "INFO", `Template cache base dir: ${cacheBase}`);
+  const k8sMode = isK8sMode();
+  log("CACHE", "INFO", `Template cache base dir: ${cacheBase}`, { deploymentMode: k8sMode ? "k8s" : "docker-compose" });
   log("CACHE", "INFO", `pnpm store dir: ${process.env.PNPM_STORE_DIR || "(default: ~/.local/share/pnpm/store)"}`);
 
   const templates = [
@@ -153,6 +173,7 @@ async function warmupTemplateCache(templateDir) {
     log("CACHE", "INFO", `Warming up template cache: ${tpl.name}`, {
       zipPath,
       cachePath,
+      k8sMode,
     });
     const startTime = Date.now();
 
@@ -165,29 +186,33 @@ async function warmupTemplateCache(templateDir) {
       // 2. 去除顶层目录（模板 zip 通常有一个顶层目录包裹）
       removeTopLevelDir(cachePath);
 
-      // 3. 写 .npmrc（缓存用 copy 模式，因为可能被复制到 JuiceFS）
-      const npmrcContent = `# Template cache npmrc - auto-generated
+      if (!k8sMode) {
+        // docker-compose 模式：预构建 node_modules 缓存（pnpm install）
+        // k8s 模式跳过此步骤：node_modules 由后续 start-dev 的 pnpm install 在项目目录中创建
+        const npmrcContent = `# Template cache npmrc - auto-generated
 package-import-method=copy
 auto-install-peers=true
 registry=https://registry.npmmirror.com
 `;
-      fs.writeFileSync(path.join(cachePath, ".npmrc"), npmrcContent, "utf8");
+        fs.writeFileSync(path.join(cachePath, ".npmrc"), npmrcContent, "utf8");
 
-      // 4. 执行 pnpm install
-      log("CACHE", "INFO", `Running pnpm install for ${tpl.name} cache...`);
-      execSync(`cd "${cachePath}" && pnpm install --prefer-offline`, {
-        stdio: "pipe",
-        timeout: 180000, // 3 分钟超时
-        env: process.env,
-      });
+        log("CACHE", "INFO", `Running pnpm install for ${tpl.name} cache...`);
+        execSync(`cd "${cachePath}" && pnpm install --prefer-offline`, {
+          stdio: "pipe",
+          timeout: 180000, // 3 分钟超时
+          env: process.env,
+        });
+      }
 
-      // 5. 写 .cache-ready 标记
+      // 3. 写 .cache-ready 标记
       fs.writeFileSync(markerPath, new Date().toISOString(), "utf8");
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       log("CACHE", "INFO", `Template cache ready: ${tpl.name}`, {
         elapsed: `${elapsed}s`,
         cachePath,
+        k8sMode,
+        hasNodeModules: !k8sMode,
       });
     } catch (error) {
       log("CACHE", "ERROR", `Template cache failed: ${tpl.name}`, {
@@ -216,8 +241,13 @@ function getLocalNodeModulesPath(projectId) {
 /**
  * 从缓存复制 node_modules 到项目
  *
- * JuiceFS 环境：复制到本地磁盘 + 创建 symlink（避免 FUSE 慢）
- * 本地磁盘环境：直接 cp -a（已经很快）
+ * docker-compose 模式：
+ *   - JuiceFS 环境：复制到本地磁盘 + 创建 symlink（避免 FUSE 慢）
+ *   - 本地磁盘环境：直接 cp -a
+ *
+ * k8s 模式：
+ *   - no-op，node_modules 由 pnpm install 在项目目录中直接创建
+ *   - 所有 Pod 通过 JuiceFS 共享 node_modules，无 symlink 断链风险
  *
  * @param {string} projectPath - 项目路径
  * @param {string} projectId - 项目 ID（用于日志）
@@ -225,6 +255,16 @@ function getLocalNodeModulesPath(projectId) {
  */
 async function copyNodeModulesFromCache(projectPath, projectId) {
   const logId = projectId || path.basename(projectPath);
+
+  // K8s 模式：no-op，node_modules 直接放 JuiceFS
+  if (isK8sMode()) {
+    log(logId, "INFO", "K8s mode: skip cache copy — node_modules managed directly on workspace", {
+      projectPath,
+    });
+    return { cached: false, reason: "k8s-mode-disabled", strategy: "direct" };
+  }
+
+  // ===== 以下为 docker-compose 模式原有逻辑 =====
 
   // 检测模板类型
   const templateType = detectTemplateType(projectPath);
@@ -262,9 +302,9 @@ async function copyNodeModulesFromCache(projectPath, projectId) {
         log(logId, "INFO", "node_modules is a valid symlink, skip cache copy");
         return { cached: false, reason: "already-exists" };
       } else {
-        // symlink 断链（可能 Pod 迁移到了新节点，旧 symlink 指向的本地路径不存在）
+        // symlink 断链（可能容器重启后临时目录丢失）
         isBrokenSymlink = true;
-        log(logId, "WARN", "node_modules is a broken symlink (pod may have migrated to new node), will recreate", {
+        log(logId, "WARN", "node_modules is a broken symlink, will recreate", {
           symlink: targetNodeModules,
         });
       }
@@ -304,7 +344,7 @@ async function copyNodeModulesFromCache(projectPath, projectId) {
         stdio: "pipe",
       });
 
-      // 如果是断链（Pod 迁移到新节点），先删除旧 symlink
+      // 如果是断链，先删除旧 symlink
       if (isBrokenSymlink) {
         try {
           fs.unlinkSync(targetNodeModules);
@@ -407,6 +447,7 @@ export {
   getLocalNodeModulesPath,
   detectFilesystemType,
   detectTemplateType,
+  isK8sMode,
   warmupTemplateCache,
   copyNodeModulesFromCache,
 };

@@ -6,9 +6,9 @@ import { detectFilesystemType } from "./templateCacheUtils.js";
 /**
  * 为项目创建优化的 .npmrc 配置文件
  *
- * 根据项目所在的文件系统类型自动选择最优的 package-import-method：
- * - fuse (JuiceFS / NFS) → copy（避免 hardlink 并发竞争）
- * - local (ext4 / xfs / overlay) → hardlink（最快）
+ * 统一使用 package-import-method=copy：
+ * - 避免 hardlink 在 JuiceFS/FUSE 上失败
+ * - docker-compose 和 K8s 统一处理，不区分文件系统类型
  *
  * @param {string} projectPath - 项目路径
  * @param {string} projectId - 项目ID（用于日志）
@@ -18,9 +18,10 @@ async function createPnpmNpmrc(projectPath, projectId = null) {
   const logId = projectId || path.basename(projectPath);
   const npmrcPath = path.join(projectPath, ".npmrc");
 
-  // 根据文件系统类型选择 import-method
+  // 统一使用 copy 模式：避免 hardlink 在 JuiceFS/FUSE 上失败
+  // docker-compose 和 K8s 统一处理，不区分文件系统类型
   const fsType = detectFilesystemType(projectPath);
-  const importMethod = fsType === "fuse" ? "copy" : "hardlink";
+  const importMethod = "copy";
 
   // .npmrc 配置内容
   const npmrcContent = `# pnpm 优化配置

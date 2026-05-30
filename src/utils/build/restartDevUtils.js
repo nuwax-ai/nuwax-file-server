@@ -12,7 +12,7 @@ import ERROR_CODES from "../error/errorCodes.js";
 import { stopDevServer } from "./stopDevUtils.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
-import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
+import { copyNodeModulesFromCache, isK8sMode } from "../common/templateCacheUtils.js";
 import {
   extractIsolationContext,
   resolveProjectPath,
@@ -81,28 +81,25 @@ async function restartDevServer(req, projectId) {
       waitForStop: true, // 等待进程完全停止
     });
 
-    // 2. 删除node_modules
-    log(projectId, "INFO", "Start deleting node_modules and lock file", {
-      projectId,
-      requestId: req.requestId,
-    });
-    await removeNodeModules(projectPath, projectId);
+    // docker-compose 模式：删除 node_modules + 从缓存恢复（symlink 策略）
+    // k8s 模式：不删除 node_modules（JuiceFS 上的 rm -rf 慢，且 pnpm install 增量更新即可）
+    if (!isK8sMode()) {
+      log(projectId, "INFO", "docker-compose mode: remove node_modules and restore from cache", {
+        projectId,
+        requestId: req.requestId,
+      });
+      await removeNodeModules(projectPath, projectId);
+      await copyNodeModulesFromCache(projectPath, projectId);
+    }
 
-    // 3. 尝试从模板缓存复制 node_modules（加速重启）
-    log(projectId, "INFO", "Try copying node_modules from template cache", {
-      projectId,
-      requestId: req.requestId,
-    });
-    await copyNodeModulesFromCache(projectPath, projectId);
-
-    // 4. 创建.npmrc文件
-    log(projectId, "INFO", "Create .npmrc file", {
+    // 确保 .npmrc 存在且使用 copy 模式（避免 pnpm 默认 hardlink 在 JuiceFS 上失败）
+    log(projectId, "INFO", "Ensure .npmrc with copy mode", {
       projectId,
       requestId: req.requestId,
     });
     await createPnpmNpmrc(projectPath, projectId);
 
-    // 5. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行）
+    // 3. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行，增量 pnpm install）
     log(projectId, "INFO", "Start starting dev server", {
       projectId,
       requestId: req.requestId,
