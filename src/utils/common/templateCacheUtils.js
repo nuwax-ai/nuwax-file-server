@@ -143,7 +143,7 @@ async function warmupTemplateCache(templateDir) {
   const cacheBase = getCacheBaseDir();
   const k8sMode = isK8sMode();
   log("CACHE", "INFO", `Template cache base dir: ${cacheBase}`, { deploymentMode: k8sMode ? "k8s" : "docker-compose" });
-  log("CACHE", "INFO", `pnpm store dir: ${process.env.PNPM_STORE_DIR || "(default: ~/.local/share/pnpm/store)"}`);
+  log("CACHE", "INFO", `pnpm store dir: ${process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "(default: ~/.local/share/pnpm/store)"}`);
 
   const templates = [
     { name: "vue3", zip: "vue3-vite-template.zip" },
@@ -189,15 +189,18 @@ async function warmupTemplateCache(templateDir) {
       if (!k8sMode) {
         // docker-compose 模式：预构建 node_modules 缓存（pnpm install）
         // k8s 模式跳过此步骤：node_modules 由后续 start-dev 的 pnpm install 在项目目录中创建
+        const storeDir = process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "";
+        const storeDirLine = storeDir ? `store-dir=${storeDir}\n` : "";
+        const storeDirFlag = storeDir ? ` --store-dir=${storeDir}` : "";
         const npmrcContent = `# Template cache npmrc - auto-generated
 package-import-method=copy
 auto-install-peers=true
 registry=https://registry.npmmirror.com
-`;
+${storeDirLine}`;
         fs.writeFileSync(path.join(cachePath, ".npmrc"), npmrcContent, "utf8");
 
         log("CACHE", "INFO", `Running pnpm install for ${tpl.name} cache...`);
-        execSync(`cd "${cachePath}" && pnpm install --prefer-offline`, {
+        execSync(`cd "${cachePath}" && pnpm install --prefer-offline${storeDirFlag}`, {
           stdio: "pipe",
           timeout: 180000, // 3 分钟超时
           env: process.env,

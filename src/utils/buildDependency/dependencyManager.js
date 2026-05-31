@@ -213,7 +213,7 @@ async function preflightCleanNodeModules(projectPath, projectId) {
 
       if (storeMatch) {
         const recordedStore = storeMatch[1].trim();
-        const currentStore = process.env.PNPM_STORE_DIR || "";
+        const currentStore = process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "";
 
         if (currentStore && recordedStore !== currentStore) {
           log(logId, "WARN",
@@ -254,21 +254,26 @@ async function installDependencies(req, projectId, projectPath, options = {}) {
   const nodeModulesPath = path.join(projectPath, "node_modules");
   const isIncremental = fs.existsSync(nodeModulesPath);
 
+  // pnpm store 路径：双重保险，除了 .npmrc 中的 store-dir，命令行也传递 --store-dir
+  // pnpm 不识别 PNPM_STORE_DIR 环境变量（它用 npm 约定 npm_config_store_dir）
+  const storeDir =
+    process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "";
+  const storeDirFlag = storeDir ? ` --store-dir=${storeDir}` : "";
+
   // 如果提供了日志流，使用 spawn 获取实时输出
   if (outStream && tempOutStream && safeWrite) {
     return new Promise((resolve, reject) => {
       // 优化 pnpm install 命令，提升在 Docker/容器环境中的性能
       // --prefer-offline: 优先使用本地缓存，减少网络请求
-      // --reporter=silent: 静默模式，不输出进度信息，大幅提升 pipe 性能
-      // 注意：--loglevel=error 只显示错误，避免频繁的 I/O 操作
-      const command = `cd ${projectPath} && pnpm install --prefer-offline`;
+      // --store-dir: 显式指定 store 路径（双重保险，.npmrc 也有配置）
+      const command = `cd ${projectPath} && pnpm install --prefer-offline${storeDirFlag}`;
 
       // 记录开始时间
       const startTime = Date.now();
 
       // 写入开始安装的日志（safeWrite 会自动添加时间戳）
       const installMode = isIncremental ? "incremental (node_modules from cache)" : "full install";
-      const startMessage = `Start installing dependencies (${installMode})\nCommand: pnpm install --prefer-offline\n`;
+      const startMessage = `Start installing dependencies (${installMode})\nCommand: pnpm install --prefer-offline${storeDirFlag}\n`;
       safeWrite(outStream, startMessage, "Main log");
       safeWrite(tempOutStream, startMessage, "Temp log");
       
@@ -371,7 +376,7 @@ async function installDependencies(req, projectId, projectPath, options = {}) {
   // 如果没有提供日志流，使用原来的 exec 方式（保持向后兼容）
   return new Promise((resolve, reject) => {
     // 优化 pnpm install 命令，提升性能
-    const command = `cd ${projectPath} && pnpm install --prefer-offline --reporter=silent --loglevel=error`;
+    const command = `cd ${projectPath} && pnpm install --prefer-offline${storeDirFlag} --reporter=silent --loglevel=error`;
 
     log(projectId, "INFO", "Start executing dependency installation command", {
       command,

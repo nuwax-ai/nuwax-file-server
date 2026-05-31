@@ -23,15 +23,20 @@ async function createPnpmNpmrc(projectPath, projectId = null) {
   const fsType = detectFilesystemType(projectPath);
   const importMethod = "copy";
 
+  // pnpm store 路径：pnpm 不识别 PNPM_STORE_DIR 环境变量（它用 npm 约定 npm_config_store_dir）
+  // 必须显式写入 .npmrc 的 store-dir= 配置行，否则 store 会落入项目目录（JuiceFS 上极慢）
+  const storeDir =
+    process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "";
+  const storeDirLine = storeDir ? `store-dir=${storeDir}\n` : "";
+
   // .npmrc 配置内容
   const npmrcContent = `# pnpm 优化配置
 # 自动生成于 ${getCSTDateTimeString()}
 # 文件系统类型: ${fsType}
-# pnpm store: ${process.env.PNPM_STORE_DIR || "(default)"}
 package-import-method=${importMethod}
 auto-install-peers=true
 registry=https://registry.npmmirror.com
-`;
+${storeDirLine}`;
 
   try {
     // 检查 .npmrc 是否已存在（在写入前记录，用于日志区分 created/updated）
@@ -40,19 +45,31 @@ registry=https://registry.npmmirror.com
     if (existed) {
       const existingContent = fs.readFileSync(npmrcPath, "utf8");
 
-      // 检查是否需要更新 import-method
+      // 检查是否需要更新 import-method 或 store-dir
+      // 用 ^\s* + m(多行) 标志排除注释行（# 开头），只匹配实际配置行
       const existingMethodMatch = existingContent.match(
-        /package-import-method\s*=\s*(\S+)/
+        /^\s*package-import-method\s*=\s*(\S+)/m
+      );
+      const existingStoreMatch = existingContent.match(
+        /^\s*store-dir\s*=\s*(\S+)/m
       );
       const existingMethod = existingMethodMatch
         ? existingMethodMatch[1]
         : null;
+      const existingStoreDir = existingStoreMatch
+        ? existingStoreMatch[1]
+        : null;
 
-      if (existingMethod === importMethod) {
+      // 两项配置都正确时才跳过：import-method 匹配 且 store-dir 匹配（或无需设置 store-dir）
+      const methodOk = existingMethod === importMethod;
+      const storeOk = !storeDir || existingStoreDir === storeDir;
+
+      if (methodOk && storeOk) {
         log(logId, "INFO", ".npmrc already optimal, skip creation", {
           projectPath,
           npmrcPath,
           importMethod,
+          storeDir: existingStoreDir || "(not set)",
           fsType,
         });
         return {
@@ -61,16 +78,19 @@ registry=https://registry.npmmirror.com
           message: ".npmrc already optimal",
           npmrcPath,
           importMethod,
+          storeDir: existingStoreDir,
           fsType,
         };
       }
 
-      // 需要更新 import-method
+      // 需要更新
       log(logId, "INFO", ".npmrc needs update", {
         projectPath,
         npmrcPath,
         existingMethod,
         newMethod: importMethod,
+        existingStoreDir: existingStoreDir || "(not set)",
+        newStoreDir: storeDir || "(not set)",
         fsType,
       });
     }
@@ -83,6 +103,7 @@ registry=https://registry.npmmirror.com
       projectPath,
       npmrcPath,
       importMethod,
+      storeDir: storeDir || "(not set)",
       fsType,
     });
 
@@ -92,6 +113,7 @@ registry=https://registry.npmmirror.com
       message: `.npmrc ${action} successfully`,
       npmrcPath,
       importMethod,
+      storeDir,
       fsType,
     };
   } catch (error) {
