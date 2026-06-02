@@ -75,39 +75,21 @@ async function removeNodeModules(projectPath, projectId = null) {
 
   if (exists) {
     if (isSymlink) {
-      // symlink 策略：先删除 symlink（快），再删除本地目标（快）
-      log(logId, "INFO", "Found node_modules symlink, using fast removal", {
+      // symlink 策略：只删除 symlink（快），保留本地目标作为缓存
+      // 下次 copyNodeModulesFromCache 会检测到目标已存在，直接复用
+      log(logId, "INFO", "Found node_modules symlink, removing symlink only (preserving target as cache)", {
         projectPath,
         symlink: nodeModulesPath,
         target: symlinkTarget,
       });
 
       try {
-        // 1. 删除 symlink（1 次 JuiceFS 元数据操作，< 5ms）
+        // 删除 symlink（1 次 JuiceFS 元数据操作，< 5ms）
         await fs.promises.unlink(nodeModulesPath);
-        log(logId, "INFO", "Symlink removed", { nodeModulesPath });
-
-        // 2. 删除本地磁盘上的目标目录（本地文件系统，快）
-        if (symlinkTarget) {
-          // 解析绝对路径
-          const absoluteTarget = path.isAbsolute(symlinkTarget)
-            ? symlinkTarget
-            : path.resolve(path.dirname(nodeModulesPath), symlinkTarget);
-
-          if (fs.existsSync(absoluteTarget)) {
-            await fs.promises.rm(absoluteTarget, { recursive: true, force: true });
-            log(logId, "INFO", "Local node_modules target removed", { absoluteTarget });
-
-            // 清理父目录（如果为空）
-            try {
-              const parentDir = path.dirname(absoluteTarget);
-              await fs.promises.rmdir(parentDir);
-              log(logId, "INFO", "Empty parent directory removed", { parentDir });
-            } catch (_) {
-              // 目录不为空或删除失败，忽略
-            }
-          }
-        }
+        log(logId, "INFO", "Symlink removed, target preserved for cache reuse", {
+          nodeModulesPath,
+          target: symlinkTarget,
+        });
       } catch (error) {
         log(logId, "WARN", `Failed to remove node_modules symlink: ${error.message}`, {
           error: error.message,
@@ -218,12 +200,19 @@ async function preflightCleanNodeModules(projectPath, projectId) {
         if (currentStore && recordedStore !== currentStore) {
           log(logId, "WARN",
             `Store path mismatch detected (node_modules from different store), ` +
-            "removing node_modules to prevent ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY", {
+            "removing .modules.yaml to let pnpm rewrite it (preserving node_modules)", {
               projectPath,
               recordedStoreDir: recordedStore,
               currentStoreDir: currentStore,
             });
-          await removeNodeModules(projectPath, projectId);
+          // 只删除 .modules.yaml, 不删除 node_modules
+          // pnpm install 会重新生成 .modules.yaml, 已有的包会被复用
+          try {
+            await fs.promises.unlink(modulesYamlPath);
+            log(logId, "INFO", "Removed stale .modules.yaml, node_modules preserved", {
+              modulesYamlPath,
+            });
+          } catch (_) {}
         }
       }
     }

@@ -258,54 +258,20 @@ function getLocalNodeModulesPath(projectId) {
  */
 async function copyNodeModulesFromCache(projectPath, projectId) {
   const logId = projectId || path.basename(projectPath);
-
-  // K8s 模式：no-op，node_modules 直接放 JuiceFS
-  if (isK8sMode()) {
-    log(logId, "INFO", "K8s mode: skip cache copy — node_modules managed directly on workspace", {
-      projectPath,
-    });
-    return { cached: false, reason: "k8s-mode-disabled", strategy: "direct" };
-  }
-
-  // ===== 以下为 docker-compose 模式原有逻辑 =====
-
-  // 检测模板类型
-  const templateType = detectTemplateType(projectPath);
-  if (!templateType) {
-    log(logId, "WARN", "Cannot detect template type, skip cache copy", {
-      projectPath,
-    });
-    return { cached: false, reason: "unknown-template" };
-  }
-
-  // 检查缓存是否存在
-  const cacheBase = getCacheBaseDir();
-  const cacheNodeModules = path.join(cacheBase, templateType, "node_modules");
-  const markerPath = path.join(cacheBase, templateType, ".cache-ready");
-
-  if (!fs.existsSync(markerPath) || !fs.existsSync(cacheNodeModules)) {
-    log(logId, "INFO", `Template cache not ready: ${templateType}`, {
-      cacheNodeModules,
-    });
-    return { cached: false, reason: "cache-not-ready" };
-  }
-
   const targetNodeModules = path.join(projectPath, "node_modules");
 
   // 检查 node_modules 状态（区分正常存在、断链、不存在）
-  let targetExists = false;
   let isBrokenSymlink = false;
 
   try {
     const lstat = fs.lstatSync(targetNodeModules);
     if (lstat.isSymbolicLink()) {
-      // 是 symlink，检查目标是否存在
       if (fs.existsSync(targetNodeModules)) {
         // symlink 有效，跳过
         log(logId, "INFO", "node_modules is a valid symlink, skip cache copy");
         return { cached: false, reason: "already-exists" };
       } else {
-        // symlink 断链（可能容器重启后临时目录丢失）
+        // symlink 断链（Pod 重建后 /local-cache 清空，或 Pod 迁移到新节点）
         isBrokenSymlink = true;
         log(logId, "WARN", "node_modules is a broken symlink, will recreate", {
           symlink: targetNodeModules,
@@ -318,6 +284,55 @@ async function copyNodeModulesFromCache(projectPath, projectId) {
     }
   } catch (_) {
     // 不存在，继续
+  }
+
+  // ===== 优先复用本地缓存 (Longhorn PVC 上的 node_modules) =====
+  // removeNodeModules 只删 symlink 不删目标，所以目标目录在 Pod 重建后仍然存在
+  const localNodeModules = getLocalNodeModulesPath(projectId);
+  //   → /local-cache/node-modules/{projectId}/node_modules
+
+  if (fs.existsSync(localNodeModules)) {
+    const startTime = Date.now();
+
+    // 清理断裂的 symlink
+    if (isBrokenSymlink) {
+      try {
+        fs.unlinkSync(targetNodeModules);
+        log(logId, "INFO", "Removed broken symlink before recreating");
+      } catch (_) {}
+    }
+
+    // 创建 symlink 指向已有的本地缓存
+    fs.symlinkSync(localNodeModules, targetNodeModules, "dir");
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(3);
+    log(logId, "INFO", "Reused existing node_modules cache via symlink", {
+      cache: localNodeModules,
+      symlink: targetNodeModules,
+      elapsed: `${elapsed}s`,
+    });
+    return { cached: true, elapsed: `${elapsed}s`, strategy: "reuse-cache" };
+  }
+
+  // ===== 本地缓存不存在，从 template cache 复制 =====
+  // 检测模板类型
+  const templateType = detectTemplateType(projectPath);
+  if (!templateType) {
+    log(logId, "WARN", "Cannot detect template type, skip cache copy", {
+      projectPath,
+    });
+    return { cached: false, reason: "unknown-template" };
+  }
+
+  // 检查 template cache 是否存在
+  const cacheBase = getCacheBaseDir();
+  const cacheNodeModules = path.join(cacheBase, templateType, "node_modules");
+  const markerPath = path.join(cacheBase, templateType, ".cache-ready");
+
+  if (!fs.existsSync(markerPath) || !fs.existsSync(cacheNodeModules)) {
+    log(logId, "INFO", `Template cache not ready: ${templateType}`, {
+      cacheNodeModules,
+    });
+    return { cached: false, reason: "cache-not-ready" };
   }
 
   const startTime = Date.now();
