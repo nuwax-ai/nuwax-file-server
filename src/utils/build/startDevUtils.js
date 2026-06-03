@@ -12,7 +12,7 @@ import {
 } from "./processManager.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
-import { copyNodeModulesFromCache, isK8sMode } from "../common/templateCacheUtils.js";
+import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
 import {
   extractIsolationContext,
   resolveProjectPath,
@@ -109,46 +109,43 @@ async function startDevServer(req, projectId) {
       process.env.ROLLUP_DISABLE_NATIVE = process.env.ROLLUP_DISABLE_NATIVE || "1";
     } catch (_) {}
 
-    // docker-compose 模式：检测 symlink 断链并恢复（容器重启后临时目录可能丢失）
-    // k8s 模式：node_modules 在 JuiceFS 上，Pod 迁移后仍完好，无需检测
-    if (!isK8sMode()) {
+    // 检测 symlink 断链并从缓存恢复（Pod 重建后 /local-cache 可能丢失）
+    try {
+      const nodeModulesPath = path.join(projectPath, "node_modules");
+      let needCopy = false;
+
       try {
-        const nodeModulesPath = path.join(projectPath, "node_modules");
-        let needCopy = false;
-
-        try {
-          const lstat = fs.lstatSync(nodeModulesPath);
-          if (lstat.isSymbolicLink()) {
-            if (!fs.existsSync(nodeModulesPath)) {
-              log(projectId, "WARN", "node_modules symlink is broken, will restore from cache", {
-                projectId,
-                requestId: req.requestId,
-              });
-              needCopy = true;
-            }
+        const lstat = fs.lstatSync(nodeModulesPath);
+        if (lstat.isSymbolicLink()) {
+          if (!fs.existsSync(nodeModulesPath)) {
+            log(projectId, "WARN", "node_modules symlink is broken, will restore from cache", {
+              projectId,
+              requestId: req.requestId,
+            });
+            needCopy = true;
           }
-        } catch (e) {
-          log(projectId, "INFO", "node_modules not found, will try to copy from cache", {
-            projectId,
-            requestId: req.requestId,
-          });
-          needCopy = true;
-        }
-
-        if (needCopy) {
-          log(projectId, "INFO", "Attempting to restore node_modules from template cache", {
-            projectId,
-            requestId: req.requestId,
-          });
-          await copyNodeModulesFromCache(projectPath, projectId);
         }
       } catch (e) {
-        log(projectId, "WARN", "Failed to check/restore node_modules, will proceed anyway", {
+        log(projectId, "INFO", "node_modules not found, will try to copy from cache", {
           projectId,
           requestId: req.requestId,
-          error: e && e.message,
         });
+        needCopy = true;
       }
+
+      if (needCopy) {
+        log(projectId, "INFO", "Attempting to restore node_modules from template cache", {
+          projectId,
+          requestId: req.requestId,
+        });
+        await copyNodeModulesFromCache(projectPath, projectId);
+      }
+    } catch (e) {
+      log(projectId, "WARN", "Failed to check/restore node_modules, will proceed anyway", {
+        projectId,
+        requestId: req.requestId,
+        error: e && e.message,
+      });
     }
 
     // 确保 .npmrc 存在且使用 copy 模式（避免 pnpm 默认 hardlink 在 JuiceFS 上失败）
