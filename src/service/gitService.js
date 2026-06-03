@@ -12,7 +12,7 @@ import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 import {
   getGitInstance,
   isGitRepo,
-  requireGitRepo,
+  ensureGitRepo,
   ensureGitignore,
 } from "../utils/git/gitUtils.js";
 
@@ -107,7 +107,7 @@ async function init(options = {}) {
  */
 async function status(options = {}) {
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -144,7 +144,7 @@ async function commit(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -197,7 +197,7 @@ async function commit(options = {}) {
 async function unstage(options = {}) {
   const { files } = options;
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -277,7 +277,7 @@ async function cleanEmptyParentDirs(root, relativeFiles) {
 async function discard(options = {}) {
   const { files } = options;
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -364,15 +364,21 @@ async function discard(options = {}) {
  * 获取提交历史
  */
 async function logHistory(options = {}) {
-  const { maxCount: rawMax = 50, branch } = options;
+  const { maxCount: rawMax = 50, branch, skip: rawSkip = 0 } = options;
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
     const maxCount = Math.min(Math.max(1, rawMax), 500);
+    const skip = Math.max(0, rawSkip);
 
-    const logResult = await git.log(branch ? [branch, `--max-count=${maxCount}`] : { maxCount });
+    const args = [];
+    if (branch) args.push(branch);
+    args.push(`--max-count=${maxCount}`);
+    if (skip > 0) args.push(`--skip=${skip}`);
+
+    const logResult = await git.log(args);
 
     const commits = logResult.all.map((entry) => ({
       hash: entry.hash,
@@ -397,7 +403,7 @@ async function logHistory(options = {}) {
 async function diff(options = {}) {
   const { from, to, paths } = options;
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -455,7 +461,7 @@ async function rollback(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -511,7 +517,7 @@ async function rollback(options = {}) {
  */
 async function listTags(options = {}) {
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -538,7 +544,7 @@ async function createTag(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -567,7 +573,7 @@ async function deleteTag(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -588,7 +594,7 @@ async function deleteTag(options = {}) {
  */
 async function listBranches(options = {}) {
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -616,7 +622,7 @@ async function createBranch(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -645,7 +651,7 @@ async function switchBranch(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -684,7 +690,7 @@ async function deleteBranch(options = {}) {
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -718,7 +724,7 @@ async function deleteBranch(options = {}) {
 async function stashPush(options = {}) {
   const { message: stashMessage } = options;
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -742,7 +748,7 @@ async function stashPush(options = {}) {
 async function stashPop(options = {}) {
   const { index } = options;
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
@@ -766,7 +772,7 @@ async function stashPop(options = {}) {
  */
 async function stashList(options = {}) {
   const { targetPath, logId } = resolveAndCheck(options);
-  requireGitRepo(targetPath);
+  await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);

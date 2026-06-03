@@ -1,7 +1,6 @@
 import path from "path";
 import fs from "fs";
 import { simpleGit } from "simple-git";
-import { BusinessError } from "../error/errorHandler.js";
 import config from "../../appConfig/index.js";
 
 /**
@@ -23,18 +22,20 @@ function isGitRepo(projectPath) {
 }
 
 /**
- * 要求项目已初始化 Git，否则抛出 BusinessError
+ * 确保项目已初始化 Git，未初始化则自动执行 git init 并生成 .gitignore。
  * @param {string} projectPath
- * @throws {BusinessError}
  */
-function requireGitRepo(projectPath) {
+async function ensureGitRepo(projectPath) {
   if (!isGitRepo(projectPath)) {
-    throw new BusinessError(
-      "Git repository is not initialized for this project, please call /api/git/init first",
-      { projectPath }
-    );
+    const git = simpleGit(projectPath);
+    await git.init();
+    ensureGitignore(projectPath);
+    await git.addConfig("user.name", config.GIT_DEFAULT_AUTHOR_NAME, false, "local");
+    await git.addConfig("user.email", config.GIT_DEFAULT_AUTHOR_EMAIL, false, "local");
   }
 }
+
+export { getGitInstance, isGitRepo, ensureGitRepo, ensureGitignore };
 
 /**
  * 自动创建或合并 .gitignore 文件
@@ -62,5 +63,3 @@ function ensureGitignore(projectPath) {
     fs.appendFileSync(gitignorePath, content, "utf8");
   }
 }
-
-export { getGitInstance, isGitRepo, requireGitRepo, ensureGitignore };
