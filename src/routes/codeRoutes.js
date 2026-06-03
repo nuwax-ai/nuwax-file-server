@@ -196,6 +196,14 @@ const routes = [
         });
       }
 
+      if (config.GIT_ENABLED) {
+        return res.status(200).json({
+          success: false,
+          deprecated: true,
+          message: "此接口已废弃，请使用 /api/git/rollback 进行版本回滚",
+        });
+      }
+
       const result = await codeService.rollbackVersion(
         String(projectId),
         String(codeVersion),

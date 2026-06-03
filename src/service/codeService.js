@@ -173,7 +173,9 @@ async function specifiedFilesUpdate(
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
     log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
-    await backupProjectToZip(projectId, projectPath, backupZipPath);
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
     log(projectId, "INFO", "Project backed up successfully", {
       projectId,
       zipPath: backupZipPath,
@@ -401,7 +403,9 @@ async function allFilesUpdate(
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
     log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
-    await backupProjectToZip(projectId, projectPath, backupZipPath);
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
 
     // 2) 写入文件
     try {
@@ -600,7 +604,9 @@ async function uploadSingleFile(
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
     log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
-    await backupProjectToZip(projectId, projectPath, backupZipPath);
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
     log(projectId, "INFO", `Project backed up: ${backupZipPath}`, {
       projectId,
       zipPath: backupZipPath,

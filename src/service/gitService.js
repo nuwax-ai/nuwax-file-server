@@ -464,9 +464,24 @@ async function rollback(options = {}) {
     const currentLog = await git.log({ maxCount: 1 });
     const previousHead = currentLog.latest ? currentLog.latest.hash : null;
 
+    /*
+        soft：
+        文件回到 target 的状态，但 HEAD 还在原位，所有变更显示为 staged。用户可以直接 commit 生成一个新的"回滚提交"，历史保留完整
+        例如：A → B → C，HEAD 在 C，soft rollback to A 之后
+        - HEAD → 还在 C（不动）
+        - 工作区 + 暂存区 → 文件内容恢复成 A 的状态（即 B 和 C 的改动被撤销了）
+        - B、C 的 commit 历史还在，没有丢失
+        暂存区的改动还在，随时可以再 commit 或 discard
+        如果先soft回滚到A，接着想回滚到B，可以直接soft回滚到B，因为 HEAD 一直在 C 没变过，随时可以checkout任意版本
+
+        hard：
+        彻底回到 target，后面的 commit 历史丢弃
+        回滚接口会返回："previousHead": "def5678"   // 回滚前的 HEAD
+        如果想回到 C，可以直接再调 rollback 返回到 previousHead
+     */
     if (mode === "soft") {
-      // soft: 恢复 index 和 worktree 到目标版本，但不移动 HEAD
-      await git.reset(["--mixed", target]);
+      // soft: 将 target 版本的文件检出到工作区和暂存区，HEAD 不变（可再 commit 生成新提交）
+      await git.raw(["checkout", target, "--", "."]);
     } else {
       await git.reset(["--hard", target]);
     }

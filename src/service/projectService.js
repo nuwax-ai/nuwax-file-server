@@ -124,6 +124,21 @@ async function createProject(projectId, templateType = "react", isolationContext
 
     log(projectId, "INFO", `Project ${projectId} initialized successfully`, { projectId, elapsedMs: Date.now() - startTime });
 
+    if (config.GIT_ENABLED) {
+      try {
+        const gitService = await import("./gitService.js");
+        await gitService.init({ workspaceType: "pageApp", projectId, isolationContext });
+        await gitService.commit({
+          workspaceType: "pageApp",
+          projectId,
+          isolationContext,
+          message: `init project: ${projectId}`,
+        });
+      } catch (gitErr) {
+        log(projectId, "WARN", "Git init/commit failed, skipping", { error: gitErr.message });
+      }
+    }
+
     return {
       success: true,
       message: `Project ${projectId} created successfully`,
@@ -285,9 +300,11 @@ async function uploadProject(
       );
 
       if (!fs.existsSync(backupZipPath)) {
-        // 备份当前项目
+        // 备份当前项目（Git 启用时跳过 zip 备份）
         try {
-          await backupProjectOfVersion(projectId, prevVersion, isolationContext);
+          if (!config.GIT_ENABLED) {
+            await backupProjectOfVersion(projectId, prevVersion, isolationContext);
+          }
           log(projectId, "INFO", `Current version backed up: ${backupZipPath}`, {
             projectId,
           });
@@ -360,6 +377,21 @@ async function uploadProject(
     // 为项目创建 .npmrc 配置文件
     log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectId });
     await createPnpmNpmrc(projectPath, projectId);
+
+    if (config.GIT_ENABLED) {
+      try {
+        const gitService = await import("./gitService.js");
+        await gitService.init({ workspaceType: "pageApp", projectId, isolationContext });
+        await gitService.commit({
+          workspaceType: "pageApp",
+          projectId,
+          isolationContext,
+          message: `upload project v${codeVersion}`,
+        });
+      } catch (gitErr) {
+        log(projectId, "WARN", "Git commit failed after upload, skipping", { error: gitErr.message });
+      }
+    }
 
     // 不需要启动dev,前端会调用启动
     log(projectId, "INFO", `Project ${projectId} uploaded successfully`, { projectId, codeVersion, elapsedMs: Date.now() - startTime });

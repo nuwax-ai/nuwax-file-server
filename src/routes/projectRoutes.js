@@ -327,6 +327,13 @@ const routes = [
       if (!codeVersion) {
         throw new ValidationError("Code version cannot be empty", { field: "codeVersion" });
       }
+      if (config.GIT_ENABLED) {
+        return res.status(200).json({
+          success: false,
+          deprecated: true,
+          message: "此接口已废弃，请使用 /api/git/log + /api/git/diff 查看历史版本内容",
+        });
+      }
       try {
         const result = await getProjectContentByVersion(
           String(projectId),
@@ -348,6 +355,14 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { projectId, codeVersion } = req.body;
       const isolationContext = extractIsolationContext(req.body || {});
+
+      if (config.GIT_ENABLED) {
+        return res.status(200).json({
+          success: false,
+          deprecated: true,
+          message: "此接口已废弃，请使用 Git 版本管理 API（/api/git/*）",
+        });
+      }
 
       const result = await projectService.backupCurrentVersion(
         String(projectId),

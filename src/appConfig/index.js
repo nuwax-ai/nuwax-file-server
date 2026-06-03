@@ -163,7 +163,8 @@ const config = {
     process.env.GIT_AUTO_GITIGNORE?.toLowerCase() === "false" ? false : true,
   GIT_GITIGNORE_ENTRIES: process.env.GIT_GITIGNORE_ENTRIES
     ? process.env.GIT_GITIGNORE_ENTRIES.split("|").map((s) => s.trim()).filter(Boolean)
-    : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store"],
+    : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store", ".agents/", ".claude/", ".opencode/", ".codex/"],
+  GIT_ENABLED: process.env.GIT_ENABLED?.toLowerCase() === "true",
 };
 
 export default config;

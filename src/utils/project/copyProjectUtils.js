@@ -9,6 +9,7 @@ import {
 } from "../error/errorHandler.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
 import { resolveProjectPath } from "../common/projectPathUtils.js";
+import config from "../../appConfig/index.js";
 
 /**
  * 复制项目
@@ -93,6 +94,21 @@ async function copyProject(
 
     // 为目标项目创建 .npmrc 配置文件
     await createPnpmNpmrc(targetProjectPath, targetProjectId);
+
+    if (config.GIT_ENABLED) {
+      try {
+        const gitService = await import("../../service/gitService.js");
+        await gitService.init({ workspaceType: "pageApp", projectId: targetProjectId, isolationContext: targetIsolationContext });
+        await gitService.commit({
+          workspaceType: "pageApp",
+          projectId: targetProjectId,
+          isolationContext: targetIsolationContext,
+          message: `copy project: ${sourceProjectId} -> ${targetProjectId}`,
+        });
+      } catch (gitErr) {
+        log(targetProjectId, "WARN", "Git init/commit failed, skipping", { error: gitErr.message });
+      }
+    }
 
     return {
       success: true,
