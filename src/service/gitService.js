@@ -446,18 +446,21 @@ async function diff(options = {}) {
   }
 }
 
-// ──────────────────────────── rollback ────────────────────────────
+// ──────────────────────────── reset ────────────────────────────
 
 /**
- * 回滚
+ * 重置 HEAD 到指定版本
+ * - soft:  HEAD 移到 target，后续 commit 的改动保留在暂存区（staged）
+ * - mixed: HEAD 移到 target，后续 commit 的改动变为 unstaged
+ * - hard:  HEAD 移到 target，暂存区和工作区全部恢复到 target 状态，后续改动丢失
  */
-async function rollback(options = {}) {
-  const { target, mode = "soft" } = options;
+async function reset(options = {}) {
+  const { target, mode = "mixed" } = options;
   if (!target) {
-    throw new ValidationError("Rollback target cannot be empty", { field: "target" });
+    throw new ValidationError("Reset target cannot be empty", { field: "target" });
   }
-  if (!["soft", "hard"].includes(mode)) {
-    throw new ValidationError("Mode must be soft or hard", { field: "mode" });
+  if (!["soft", "mixed", "hard"].includes(mode)) {
+    throw new ValidationError("Mode must be soft, mixed or hard", { field: "mode" });
   }
 
   const { targetPath, logId } = resolveAndCheck(options);
@@ -470,43 +473,90 @@ async function rollback(options = {}) {
     const currentLog = await git.log({ maxCount: 1 });
     const previousHead = currentLog.latest ? currentLog.latest.hash : null;
 
-    /*
-        soft：
-        文件回到 target 的状态，但 HEAD 还在原位，所有变更显示为 staged。用户可以直接 commit 生成一个新的"回滚提交"，历史保留完整
-        例如：A → B → C，HEAD 在 C，soft rollback to A 之后
-        - HEAD → 还在 C（不动）
-        - 工作区 + 暂存区 → 文件内容恢复成 A 的状态（即 B 和 C 的改动被撤销了）
-        - B、C 的 commit 历史还在，没有丢失
-        暂存区的改动还在，随时可以再 commit 或 discard
-        如果先soft回滚到A，接着想回滚到B，可以直接soft回滚到B，因为 HEAD 一直在 C 没变过，随时可以checkout任意版本
+    await git.reset([`--${mode}`, target]);
 
-        hard：
-        彻底回到 target，后面的 commit 历史丢弃
-        回滚接口会返回："previousHead": "def5678"   // 回滚前的 HEAD
-        如果想回到 C，可以直接再调 rollback 返回到 previousHead
-     */
-    if (mode === "soft") {
-      // soft: 将 target 版本的文件检出到工作区和暂存区，HEAD 不变（可再 commit 生成新提交）
-      await git.raw(["checkout", target, "--", "."]);
-    } else {
-      await git.reset(["--hard", target]);
-    }
-
-    log(logId, "INFO", "Git rollback successful", {
+    log(logId, "INFO", "Git reset successful", {
       logId, target, mode, previousHead,
     });
 
     return {
       success: true,
-      message: `Rollback (${mode}) to ${target} successful`,
+      message: `Reset (${mode}) to ${target} successful`,
       logId,
       target,
       mode,
       previousHead,
     };
   } catch (e) {
-    log(logId, "ERROR", "Failed to rollback", { logId, target, error: e.message });
-    throw new SystemError("Failed to rollback", { originalError: e.message });
+    log(logId, "ERROR", "Failed to reset", { logId, target, mode, error: e.message });
+    throw new SystemError("Failed to reset", { originalError: e.message });
+  }
+}
+
+// ──────────────────────────── checkout ────────────────────────────
+
+/**
+ * 将 target 版本的文件检出到工作区和暂存区，HEAD 不动
+ * 暂存区中的 staged 变更为后续 commit 改动的反向，可直接 commit 生成回滚提交
+ */
+async function checkout(options = {}) {
+  const { target } = options;
+  if (!target) {
+    throw new ValidationError("Checkout target cannot be empty", { field: "target" });
+  }
+
+  const { targetPath, logId } = resolveAndCheck(options);
+  await ensureGitRepo(targetPath);
+
+  try {
+    const git = getGitInstance(targetPath);
+
+    await git.raw(["checkout", target, "--", "."]);
+
+    log(logId, "INFO", "Git checkout files successful", { logId, target });
+
+    return {
+      success: true,
+      message: `Checkout files from ${target} successful`,
+      logId,
+      target,
+    };
+  } catch (e) {
+    log(logId, "ERROR", "Failed to checkout files", { logId, target, error: e.message });
+    throw new SystemError("Failed to checkout files", { originalError: e.message });
+  }
+}
+
+// ──────────────────────────── revert ────────────────────────────
+
+/**
+ * 创建新提交来撤销指定 commit 的改动，不修改历史
+ */
+async function revert(options = {}) {
+  const { target } = options;
+  if (!target) {
+    throw new ValidationError("Revert target cannot be empty", { field: "target" });
+  }
+
+  const { targetPath, logId } = resolveAndCheck(options);
+  await ensureGitRepo(targetPath);
+
+  try {
+    const git = getGitInstance(targetPath);
+
+    await git.revert(target);
+
+    log(logId, "INFO", "Git revert successful", { logId, target });
+
+    return {
+      success: true,
+      message: `Revert ${target} successful`,
+      logId,
+      target,
+    };
+  } catch (e) {
+    log(logId, "ERROR", "Failed to revert", { logId, target, error: e.message });
+    throw new SystemError("Failed to revert", { originalError: e.message });
   }
 }
 
@@ -799,7 +849,9 @@ export {
   discard,
   logHistory,
   diff,
-  rollback,
+  reset,
+  checkout,
+  revert,
   listTags,
   createTag,
   deleteTag,
@@ -820,7 +872,9 @@ export default {
   discard,
   logHistory,
   diff,
-  rollback,
+  reset,
+  checkout,
+  revert,
   listTags,
   createTag,
   deleteTag,

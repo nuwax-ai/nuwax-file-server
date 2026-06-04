@@ -133,19 +133,53 @@ const routes = [
     }),
   },
   {
-    path: "/rollback",
+    path: "/reset",
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { target, mode } = req.body || {};
-      const params = { ...extractGitParams(req.body), target, mode: mode || "soft" };
+      const params = { ...extractGitParams(req.body), target, mode: mode || "mixed" };
 
       if (!target) {
-        throw new ValidationError("Rollback target cannot be empty", { field: "target" });
+        throw new ValidationError("Reset target cannot be empty", { field: "target" });
       }
 
-      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git rollback", { target, mode });
+      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git reset", { target, mode });
 
-      const result = await gitService.rollback(params);
+      const result = await gitService.reset(params);
+      res.status(200).json(result);
+    }),
+  },
+  {
+    path: "/checkout",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { target } = req.body || {};
+      const params = { ...extractGitParams(req.body), target };
+
+      if (!target) {
+        throw new ValidationError("Checkout target cannot be empty", { field: "target" });
+      }
+
+      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git checkout files", { target });
+
+      const result = await gitService.checkout(params);
+      res.status(200).json(result);
+    }),
+  },
+  {
+    path: "/revert",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { target } = req.body || {};
+      const params = { ...extractGitParams(req.body), target };
+
+      if (!target) {
+        throw new ValidationError("Revert target cannot be empty", { field: "target" });
+      }
+
+      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git revert", { target });
+
+      const result = await gitService.revert(params);
       res.status(200).json(result);
     }),
   },
