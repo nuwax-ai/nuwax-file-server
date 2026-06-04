@@ -294,8 +294,8 @@ const routes = [
     path: "/stash",
     method: "post",
     handler: asyncHandler(async (req, res) => {
-      const { message: stashMessage } = req.body || {};
-      const params = { ...extractGitParams(req.body), message: stashMessage };
+      const { message: stashMessage, files } = req.body || {};
+      const params = { ...extractGitParams(req.body), message: stashMessage, files };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git stash push", params);
 
@@ -307,8 +307,8 @@ const routes = [
     path: "/stash-pop",
     method: "post",
     handler: asyncHandler(async (req, res) => {
-      const { index } = req.body || {};
-      const params = { ...extractGitParams(req.body), index };
+      const { index, files } = req.body || {};
+      const params = { ...extractGitParams(req.body), index, files };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git stash pop", { index });
 

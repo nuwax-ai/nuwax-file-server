@@ -772,7 +772,7 @@ async function deleteBranch(options = {}) {
  * 暂存更改
  */
 async function stashPush(options = {}) {
-  const { message: stashMessage } = options;
+  const { message: stashMessage, files } = options;
   const { targetPath, logId } = resolveAndCheck(options);
   await ensureGitRepo(targetPath);
 
@@ -781,6 +781,9 @@ async function stashPush(options = {}) {
     const stashArgs = ["push"];
     if (stashMessage) {
       stashArgs.push("-m", stashMessage);
+    }
+    if (Array.isArray(files) && files.length > 0) {
+      stashArgs.push("--", ...files);
     }
     await git.stash(stashArgs);
 
@@ -796,21 +799,27 @@ async function stashPush(options = {}) {
  * 恢复暂存
  */
 async function stashPop(options = {}) {
-  const { index } = options;
+  const { index, files } = options;
   const { targetPath, logId } = resolveAndCheck(options);
   await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
+    const stashRef = (index !== undefined && index !== null) ? `stash@{${Number(index)}}` : "stash@{0}";
 
-    if (index !== undefined && index !== null) {
-      await git.stash(["pop", `stash@{${Number(index)}}`]);
+    if (Array.isArray(files) && files.length > 0) {
+      // 指定文件：从 stash 中恢复指定文件，stash 条目保留
+      await git.raw(["checkout", stashRef, "--", ...files]);
+
+      log(logId, "INFO", "Git stash pop (partial)", { logId, index, files });
+      return { success: true, message: "Stash restored (partial)", logId, index, files };
     } else {
-      await git.stash(["pop"]);
-    }
+      // 不指定文件：恢复全部并从栈中移除
+      await git.stash(["pop", stashRef]);
 
-    log(logId, "INFO", "Git stash pop", { logId, index });
-    return { success: true, message: "Stash restored successfully", logId };
+      log(logId, "INFO", "Git stash pop", { logId, index });
+      return { success: true, message: "Stash restored successfully", logId };
+    }
   } catch (e) {
     log(logId, "ERROR", "Failed to pop stash", { logId, index, error: e.message });
     throw new SystemError("Failed to pop stash", { originalError: e.message });
