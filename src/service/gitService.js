@@ -805,6 +805,14 @@ async function stashPop(options = {}) {
 
   try {
     const git = getGitInstance(targetPath);
+
+    // 检查 stash 是否存在
+    const stashResult = await git.stashList().catch(() => ({ all: [], total: 0 }));
+    const stashCount = (stashResult.all && stashResult.all.length) || stashResult.total || 0;
+    if (stashCount === 0) {
+      throw new BusinessError("No stash entries to restore");
+    }
+
     const stashRef = (index !== undefined && index !== null) ? `stash@{${Number(index)}}` : "stash@{0}";
 
     if (Array.isArray(files) && files.length > 0) {
@@ -821,6 +829,7 @@ async function stashPop(options = {}) {
       return { success: true, message: "Stash restored successfully", logId };
     }
   } catch (e) {
+    if (e instanceof BusinessError) throw e;
     log(logId, "ERROR", "Failed to pop stash", { logId, index, error: e.message });
     throw new SystemError("Failed to pop stash", { originalError: e.message });
   }
