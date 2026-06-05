@@ -32,6 +32,8 @@ async function ensureGitRepo(projectPath) {
     ensureGitignore(projectPath);
     await git.addConfig("user.name", config.GIT_DEFAULT_AUTHOR_NAME, false, "local");
     await git.addConfig("user.email", config.GIT_DEFAULT_AUTHOR_EMAIL, false, "local");
+    // 创建初始提交，确保 HEAD 存在
+    await git.commit("Initial commit", ["--allow-empty"]);
   }
 }
 
