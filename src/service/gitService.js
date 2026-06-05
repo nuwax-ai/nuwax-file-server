@@ -875,11 +875,24 @@ async function stashList(options = {}) {
     const git = getGitInstance(targetPath);
     const stashResult = await git.stashList();
 
-    const stashes = stashResult.all.map((entry) => ({
-      hash: entry.hash,
-      message: entry.message,
-      date: entry.date,
-    }));
+    const stashes = [];
+    for (let i = 0; i < stashResult.all.length; i++) {
+      const entry = stashResult.all[i];
+      let files = [];
+      try {
+        const raw = await git.raw(["stash", "show", `stash@{${i}}`, "--name-only"]);
+        files = raw.trim().split("\n").filter(Boolean);
+      } catch (_) {
+        // ignore
+      }
+      stashes.push({
+        index: i,
+        hash: entry.hash,
+        message: entry.message,
+        date: entry.date,
+        files,
+      });
+    }
 
     return { success: true, logId, stashes, total: stashes.length };
   } catch (e) {
