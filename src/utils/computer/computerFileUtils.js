@@ -4,6 +4,7 @@ import archiver from "archiver";
 import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { ValidationError, SystemError } from "../error/errorHandler.js";
+import { autoGitAdd } from "../git/gitUtils.js";
 
 const DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const DOWNLOAD_MAX_FILE_SIZE_BYTES =
@@ -505,6 +506,8 @@ async function updateFiles(userId, cId, files) {
       elapsedMs: Date.now() - startTime,
     });
 
+    await autoGitAdd(targetDir, null);
+
     return {
       success: true,
       message: "User files updated successfully",
@@ -611,6 +614,8 @@ async function uploadFile(userId, cId, file, filePath) {
         : 0,
       elapsedMs: Date.now() - startTime,
     });
+
+    await autoGitAdd(targetDir, [normalizedPath]);
 
     return {
       success: true,

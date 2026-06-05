@@ -70,6 +70,22 @@ const routes = [
     }),
   },
   {
+    path: "/add",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { files } = req.body || {};
+      const params = { ...extractGitParams(req.body), files };
+
+      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git add", {
+        ...params,
+        filesCount: files ? files.length : "all",
+      });
+
+      const result = await gitService.add(params);
+      res.status(200).json(result);
+    }),
+  },
+  {
     path: "/unstage",
     method: "post",
     handler: asyncHandler(async (req, res) => {

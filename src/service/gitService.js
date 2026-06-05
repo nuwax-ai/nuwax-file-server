@@ -189,6 +189,33 @@ async function commit(options = {}) {
   }
 }
 
+// ──────────────────────────── add ────────────────────────────
+
+/**
+ * 暂存文件（git add），files 为空时暂存全部变更
+ */
+async function add(options = {}) {
+  const { files } = options;
+  const { targetPath, logId } = resolveAndCheck(options);
+  await ensureGitRepo(targetPath);
+
+  try {
+    const git = getGitInstance(targetPath);
+
+    if (Array.isArray(files) && files.length > 0) {
+      await git.add(files);
+    } else {
+      await git.add("--all");
+    }
+
+    log(logId, "INFO", "Git add successful", { logId, filesCount: files ? files.length : "all" });
+    return { success: true, message: "Files staged successfully", logId };
+  } catch (e) {
+    log(logId, "ERROR", "Failed to add files", { logId, error: e.message });
+    throw new SystemError("Failed to add files", { originalError: e.message });
+  }
+}
+
 // ──────────────────────────── unstage ────────────────────────────
 
 /**
@@ -783,6 +810,8 @@ async function stashPush(options = {}) {
       stashArgs.push("-m", stashMessage);
     }
     if (Array.isArray(files) && files.length > 0) {
+      // 先 add 确保未跟踪文件也能被 stash
+      await git.add(files);
       stashArgs.push("--", ...files);
     }
     await git.stash(stashArgs);
@@ -863,6 +892,7 @@ export {
   init,
   status,
   commit,
+  add,
   unstage,
   discard,
   logHistory,
@@ -886,6 +916,7 @@ export default {
   init,
   status,
   commit,
+  add,
   unstage,
   discard,
   logHistory,

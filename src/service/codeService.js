@@ -9,6 +9,7 @@ import {
   ResourceError,
   FileError,
 } from "../utils/error/errorHandler.js";
+import { autoGitAdd } from "../utils/git/gitUtils.js";
 import { sanitizeSensitivePaths } from "../utils/common/sensitiveUtils.js";
 import {
   backupProjectToZip,
@@ -340,6 +341,8 @@ async function specifiedFilesUpdate(
         elapsedMs: Date.now() - startTime,
       });
 
+      await autoGitAdd(projectPath, null);
+
       return {
         success: true,
         message: "Specified files updated successfully",
@@ -520,6 +523,9 @@ async function allFilesUpdate(
       filesCount: files.length,
       elapsedMs: Date.now() - startTime,
     });
+
+    await autoGitAdd(projectPath, null);
+
     return {
       success: true,
       message: "Files submitted successfully",
@@ -644,6 +650,8 @@ async function uploadSingleFile(
         fileSize: file.buffer ? file.buffer.length : 0,
         elapsedMs: Date.now() - startTime,
       });
+
+      await autoGitAdd(projectPath, [normalizedPath]);
 
       // 判断是否需要重启开发服务器
       // const needRestart = shouldRestartForSingleFile(path.basename(normalizedPath));

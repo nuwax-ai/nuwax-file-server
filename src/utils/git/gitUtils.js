@@ -37,7 +37,26 @@ async function ensureGitRepo(projectPath) {
   }
 }
 
-export { getGitInstance, isGitRepo, ensureGitRepo, ensureGitignore };
+export { getGitInstance, isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd };
+
+/**
+ * 文件操作后自动 git add，非阻塞（失败不影响主流程）
+ * @param {string} projectPath 项目绝对路径
+ * @param {string[]|null} files 相对路径文件列表，null 时 add --all
+ */
+async function autoGitAdd(projectPath, files) {
+  if (!isGitRepo(projectPath)) return;
+  try {
+    const git = getGitInstance(projectPath);
+    if (Array.isArray(files) && files.length > 0) {
+      await git.add(files);
+    } else {
+      await git.add("--all");
+    }
+  } catch (_) {
+    // non-blocking
+  }
+}
 
 /**
  * 自动创建或合并 .gitignore 文件
