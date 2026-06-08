@@ -478,11 +478,11 @@ async function diff(options = {}) {
         diffArgs.push("--cached");
         break;
       case "commit":
-        // 两个 commit 之间
+        // 两个 commit 之间，只传 from 时自动与前一个版本比较
         if (from && to) {
           diffArgs.push(`${from}..${to}`);
         } else if (from) {
-          diffArgs.push(from);
+          diffArgs.push(`${from}^..${from}`);
         }
         break;
       case "worktree":
