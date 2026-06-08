@@ -149,6 +149,19 @@ const routes = [
     }),
   },
   {
+    path: "/file-content",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { ref, filePath } = req.body || {};
+      const params = { ...extractGitParams(req.body), ref, filePath };
+
+      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git file content", { ref, filePath });
+
+      const result = await gitService.fileContent(params);
+      res.status(200).json(result);
+    }),
+  },
+  {
     path: "/reset",
     method: "post",
     handler: asyncHandler(async (req, res) => {

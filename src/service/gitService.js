@@ -525,6 +525,59 @@ async function diff(options = {}) {
   }
 }
 
+// ──────────────────────────── file content ────────────────────────────
+
+/**
+ * 获取指定 git 版本的文件内容
+ * @param {Object} options
+ * @param {string} options.ref git 引用（commit hash、分支名、HEAD、HEAD~1 等）
+ *   - "worktree": 读取工作区文件
+ *   - "staged" 或 "": 读取暂存区文件（git show :path）
+ *   - 其他: 读取指定版本的文件（git show ref:path）
+ * @param {string} options.filePath 文件相对路径
+ */
+async function fileContent(options = {}) {
+  const { ref = "HEAD", filePath } = options;
+  if (!filePath) {
+    throw new ValidationError("filePath is required", { field: "filePath" });
+  }
+
+  const { targetPath, logId } = resolveAndCheck(options);
+  await ensureGitRepo(targetPath);
+
+  try {
+    const git = getGitInstance(targetPath);
+    let content;
+
+    if (ref === "worktree") {
+      // 读取工作区文件
+      const fullPath = path.join(targetPath, filePath);
+      if (!fs.existsSync(fullPath)) {
+        throw new ResourceError("File not found in working tree", { filePath });
+      }
+      content = fs.readFileSync(fullPath, "utf-8");
+    } else if (ref === "staged" || ref === "") {
+      // 读取暂存区文件
+      content = await git.show([`:${filePath}`]);
+    } else {
+      // 读取指定版本的文件
+      content = await git.show([`${ref}:${filePath}`]);
+    }
+
+    return {
+      success: true,
+      logId,
+      filePath,
+      ref,
+      content,
+    };
+  } catch (e) {
+    if (e instanceof ResourceError) throw e;
+    log(logId, "ERROR", "Failed to get file content", { logId, ref, filePath, error: e.message });
+    throw new SystemError("Failed to get file content", { originalError: e.message });
+  }
+}
+
 // ──────────────────────────── reset ────────────────────────────
 
 /**
@@ -962,6 +1015,7 @@ export {
   discard,
   logHistory,
   diff,
+  fileContent,
   reset,
   checkout,
   revert,
@@ -986,6 +1040,7 @@ export default {
   discard,
   logHistory,
   diff,
+  fileContent,
   reset,
   checkout,
   revert,
