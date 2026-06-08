@@ -716,6 +716,15 @@ async function revert(options = {}) {
   try {
     const git = getGitInstance(targetPath);
 
+    // 检查工作区是否有未提交的修改
+    const statusResult = await git.status();
+    if (!statusResult.isClean()) {
+      throw new BusinessError("工作区有未提交的修改，请先 commit 或 stash 后再 revert", {
+        staged: statusResult.staged,
+        modified: statusResult.modified,
+      });
+    }
+
     await git.revert(target);
 
     log(logId, "INFO", "Git revert successful", { logId, target });
