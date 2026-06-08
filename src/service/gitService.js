@@ -740,6 +740,15 @@ async function revert(options = {}) {
     };
   } catch (e) {
     if (e instanceof BusinessError) throw e;
+    // revert 产生冲突时，自动 abort 恢复干净状态
+    try {
+      await git.raw(["revert", "--abort"]);
+    } catch (_) {
+      // ignore
+    }
+    if (e.message && e.message.includes("CONFLICT")) {
+      throw new BusinessError("Revert 产生冲突，无法自动合并，该 commit 暂不支持 revert", { target });
+    }
     log(logId, "ERROR", "Failed to revert", { logId, target, error: e.message });
     throw new SystemError("Failed to revert", { originalError: e.message });
   }
