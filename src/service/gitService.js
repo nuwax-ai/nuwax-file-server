@@ -581,18 +581,27 @@ async function fileContent(options = {}) {
     let content;
 
     if (ref === "worktree") {
-      // 读取工作区文件
+      // 读取工作区文件，不存在则返回空内容（文件可能已被删除）
       const fullPath = path.join(targetPath, filePath);
       if (!fs.existsSync(fullPath)) {
-        throw new ResourceError("File not found in working tree", { filePath });
+        content = "";
+      } else {
+        content = fs.readFileSync(fullPath, "utf-8");
       }
-      content = fs.readFileSync(fullPath, "utf-8");
     } else if (ref === "staged" || ref === "") {
-      // 读取暂存区文件
-      content = await git.show([`:${filePath}`]);
+      // 读取暂存区文件，不存在则返回空内容（文件可能未被 add）
+      try {
+        content = await git.show([`:${filePath}`]);
+      } catch (_) {
+        content = "";
+      }
     } else {
-      // 读取指定版本的文件
-      content = await git.show([`${ref}:${filePath}`]);
+      // 读取指定版本的文件，不存在则返回空内容（该版本中文件不存在）
+      try {
+        content = await git.show([`${ref}:${filePath}`]);
+      } catch (_) {
+        content = "";
+      }
     }
 
     return {
