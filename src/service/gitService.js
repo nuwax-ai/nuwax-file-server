@@ -113,14 +113,42 @@ async function status(options = {}) {
     const git = getGitInstance(targetPath);
     const statusResult = await git.status();
 
+    // 使用 porcelain 输出精确解析，避免 simple-git 字段语义歧义
+    // porcelain 格式: "XY filename"，X=暂存区状态，Y=工作区状态
+    const raw = await git.raw(["status", "--porcelain"]);
+    const staged = [];
+    const modified = [];
+    const created = [];
+    const deleted = [];
+    const untracked = [];
+
+    if (raw) {
+      for (const line of raw.split("\n").filter(Boolean)) {
+        const x = line[0]; // 暂存区状态
+        const y = line[1]; // 工作区状态
+        const file = line.substring(3);
+        // 暂存区变更（X 列）
+        if (x === "M") staged.push(file);
+        else if (x === "A") { staged.push(file); created.push(file); }
+        else if (x === "D") { staged.push(file); deleted.push(file); }
+        else if (x === "R") staged.push(file);
+        else if (x === "C") staged.push(file);
+        // 工作区变更（Y 列）
+        if (y === "M") modified.push(file);
+        else if (y === "D") { modified.push(file); deleted.push(file); }
+        else if (y === "?") untracked.push(file);
+      }
+    }
+
     return {
       success: true,
       logId,
       current: statusResult.current,
-      staged: statusResult.staged,
-      modified: statusResult.modified,
-      created: statusResult.created,
-      deleted: statusResult.deleted,
+      staged,
+      modified,
+      created,
+      deleted,
+      untracked,
       conflicted: statusResult.conflicted,
       ahead: statusResult.ahead,
       behind: statusResult.behind,
