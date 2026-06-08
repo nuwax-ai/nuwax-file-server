@@ -177,9 +177,12 @@ async function commit(options = {}) {
   try {
     const git = getGitInstance(targetPath);
 
-    // 暂存文件
+    // 暂存文件（过滤不存在的文件路径）
     if (Array.isArray(files) && files.length > 0) {
-      await git.add(files);
+      const existingFiles = files.filter(f => fs.existsSync(path.join(targetPath, f)));
+      if (existingFiles.length > 0) {
+        await git.add(existingFiles);
+      }
     } else {
       await git.add("--all");
     }
