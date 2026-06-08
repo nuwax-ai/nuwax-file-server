@@ -482,12 +482,37 @@ async function diff(options = {}) {
         if (from && to) {
           diffArgs.push(`${from}..${to}`);
         } else if (from) {
-          // 检查是否有父提交，初始 commit 无父提交需对比空树
+          // 检查是否有父提交，初始 commit 无父提交需用 diff-tree
           const parentHash = await git.raw(["log", "--format=%P", "-1", from]);
           if (parentHash.trim()) {
             diffArgs.push(`${from}^..${from}`);
           } else {
-            diffArgs.push(`4b825dc642cb6eb9a060e54bf899d15363d7a90d..${from}`);
+            // 初始 commit：用 diff-tree 对比空内容
+            const pathArgs = Array.isArray(paths) && paths.length > 0 ? ["--", ...paths] : [];
+            const [initialDiff, numstatRaw] = await Promise.all([
+              git.raw(["diff-tree", "-p", from, ...pathArgs]),
+              git.raw(["diff-tree", "--numstat", "-r", from, ...pathArgs]),
+            ]);
+            const files = [];
+            let totalInsertions = 0;
+            let totalDeletions = 0;
+            for (const line of numstatRaw.split("\n").filter(Boolean)) {
+              const parts = line.split("\t");
+              if (parts.length === 3) {
+                const ins = parseInt(parts[0], 10) || 0;
+                const del = parseInt(parts[1], 10) || 0;
+                files.push({ file: parts[2], changes: ins + del, insertions: ins, deletions: del, binary: false });
+                totalInsertions += ins;
+                totalDeletions += del;
+              }
+            }
+            return {
+              success: true,
+              logId,
+              source,
+              diff: initialDiff,
+              summary: { files, insertions: totalInsertions, deletions: totalDeletions },
+            };
           }
         }
         break;
