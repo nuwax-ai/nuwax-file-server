@@ -29,13 +29,13 @@ async function ensureGitRepo(projectPath) {
   if (!isGitRepo(projectPath)) {
     const git = simpleGit(projectPath);
     await git.init(["-b", "main"]);
-    ensureGitignore(projectPath);
     await git.addConfig("user.name", config.GIT_DEFAULT_AUTHOR_NAME, false, "local");
     await git.addConfig("user.email", config.GIT_DEFAULT_AUTHOR_EMAIL, false, "local");
     await git.addConfig("init.defaultBranch", "main", false, "local");
     // 创建初始提交，确保 HEAD 存在
     await git.commit("Initial commit", ["--allow-empty"]);
   }
+  ensureGitignore(projectPath);
 }
 
 export { getGitInstance, isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd };

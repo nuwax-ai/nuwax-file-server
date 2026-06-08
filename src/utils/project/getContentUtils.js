@@ -83,8 +83,8 @@ async function traverseDirectory(targetDir, basePath, projectId, proxyPath) {
   for (const entry of entries) {
     const fullPath = path.join(targetDir, entry.name);
 
-    // 跳过隐藏文件（以 . 开头的文件）
-    if (entry.name.startsWith(".")) {
+    // 跳过隐藏文件（以 . 开头的文件），但允许 .gitignore 等可编辑配置文件
+    if (entry.name.startsWith(".") && entry.name !== ".gitignore") {
       continue;
     }
 
