@@ -736,12 +736,10 @@ async function revert(options = {}) {
       target,
     };
   } catch (e) {
+    if (e instanceof BusinessError) throw e;
     log(logId, "ERROR", "Failed to revert", { logId, target, error: e.message });
     throw new SystemError("Failed to revert", { originalError: e.message });
   }
-}
-
-// ──────────────────────────── tags ────────────────────────────
 
 /**
  * 列出标签
