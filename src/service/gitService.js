@@ -454,20 +454,43 @@ async function logHistory(options = {}) {
 
 /**
  * 差异对比
+ * @param {Object} options
+ * @param {"worktree"|"staged"|"commit"} [options.source] 对比来源：
+ *   - "worktree": 工作区 vs HEAD（默认）
+ *   - "staged":   暂存区 vs HEAD（git diff --cached）
+ *   - "commit":   两个 commit 之间的对比，需配合 from/to 使用
+ * @param {string} [options.from] commit hash（source=commit 时使用）
+ * @param {string} [options.to]   commit hash（source=commit 时使用）
+ * @param {string[]} [options.paths] 限定文件范围
  */
 async function diff(options = {}) {
-  const { from, to, paths } = options;
+  const { source = "worktree", from, to, paths } = options;
   const { targetPath, logId } = resolveAndCheck(options);
   await ensureGitRepo(targetPath);
 
   try {
     const git = getGitInstance(targetPath);
-    const diffArgs = [];
+    let diffArgs = [];
 
-    if (from && to) {
-      diffArgs.push(`${from}..${to}`);
-    } else if (from) {
-      diffArgs.push(from);
+    switch (source) {
+      case "staged":
+        // 暂存区 vs HEAD
+        diffArgs.push("--cached");
+        break;
+      case "commit":
+        // 两个 commit 之间
+        if (from && to) {
+          diffArgs.push(`${from}..${to}`);
+        } else if (from) {
+          diffArgs.push(from);
+        }
+        break;
+      case "worktree":
+      default:
+        // 工作区 vs HEAD（不传参数时 git diff 默认就是工作区 vs 暂存区，
+        // 加 HEAD 才是 vs HEAD）
+        diffArgs.push("HEAD");
+        break;
     }
 
     if (Array.isArray(paths) && paths.length > 0) {
@@ -482,6 +505,7 @@ async function diff(options = {}) {
     return {
       success: true,
       logId,
+      source,
       diff: diffText,
       summary: {
         files: summary.files.map((f) => ({

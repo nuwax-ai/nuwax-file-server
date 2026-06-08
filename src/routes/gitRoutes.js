@@ -139,8 +139,8 @@ const routes = [
     path: "/diff",
     method: "post",
     handler: asyncHandler(async (req, res) => {
-      const { from, to, paths } = req.body || {};
-      const params = { ...extractGitParams(req.body), from, to, paths };
+      const { from, to, paths, source } = req.body || {};
+      const params = { ...extractGitParams(req.body), from, to, paths, source };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git diff", { from, to });
 
