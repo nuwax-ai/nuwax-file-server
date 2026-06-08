@@ -482,7 +482,13 @@ async function diff(options = {}) {
         if (from && to) {
           diffArgs.push(`${from}..${to}`);
         } else if (from) {
-          diffArgs.push(`${from}^..${from}`);
+          // 检查是否有父提交，初始 commit 无父提交需对比空树
+          const parentHash = await git.raw(["log", "--format=%P", "-1", from]);
+          if (parentHash.trim()) {
+            diffArgs.push(`${from}^..${from}`);
+          } else {
+            diffArgs.push(`4b825dc642cb6eb9a060e54bf899d15363d7a90d..${from}`);
+          }
         }
         break;
       case "worktree":
