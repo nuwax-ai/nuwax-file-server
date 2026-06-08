@@ -740,6 +740,7 @@ async function revert(options = {}) {
     log(logId, "ERROR", "Failed to revert", { logId, target, error: e.message });
     throw new SystemError("Failed to revert", { originalError: e.message });
   }
+}
 
 /**
  * 列出标签
