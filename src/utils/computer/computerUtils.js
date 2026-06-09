@@ -190,13 +190,119 @@ async function moveDirectory(srcDir, destDir) {
 }
 
 /**
+ * 写入 .claude/settings.json、.mcp.json、hook 外挂脚本
+ * @param {string} userWorkspaceRoot 工作空间根目录
+ * @param {string|undefined} mcpServersConfig MCP servers配置 JSON字符串
+ * @param {string|undefined} hooksConfig Hooks配置 JSON字符串
+ * @param {string|undefined} permissionsConfig 工具权限配置 JSON字符串
+ * @param {Array|undefined} hookScripts Hook外挂脚本数组 [{path, content}]
+ * @param {string} logId
+ */
+async function writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId) {
+  const hasMcp = mcpServersConfig && mcpServersConfig.trim();
+  const hasHooks = hooksConfig && hooksConfig.trim();
+  const hasPerms = permissionsConfig && permissionsConfig.trim();
+  const hasScripts = Array.isArray(hookScripts) && hookScripts.length > 0;
+
+  if (!hasMcp && !hasHooks && !hasPerms && !hasScripts) {
+    return;
+  }
+
+  const claudeDir = path.join(userWorkspaceRoot, ".claude");
+  try {
+    if (!fs.existsSync(claudeDir)) {
+      await fs.promises.mkdir(claudeDir, { recursive: true });
+    }
+
+    // 1. MCP 配置写入项目根目录的 .mcp.json（官方规范）
+    if (hasMcp) {
+      try {
+        const mcpConfig = { mcpServers: JSON.parse(mcpServersConfig) };
+        const mcpPath = path.join(userWorkspaceRoot, ".mcp.json");
+        await fs.promises.writeFile(mcpPath, JSON.stringify(mcpConfig, null, 2), "utf-8");
+        log(logId, "INFO", "Written .mcp.json to workspace root");
+      } catch (e) {
+        log(logId, "WARN", "Failed to parse/write mcpServersConfig, skipping", { error: e.message });
+      }
+    }
+
+    // 2. Hooks + Permissions 写入 .claude/settings.json
+    const settings = {};
+
+    if (hasHooks) {
+      try {
+        settings.hooks = JSON.parse(hooksConfig);
+      } catch (e) {
+        log(logId, "WARN", "Failed to parse hooksConfig, skipping", { error: e.message });
+      }
+    }
+
+    if (hasPerms) {
+      try {
+        settings.permissions = JSON.parse(permissionsConfig);
+      } catch (e) {
+        log(logId, "WARN", "Failed to parse permissionsConfig, skipping", { error: e.message });
+      }
+    }
+
+    if (Object.keys(settings).length > 0) {
+      const settingsPath = path.join(claudeDir, "settings.json");
+      await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+      log(logId, "INFO", "Written .claude/settings.json", {
+        keys: Object.keys(settings),
+      });
+    }
+
+    // 3. 写入 hook 外挂脚本
+    if (hasScripts) {
+      const hooksDir = path.join(claudeDir, "hooks");
+      if (!fs.existsSync(hooksDir)) {
+        await fs.promises.mkdir(hooksDir, { recursive: true });
+      }
+
+      for (const script of hookScripts) {
+        if (!script || !script.path || !script.content) continue;
+
+        // 防止路径穿越（path 相对于 .claude 目录）
+        const normalizedScriptPath = path.normalize(script.path);
+        if (normalizedScriptPath.startsWith("..") || path.isAbsolute(normalizedScriptPath)) {
+          log(logId, "WARN", "Hook script path contains traversal, skipping", { path: script.path });
+          continue;
+        }
+
+        // path 是相对于 .claude 目录的路径，如 hooks/my-script.sh
+        const scriptFilePath = path.join(claudeDir, normalizedScriptPath);
+        const scriptDir = path.dirname(scriptFilePath);
+
+        if (!fs.existsSync(scriptDir)) {
+          await fs.promises.mkdir(scriptDir, { recursive: true });
+        }
+
+        await fs.promises.writeFile(scriptFilePath, script.content, "utf-8");
+        // 设置可执行权限
+        await fs.promises.chmod(scriptFilePath, 0o755);
+        log(logId, "INFO", "Written hook script", { path: script.path });
+      }
+    }
+  } catch (e) {
+    log(logId, "WARN", "Failed to write .claude/settings or .mcp.json or hook scripts, not blocking workspace creation", {
+      error: e.message,
+    });
+  }
+}
+
+/**
  * 创建工作空间并（可选）处理上传的 zip，提取 skills 目录
  * @param {string|number} userId
  * @param {string|number} cId
  * @param {Object|null} file multer 文件对象（zip），可以为空
  * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
+ * @param {string|undefined} mcpServersConfig MCP servers配置 JSON字符串
+ * @param {string|undefined} permissionsConfig 工具权限配置 JSON字符串
+ * @param {string|undefined} hooksConfig Hooks配置 JSON字符串
+ * @param {Array|undefined} hookScripts Hook外挂脚本数组 [{path, content}]
  */
-async function createWorkspace(userId, cId, file, skillUrls) {
+async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, permissionsConfig, hooksConfig, hookScripts) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const normalizedSkillUrls = normalizeSkillUrls(skillUrls);
@@ -299,6 +405,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
 
   // 如果没有上传文件也没有 URL：不写入 skills 和 agents
   if (!file && normalizedSkillUrls.length === 0) {
+    await writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId);
     await syncAgents(userWorkspaceRoot);
     log(logId, "INFO", "Created workspace (no uploaded file, no skills and agents)", {
       userId,
@@ -525,6 +632,7 @@ async function createWorkspace(userId, cId, file, skillUrls) {
       agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
+    await writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId);
     await syncAgents(userWorkspaceRoot);
 
     return {

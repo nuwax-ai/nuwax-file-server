@@ -102,7 +102,7 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, skillUrls } = req.body || {};
+      const { userId, cId, skillUrls, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
 
@@ -117,6 +117,16 @@ const routes = [
         }
       }
 
+      // hookScripts 可能是 JSON 字符串（multipart form 传数组会序列化）
+      let normalizedHookScripts = hookScripts;
+      if (typeof hookScripts === "string") {
+        try {
+          normalizedHookScripts = JSON.parse(hookScripts);
+        } catch {
+          normalizedHookScripts = null;
+        }
+      }
+
       log(logId, "INFO", "Create workspace v2 request", {
         userId,
         cId,
@@ -124,9 +134,13 @@ const routes = [
         fileName: file?.originalname,
         fileSize: file?.size,
         skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
+        hasMcpServersConfig: !!mcpServersConfig,
+        hasHooksConfig: !!hooksConfig,
+        hasPermissionsConfig: !!permissionsConfig,
+        hookScriptsCount: Array.isArray(normalizedHookScripts) ? normalizedHookScripts.length : 0,
       });
 
-      const result = await createWorkspace(userId, cId, file, normalizedSkillUrls);
+      const result = await createWorkspace(userId, cId, file, normalizedSkillUrls, mcpServersConfig, permissionsConfig, hooksConfig, normalizedHookScripts);
 
       res.status(200).json({
         success: true,
