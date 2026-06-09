@@ -403,9 +403,21 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
     agentsExists: agentsExistsAfter,
   });
 
+  // 清除旧的配置文件，避免残留上次调用的配置
+  const mcpJsonPath = path.join(userWorkspaceRoot, ".mcp.json");
+  if (fs.existsSync(mcpJsonPath)) {
+    await fs.promises.unlink(mcpJsonPath);
+  }
+  const claudeSettingsPath = path.join(userWorkspaceRoot, ".claude", "settings.json");
+  if (fs.existsSync(claudeSettingsPath)) {
+    await fs.promises.unlink(claudeSettingsPath);
+  }
+
+  // 写入新的配置文件
+  await writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId);
+
   // 如果没有上传文件也没有 URL：不写入 skills 和 agents
   if (!file && normalizedSkillUrls.length === 0) {
-    await writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId);
     await syncAgents(userWorkspaceRoot);
     log(logId, "INFO", "Created workspace (no uploaded file, no skills and agents)", {
       userId,
@@ -632,7 +644,6 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
       agentTypes: normalizedAgentTypes,
       elapsedMs: Date.now() - startTime,
     });
-    await writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId);
     await syncAgents(userWorkspaceRoot);
 
     return {
