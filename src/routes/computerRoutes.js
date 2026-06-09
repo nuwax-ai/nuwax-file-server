@@ -5,7 +5,7 @@ import path from "path";
 import { ValidationError, asyncHandler } from "../utils/error/errorHandler.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
-import { createWorkspace, pushSkillsToWorkspace, } from "../utils/computer/computerUtils.js";
+import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
   updateFiles,
@@ -353,6 +353,32 @@ const routes = [
           }
         }
       }
+    }),
+  },
+  {
+    path: "/init-project-template",
+    method: "post",
+    middleware: upload.single("file"),
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, enableGit } = req.body || {};
+      const file = req.file || null;
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Init project template request", {
+        userId,
+        cId,
+        hasFile: !!file,
+        fileName: file?.originalname,
+        fileSize: file?.size,
+        enableGit,
+      });
+
+      const result = await initProjectTemplate(userId, cId, file, enableGit);
+
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
     }),
   },
   {

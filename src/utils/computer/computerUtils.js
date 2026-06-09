@@ -975,6 +975,154 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
   }
 }
 
-export { createWorkspace, pushSkillsToWorkspace };
+/**
+ * 初始化项目模板
+ * 将模板 zip 解压到工作空间目录，并执行 git init + commit
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {Object|null} file multer 文件对象（zip）
+ * @param {string|boolean|undefined} enableGit 是否开启 git 版本管理
+ */
+async function initProjectTemplate(userId, cId, file, enableGit) {
+  const startTime = Date.now();
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!file || !file.path) {
+    throw new ValidationError("file is required", { field: "file" });
+  }
+
+  const ext = path.extname(file.originalname || file.filename || "").toLowerCase();
+  if (ext !== ".zip") {
+    throw new ValidationError("Only zip files are supported", {
+      field: "file",
+      originalName: file.originalname,
+    });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+  const tmpRoot = path.join(targetDir, ".tmp");
+  const extractRoot = path.join(
+    tmpRoot,
+    `template_extract_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+  );
+
+  try {
+    // 确保目标目录存在
+    if (!fs.existsSync(targetDir)) {
+      await fs.promises.mkdir(targetDir, { recursive: true });
+    }
+    if (!fs.existsSync(tmpRoot)) {
+      await fs.promises.mkdir(tmpRoot, { recursive: true });
+    }
+    await fs.promises.mkdir(extractRoot, { recursive: true });
+
+    // 解压 zip 到临时目录
+    log(logId, "DEBUG", "Start extracting template zip file", { extractRoot });
+    await extractZip(file.path, extractRoot);
+    log(logId, "DEBUG", "Template zip file extracted successfully", { extractRoot });
+
+    // 将解压后的内容移动到目标目录（支持 zip 根目录有或没有子目录包装的情况）
+    const extractedEntries = await fs.promises.readdir(extractRoot, { withFileTypes: true });
+    // 如果解压后只有一个子目录，进入该子目录取内容
+    let sourceDir = extractRoot;
+    if (extractedEntries.length === 1 && extractedEntries[0].isDirectory()) {
+      sourceDir = path.join(extractRoot, extractedEntries[0].name);
+    }
+
+    const items = await fs.promises.readdir(sourceDir, { withFileTypes: true });
+    for (const item of items) {
+      const srcPath = path.join(sourceDir, item.name);
+      const destPath = path.join(targetDir, item.name);
+      if (item.isDirectory()) {
+        await moveDirectory(srcPath, destPath);
+      } else {
+        // 确保目标目录存在
+        const destParent = path.dirname(destPath);
+        if (!fs.existsSync(destParent)) {
+          await fs.promises.mkdir(destParent, { recursive: true });
+        }
+        await fs.promises.copyFile(srcPath, destPath);
+      }
+    }
+
+    log(logId, "INFO", "Template files extracted to workspace", {
+      userId,
+      cId,
+      targetDir,
+      fileCount: items.length,
+    });
+
+    // git init + commit（仅当 enableGit 为 true 时执行）
+    if (config.GIT_ENABLED && (enableGit === "true" || enableGit === true)) {
+      const gitService = await import("../../service/gitService.js");
+      await gitService.default.init({ workspaceType: "taskAgent", userId, cId });
+      await gitService.default.commit({ workspaceType: "taskAgent", userId, cId, message: "Initial commit" });
+      log(logId, "INFO", "Git init and initial commit done", { userId, cId });
+    }
+
+    log(logId, "INFO", "Init project template completed", {
+      userId,
+      cId,
+      targetDir,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    return {
+      message: "Project template initialized successfully",
+      workspaceRoot: targetDir,
+    };
+  } catch (error) {
+    log(logId, "ERROR", "Failed to init project template", {
+      userId,
+      cId,
+      error: error.message,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    if (
+      error instanceof ValidationError ||
+      error instanceof FileError ||
+      error instanceof SystemError
+    ) {
+      throw error;
+    }
+
+    throw new SystemError(`Failed to init project template: ${error.message}`, {
+      userId,
+      cId,
+    });
+  } finally {
+    // 清理临时解压目录
+    try {
+      if (fs.existsSync(extractRoot)) {
+        await fs.promises.rm(extractRoot, { recursive: true, force: true });
+      }
+    } catch (e) {
+      log(logId, "WARN", "Failed to clean up temporary extracted zip", {
+        error: e.message,
+      });
+    }
+    // 清理上传的 zip 文件
+    try {
+      if (file && file.path && fs.existsSync(file.path)) {
+        await fs.promises.unlink(file.path);
+      }
+    } catch (e) {
+      log(logId, "WARN", "Failed to clean up uploaded zip file", {
+        tempZipPath: file?.path,
+        error: e.message,
+      });
+    }
+  }
+}
+
+export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate };
 
 
