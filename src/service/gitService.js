@@ -432,6 +432,7 @@ async function logHistory(options = {}) {
     const skip = Math.max(0, rawSkip);
 
     const args = [];
+    args.push("--reflog");
     if (branch) args.push(branch);
     args.push(`--max-count=${maxCount}`);
     if (skip > 0) args.push(`--skip=${skip}`);
