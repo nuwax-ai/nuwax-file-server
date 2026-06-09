@@ -107,7 +107,17 @@ async function traverseDirectory(targetDir, basePath, projectId, proxyPath) {
     if (entry.isDirectory()) {
       // 递归处理子目录
       const subFiles = await traverseDirectory(fullPath, basePath, projectId, proxyPath);
-      files.push(...subFiles);
+      if (subFiles.length === 0) {
+        // 空目录，返回目录信息
+        const referencePath = basePath || resolveProjectPath(projectId);
+        const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
+        files.push({
+          name: relativePath,
+          isDir: true,
+        });
+      } else {
+        files.push(...subFiles);
+      }
     } else {
       // 处理文件
       try {
@@ -134,6 +144,7 @@ async function traverseDirectory(targetDir, basePath, projectId, proxyPath) {
 
         const fileInfo = {
           name: relativePath,
+          isDir: false,
           binary: isBinary,
           sizeExceeded: stats.size > config.MAX_INLINE_FILE_SIZE_BYTES,
           contents: "",
