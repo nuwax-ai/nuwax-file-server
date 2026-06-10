@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { exec } from "child_process";
 import config from "../../appConfig/index.js";
 import { extractZip } from "../common/zipUtils.js";
 import {
@@ -1039,17 +1040,10 @@ async function initProjectTemplate(userId, cId, file, enableGit) {
     await extractZip(file.path, extractRoot);
     log(logId, "DEBUG", "Template zip file extracted successfully", { extractRoot });
 
-    // 将解压后的内容移动到目标目录（支持 zip 根目录有或没有子目录包装的情况）
-    const extractedEntries = await fs.promises.readdir(extractRoot, { withFileTypes: true });
-    // 如果解压后只有一个子目录，进入该子目录取内容
-    let sourceDir = extractRoot;
-    if (extractedEntries.length === 1 && extractedEntries[0].isDirectory()) {
-      sourceDir = path.join(extractRoot, extractedEntries[0].name);
-    }
-
-    const items = await fs.promises.readdir(sourceDir, { withFileTypes: true });
+    // 将解压后的内容直接移动到目标目录（保留 zip 的顶层目录结构）
+    const items = await fs.promises.readdir(extractRoot, { withFileTypes: true });
     for (const item of items) {
-      const srcPath = path.join(sourceDir, item.name);
+      const srcPath = path.join(extractRoot, item.name);
       const destPath = path.join(targetDir, item.name);
       if (item.isDirectory()) {
         await moveDirectory(srcPath, destPath);
@@ -1134,6 +1128,63 @@ async function initProjectTemplate(userId, cId, file, enableGit) {
   }
 }
 
-export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate };
+/**
+ * 在沙箱工作空间中执行命令
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {string} command 要执行的命令
+ * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
+ */
+async function executeCommand(userId, cId, command) {
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!command || typeof command !== "string" || !command.trim()) {
+    throw new ValidationError("command cannot be empty", { field: "command" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot("computer");
+  const workDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (!fs.existsSync(workDir)) {
+    throw new ValidationError("workspace directory does not exist", {
+      field: "workDir",
+      workDir,
+    });
+  }
+
+  const logId = `computer:${userId}:${cId}`;
+  log(logId, "INFO", "Execute command in workspace", {
+    userId,
+    cId,
+    workDir,
+    command,
+  });
+
+  const timeoutMs = 5 * 60 * 1000; // 5 minutes
+
+  return new Promise((resolve, reject) => {
+    exec(
+      command,
+      { cwd: workDir, timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const exitCode = error ? error.code || 1 : 0;
+        log(logId, "INFO", "Execute command completed", {
+          userId,
+          cId,
+          exitCode,
+          stdoutLength: stdout ? stdout.length : 0,
+          stderrLength: stderr ? stderr.length : 0,
+        });
+        resolve({ stdout: stdout || "", stderr: stderr || "", exitCode });
+      }
+    );
+  });
+}
+
+export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand };
 
 

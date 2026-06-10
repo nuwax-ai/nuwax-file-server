@@ -5,7 +5,7 @@ import path from "path";
 import { ValidationError, asyncHandler } from "../utils/error/errorHandler.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
-import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, } from "../utils/computer/computerUtils.js";
+import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
   updateFiles,
@@ -413,6 +413,23 @@ const routes = [
 
       archive.pipe(res);
       archive.finalize();
+    }),
+  },
+  {
+    path: "/execute-command",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, command } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Execute command request", {
+        userId,
+        cId,
+        command,
+      });
+
+      const result = await executeCommand(userId, cId, command);
+      res.status(200).json({ success: true, ...result });
     }),
   },
 ];
