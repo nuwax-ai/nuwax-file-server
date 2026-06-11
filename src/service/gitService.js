@@ -445,7 +445,7 @@ async function discard(options = {}) {
  * 获取提交历史
  */
 async function logHistory(options = {}) {
-  const { maxCount: rawMax = 50, branch, skip: rawSkip = 0 } = options;
+  const { maxCount: rawMax = 50, branch, skip: rawSkip = 0, filePath } = options;
   const { targetPath, logId } = resolveAndCheck(options);
   await ensureGitRepo(targetPath);
 
@@ -455,10 +455,11 @@ async function logHistory(options = {}) {
     const skip = Math.max(0, rawSkip);
 
     const args = [];
-    args.push("--reflog");
+    if (!filePath) args.push("--reflog");
     if (branch) args.push(branch);
     args.push(`--max-count=${maxCount}`);
     if (skip > 0) args.push(`--skip=${skip}`);
+    if (filePath) args.push("--", filePath);
 
     const logResult = await git.log(args);
 

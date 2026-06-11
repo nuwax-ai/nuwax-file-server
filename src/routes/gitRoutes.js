@@ -121,12 +121,13 @@ const routes = [
     path: "/log",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const { maxCount, branch, skip } = req.query || {};
+      const { maxCount, branch, skip, filePath } = req.query || {};
       const params = {
         ...extractGitParams(req.query),
         maxCount: maxCount ? parseInt(maxCount, 10) : 50,
         skip: skip ? parseInt(skip, 10) : 0,
         branch,
+        filePath,
       };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git log", params);
