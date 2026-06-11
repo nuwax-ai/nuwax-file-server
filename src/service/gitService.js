@@ -345,11 +345,8 @@ async function discard(options = {}) {
     const createdSet = new Set([...statusResult.created]);
     const untrackedSet = new Set([...(statusResult.not_added || [])]);
 
-    // 确定要操作的文件列表（清理文件名中的多余引号）
-    const cleanFileName = (f) => typeof f === "string" ? f.replace(/^["']|["']$/g, "") : f;
-    const targetFiles = Array.isArray(files) && files.length > 0
-      ? files.map(cleanFileName).filter((f) => f)
-      : null;
+    // 确定要操作的文件列表
+    const targetFiles = Array.isArray(files) && files.length > 0 ? files : null;
 
     // 区分新增文件、未跟踪文件与已跟踪文件
     const newFiles = [];
