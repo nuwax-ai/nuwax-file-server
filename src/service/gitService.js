@@ -341,20 +341,27 @@ async function discard(options = {}) {
     const git = getGitInstance(targetPath);
     const statusResult = await git.status();
 
-    // 从 git status 中提取所有新增文件的集合（created = 暂存区中的新文件）
+    // 从 git status 中提取所有新增文件和未跟踪文件的集合
     const createdSet = new Set([...statusResult.created]);
+    const untrackedSet = new Set([...(statusResult.not_added || [])]);
 
-    // 确定要操作的文件列表
-    const targetFiles = Array.isArray(files) && files.length > 0 ? files : null;
+    // 确定要操作的文件列表（清理文件名中的多余引号）
+    const cleanFileName = (f) => typeof f === "string" ? f.replace(/^["']|["']$/g, "") : f;
+    const targetFiles = Array.isArray(files) && files.length > 0
+      ? files.map(cleanFileName).filter((f) => f)
+      : null;
 
-    // 区分新增文件与已跟踪文件
+    // 区分新增文件、未跟踪文件与已跟踪文件
     const newFiles = [];
+    const untrackedFiles = [];
     const trackedFiles = [];
 
     if (targetFiles) {
       for (const f of targetFiles) {
         if (createdSet.has(f)) {
           newFiles.push(f);
+        } else if (untrackedSet.has(f)) {
+          untrackedFiles.push(f);
         } else {
           trackedFiles.push(f);
         }
@@ -391,15 +398,26 @@ async function discard(options = {}) {
           await fs.promises.unlink(absPath);
         }
       }
-      // 清理因删除文件而产生的空目录（从被删文件的父目录向上逐级检查）
       await cleanEmptyParentDirs(targetPath, newFiles);
     }
 
-    const discardedCount = trackedFiles.length + newFiles.length;
+    // 3) 未跟踪文件：直接从磁盘删除
+    if (untrackedFiles.length > 0) {
+      for (const f of untrackedFiles) {
+        const absPath = path.join(targetPath, f);
+        if (fs.existsSync(absPath)) {
+          await fs.promises.unlink(absPath);
+        }
+      }
+      await cleanEmptyParentDirs(targetPath, untrackedFiles);
+    }
+
+    const discardedCount = trackedFiles.length + newFiles.length + untrackedFiles.length;
     log(logId, "INFO", "Git discard", {
       logId,
       trackedFiles: trackedFiles.length,
       newFiles: newFiles.length,
+      untrackedFiles: untrackedFiles.length,
     });
 
     return {
@@ -409,6 +427,7 @@ async function discard(options = {}) {
       discardedCount,
       trackedFiles,
       newFiles,
+      untrackedFiles,
     };
   } catch (e) {
     log(logId, "ERROR", "Failed to discard", { logId, error: e.message });
