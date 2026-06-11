@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { exec } from "child_process";
 import config from "../../appConfig/index.js";
 import { extractZip } from "../common/zipUtils.js";
 import {
@@ -190,13 +191,119 @@ async function moveDirectory(srcDir, destDir) {
 }
 
 /**
+ * 写入 .claude/settings.json、.mcp.json、hook 外挂脚本
+ * @param {string} userWorkspaceRoot 工作空间根目录
+ * @param {string|undefined} mcpServersConfig MCP servers配置 JSON字符串
+ * @param {string|undefined} hooksConfig Hooks配置 JSON字符串
+ * @param {string|undefined} permissionsConfig 工具权限配置 JSON字符串
+ * @param {Array|undefined} hookScripts Hook外挂脚本数组 [{path, content}]
+ * @param {string} logId
+ */
+async function writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId) {
+  const hasMcp = mcpServersConfig && mcpServersConfig.trim();
+  const hasHooks = hooksConfig && hooksConfig.trim();
+  const hasPerms = permissionsConfig && permissionsConfig.trim();
+  const hasScripts = Array.isArray(hookScripts) && hookScripts.length > 0;
+
+  if (!hasMcp && !hasHooks && !hasPerms && !hasScripts) {
+    return;
+  }
+
+  const claudeDir = path.join(userWorkspaceRoot, ".claude");
+  try {
+    if (!fs.existsSync(claudeDir)) {
+      await fs.promises.mkdir(claudeDir, { recursive: true });
+    }
+
+    // 1. MCP 配置写入项目根目录的 .mcp.json（官方规范）
+    if (hasMcp) {
+      try {
+        const mcpConfig = { mcpServers: JSON.parse(mcpServersConfig) };
+        const mcpPath = path.join(userWorkspaceRoot, ".mcp.json");
+        await fs.promises.writeFile(mcpPath, JSON.stringify(mcpConfig, null, 2), "utf-8");
+        log(logId, "INFO", "Written .mcp.json to workspace root");
+      } catch (e) {
+        log(logId, "WARN", "Failed to parse/write mcpServersConfig, skipping", { error: e.message });
+      }
+    }
+
+    // 2. Hooks + Permissions 写入 .claude/settings.json
+    const settings = {};
+
+    if (hasHooks) {
+      try {
+        settings.hooks = JSON.parse(hooksConfig);
+      } catch (e) {
+        log(logId, "WARN", "Failed to parse hooksConfig, skipping", { error: e.message });
+      }
+    }
+
+    if (hasPerms) {
+      try {
+        settings.permissions = JSON.parse(permissionsConfig);
+      } catch (e) {
+        log(logId, "WARN", "Failed to parse permissionsConfig, skipping", { error: e.message });
+      }
+    }
+
+    if (Object.keys(settings).length > 0) {
+      const settingsPath = path.join(claudeDir, "settings.json");
+      await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+      log(logId, "INFO", "Written .claude/settings.json", {
+        keys: Object.keys(settings),
+      });
+    }
+
+    // 3. 写入 hook 外挂脚本
+    if (hasScripts) {
+      const hooksDir = path.join(claudeDir, "hooks");
+      if (!fs.existsSync(hooksDir)) {
+        await fs.promises.mkdir(hooksDir, { recursive: true });
+      }
+
+      for (const script of hookScripts) {
+        if (!script || !script.path || !script.content) continue;
+
+        // 防止路径穿越（path 相对于 .claude 目录）
+        const normalizedScriptPath = path.normalize(script.path);
+        if (normalizedScriptPath.startsWith("..") || path.isAbsolute(normalizedScriptPath)) {
+          log(logId, "WARN", "Hook script path contains traversal, skipping", { path: script.path });
+          continue;
+        }
+
+        // path 是相对于 .claude 目录的路径，如 hooks/my-script.sh
+        const scriptFilePath = path.join(claudeDir, normalizedScriptPath);
+        const scriptDir = path.dirname(scriptFilePath);
+
+        if (!fs.existsSync(scriptDir)) {
+          await fs.promises.mkdir(scriptDir, { recursive: true });
+        }
+
+        await fs.promises.writeFile(scriptFilePath, script.content, "utf-8");
+        // 设置可执行权限
+        await fs.promises.chmod(scriptFilePath, 0o755);
+        log(logId, "INFO", "Written hook script", { path: script.path });
+      }
+    }
+  } catch (e) {
+    log(logId, "WARN", "Failed to write .claude/settings or .mcp.json or hook scripts, not blocking workspace creation", {
+      error: e.message,
+    });
+  }
+}
+
+/**
  * 创建工作空间并（可选）处理上传的 zip，提取 skills 目录
  * @param {string|number} userId
  * @param {string|number} cId
  * @param {Object|null} file multer 文件对象（zip），可以为空
  * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
+ * @param {string|undefined} mcpServersConfig MCP servers配置 JSON字符串
+ * @param {string|undefined} permissionsConfig 工具权限配置 JSON字符串
+ * @param {string|undefined} hooksConfig Hooks配置 JSON字符串
+ * @param {Array|undefined} hookScripts Hook外挂脚本数组 [{path, content}]
  */
-async function createWorkspace(userId, cId, file, skillUrls) {
+async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, permissionsConfig, hooksConfig, hookScripts) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const normalizedSkillUrls = normalizeSkillUrls(skillUrls);
@@ -296,6 +403,19 @@ async function createWorkspace(userId, cId, file, skillUrls) {
     skillsExists: skillsExistsAfter,
     agentsExists: agentsExistsAfter,
   });
+
+  // 清除旧的配置文件，避免残留上次调用的配置
+  const mcpJsonPath = path.join(userWorkspaceRoot, ".mcp.json");
+  if (fs.existsSync(mcpJsonPath)) {
+    await fs.promises.unlink(mcpJsonPath);
+  }
+  const claudeSettingsPath = path.join(userWorkspaceRoot, ".claude", "settings.json");
+  if (fs.existsSync(claudeSettingsPath)) {
+    await fs.promises.unlink(claudeSettingsPath);
+  }
+
+  // 写入新的配置文件
+  await writeClaudeSettings(userWorkspaceRoot, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts, logId);
 
   // 如果没有上传文件也没有 URL：不写入 skills 和 agents
   if (!file && normalizedSkillUrls.length === 0) {
@@ -867,6 +987,204 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
   }
 }
 
-export { createWorkspace, pushSkillsToWorkspace };
+/**
+ * 初始化项目模板
+ * 将模板 zip 解压到工作空间目录，并执行 git init + commit
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {Object|null} file multer 文件对象（zip）
+ * @param {string|boolean|undefined} enableGit 是否开启 git 版本管理
+ */
+async function initProjectTemplate(userId, cId, file, enableGit) {
+  const startTime = Date.now();
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!file || !file.path) {
+    throw new ValidationError("file is required", { field: "file" });
+  }
+
+  const ext = path.extname(file.originalname || file.filename || "").toLowerCase();
+  if (ext !== ".zip") {
+    throw new ValidationError("Only zip files are supported", {
+      field: "file",
+      originalName: file.originalname,
+    });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+  const tmpRoot = path.join(targetDir, ".tmp");
+  const extractRoot = path.join(
+    tmpRoot,
+    `template_extract_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+  );
+
+  try {
+    // 确保目标目录存在
+    if (!fs.existsSync(targetDir)) {
+      await fs.promises.mkdir(targetDir, { recursive: true });
+    }
+    if (!fs.existsSync(tmpRoot)) {
+      await fs.promises.mkdir(tmpRoot, { recursive: true });
+    }
+    await fs.promises.mkdir(extractRoot, { recursive: true });
+
+    // 解压 zip 到临时目录
+    log(logId, "DEBUG", "Start extracting template zip file", { extractRoot });
+    await extractZip(file.path, extractRoot);
+    log(logId, "DEBUG", "Template zip file extracted successfully", { extractRoot });
+
+    // 将解压后的内容直接移动到目标目录（保留 zip 的顶层目录结构）
+    const items = await fs.promises.readdir(extractRoot, { withFileTypes: true });
+    for (const item of items) {
+      const srcPath = path.join(extractRoot, item.name);
+      const destPath = path.join(targetDir, item.name);
+      if (item.isDirectory()) {
+        await moveDirectory(srcPath, destPath);
+      } else {
+        // 确保目标目录存在
+        const destParent = path.dirname(destPath);
+        if (!fs.existsSync(destParent)) {
+          await fs.promises.mkdir(destParent, { recursive: true });
+        }
+        await fs.promises.copyFile(srcPath, destPath);
+      }
+    }
+
+    log(logId, "INFO", "Template files extracted to workspace", {
+      userId,
+      cId,
+      targetDir,
+      fileCount: items.length,
+    });
+
+    // git init + commit（仅当 enableGit 为 true 时执行）
+    if (config.GIT_ENABLED && (enableGit === "true" || enableGit === true)) {
+      const gitService = await import("../../service/gitService.js");
+      await gitService.default.init({ workspaceType: "taskAgent", userId, cId });
+      await gitService.default.commit({ workspaceType: "taskAgent", userId, cId, message: "Initial commit" });
+      log(logId, "INFO", "Git init and initial commit done", { userId, cId });
+    }
+
+    log(logId, "INFO", "Init project template completed", {
+      userId,
+      cId,
+      targetDir,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    return {
+      message: "Project template initialized successfully",
+      workspaceRoot: targetDir,
+    };
+  } catch (error) {
+    log(logId, "ERROR", "Failed to init project template", {
+      userId,
+      cId,
+      error: error.message,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    if (
+      error instanceof ValidationError ||
+      error instanceof FileError ||
+      error instanceof SystemError
+    ) {
+      throw error;
+    }
+
+    throw new SystemError(`Failed to init project template: ${error.message}`, {
+      userId,
+      cId,
+    });
+  } finally {
+    // 清理临时解压目录
+    try {
+      if (fs.existsSync(extractRoot)) {
+        await fs.promises.rm(extractRoot, { recursive: true, force: true });
+      }
+    } catch (e) {
+      log(logId, "WARN", "Failed to clean up temporary extracted zip", {
+        error: e.message,
+      });
+    }
+    // 清理上传的 zip 文件
+    try {
+      if (file && file.path && fs.existsSync(file.path)) {
+        await fs.promises.unlink(file.path);
+      }
+    } catch (e) {
+      log(logId, "WARN", "Failed to clean up uploaded zip file", {
+        tempZipPath: file?.path,
+        error: e.message,
+      });
+    }
+  }
+}
+
+/**
+ * 在沙箱工作空间中执行命令
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {string} command 要执行的命令
+ * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
+ */
+async function executeCommand(userId, cId, command) {
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!command || typeof command !== "string" || !command.trim()) {
+    throw new ValidationError("command cannot be empty", { field: "command" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot("computer");
+  const workDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (!fs.existsSync(workDir)) {
+    throw new ValidationError("workspace directory does not exist", {
+      field: "workDir",
+      workDir,
+    });
+  }
+
+  const logId = `computer:${userId}:${cId}`;
+  log(logId, "INFO", "Execute command in workspace", {
+    userId,
+    cId,
+    workDir,
+    command,
+  });
+
+  const timeoutMs = 5 * 60 * 1000; // 5 minutes
+
+  return new Promise((resolve, reject) => {
+    exec(
+      command,
+      { cwd: workDir, timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        const exitCode = error ? error.code || 1 : 0;
+        log(logId, "INFO", "Execute command completed", {
+          userId,
+          cId,
+          exitCode,
+          stdoutLength: stdout ? stdout.length : 0,
+          stderrLength: stderr ? stderr.length : 0,
+        });
+        resolve({ stdout: stdout || "", stderr: stderr || "", exitCode });
+      }
+    );
+  });
+}
+
+export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand };
 
 

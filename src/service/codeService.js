@@ -14,7 +14,6 @@ import {
   backupProjectToZip,
   restoreProjectFromZip,
   pruneMissingFiles,
-  removeEmptyDirectories,
 } from "../utils/project/backupUtils.js";
 import { extractSingleFileFromZip } from "../utils/common/zipUtils.js";
 import {
@@ -173,7 +172,9 @@ async function specifiedFilesUpdate(
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
     log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
-    await backupProjectToZip(projectId, projectPath, backupZipPath);
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
     log(projectId, "INFO", "Project backed up successfully", {
       projectId,
       zipPath: backupZipPath,
@@ -204,25 +205,48 @@ async function specifiedFilesUpdate(
 
         switch (operation) {
           case "create": {
-            // 创建新文件
-            await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
-            const contents = fileOp.contents || "";
-            await fs.promises.writeFile(targetPath, contents, "utf8");
-            log(projectId, "INFO", "File created successfully", {
-              filePath: normalizedPath,
-            });
+            if (fileOp.isDir === true) {
+              // 创建目录
+              if (!fs.existsSync(targetPath)) {
+                await fs.promises.mkdir(targetPath, { recursive: true });
+                log(projectId, "INFO", "Directory created successfully", {
+                  filePath: normalizedPath,
+                });
+              } else {
+                log(projectId, "INFO", "Directory already exists, skipping creation", {
+                  filePath: normalizedPath,
+                });
+              }
+            } else {
+              // 创建新文件
+              await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+              const contents = fileOp.contents || "";
+              await fs.promises.writeFile(targetPath, contents, "utf8");
+              log(projectId, "INFO", "File created successfully", {
+                filePath: normalizedPath,
+              });
+            }
             break;
           }
 
           case "delete": {
-            // 删除文件
             if (fs.existsSync(targetPath)) {
-              await fs.promises.unlink(targetPath);
-              log(projectId, "INFO", "File deleted successfully", {
-                filePath: normalizedPath,
-              });
+              const stat = await fs.promises.stat(targetPath);
+              if (stat.isDirectory()) {
+                // 删除目录（递归删除）
+                await fs.promises.rm(targetPath, { recursive: true, force: true });
+                log(projectId, "INFO", "Directory deleted successfully", {
+                  filePath: normalizedPath,
+                });
+              } else {
+                // 删除文件
+                await fs.promises.unlink(targetPath);
+                log(projectId, "INFO", "File deleted successfully", {
+                  filePath: normalizedPath,
+                });
+              }
             } else {
-              log(projectId, "WARN", "File to delete does not exist", {
+              log(projectId, "WARN", "File or directory to delete does not exist", {
                 filePath: normalizedPath,
               });
             }
@@ -318,20 +342,6 @@ async function specifiedFilesUpdate(
         }
       }
 
-      // 3) 清理空目录
-      log(projectId, "DEBUG", "Start cleaning empty directories", { projectId });
-      try {
-        await removeEmptyDirectories(
-          projectPath,
-          config.TRAVERSE_EXCLUDE_DIRS || []
-        );
-      } catch (e) {
-        log(projectId, "WARN", "Failed to clean empty directories", {
-          projectId,
-          error: e && e.message,
-        });
-      }
-
       log(projectId, "INFO", "Specified files updated successfully", {
         projectId,
         filesCount: files.length,
@@ -401,7 +411,9 @@ async function allFilesUpdate(
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
     log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
-    await backupProjectToZip(projectId, projectPath, backupZipPath);
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
 
     // 2) 写入文件
     try {
@@ -409,6 +421,17 @@ async function allFilesUpdate(
       for (const file of files) {
         if (!file || typeof file.name !== "string") continue;
         const targetPath = path.join(projectPath, file.name);
+
+        // 处理空目录：确保目录存在
+        if (file.isDir === true) {
+          if (!fs.existsSync(targetPath)) {
+            await fs.promises.mkdir(targetPath, { recursive: true });
+            log(projectId, "INFO", "Directory ensured", {
+              filePath: file.name,
+            });
+          }
+          continue;
+        }
 
         // 处理文件重命名：如果存在 renameFrom，需要先重命名原文件
         if (file.renameFrom && typeof file.renameFrom === "string") {
@@ -485,23 +508,36 @@ async function allFilesUpdate(
       throw e;
     }
 
-    // 3) 清理缺失文件与空目录
+    // 3) 清理缺失文件（不自动删除空目录）
     try {
-      log(projectId, "DEBUG", "Start cleaning missing files and empty directories", { projectId });
+      log(projectId, "DEBUG", "Start cleaning missing files", { projectId });
       const keepSet = new Set(
         files
           .filter((f) => f && typeof f.name === "string")
           .map((f) => path.normalize(f.name))
       );
+
+      // 收集前端提交的空目录路径，用于在 pruneMissingFiles 后重新创建
+      const dirEntries = files.filter(
+        (f) => f && typeof f.name === "string" && f.isDir === true
+      );
+
       await pruneMissingFiles(
         projectPath,
         keepSet,
         config.TRAVERSE_EXCLUDE_DIRS || []
       );
-      await removeEmptyDirectories(
-        projectPath,
-        config.TRAVERSE_EXCLUDE_DIRS || []
-      );
+
+      // 确保前端提交的空目录存在
+      for (const dirEntry of dirEntries) {
+        const dirPath = path.join(projectPath, dirEntry.name);
+        if (!fs.existsSync(dirPath)) {
+          await fs.promises.mkdir(dirPath, { recursive: true });
+          log(projectId, "INFO", "Empty directory recreated", {
+            dirPath: dirEntry.name,
+          });
+        }
+      }
     } catch (e) {
       log(projectId, "ERROR", "Failed to clean missing files, starting rollback", {
         projectId,
@@ -516,6 +552,7 @@ async function allFilesUpdate(
       filesCount: files.length,
       elapsedMs: Date.now() - startTime,
     });
+
     return {
       success: true,
       message: "Files submitted successfully",
@@ -600,7 +637,9 @@ async function uploadSingleFile(
     const zipName = `${projectId}-v${versionNum}.zip`;
     backupZipPath = path.join(backupDir, zipName);
     log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
-    await backupProjectToZip(projectId, projectPath, backupZipPath);
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
     log(projectId, "INFO", `Project backed up: ${backupZipPath}`, {
       projectId,
       zipPath: backupZipPath,

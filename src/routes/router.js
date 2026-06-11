@@ -3,6 +3,7 @@ import buildRouter from "./buildRoutes.js";
 import projectRouter from "./projectRoutes.js";
 import codeRouter from "./codeRoutes.js";
 import computerRouter from "./computerRoutes.js";
+import gitRouter from "./gitRoutes.js";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
@@ -52,5 +53,6 @@ router.use("/api/build", buildRouter);
 router.use("/api/project", projectRouter);
 router.use("/api/project", codeRouter);
 router.use("/api/computer", computerRouter);
+router.use("/api/git", gitRouter);
 
 export default router;

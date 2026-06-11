@@ -5,7 +5,7 @@ import path from "path";
 import { ValidationError, asyncHandler } from "../utils/error/errorHandler.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
-import { createWorkspace, pushSkillsToWorkspace, } from "../utils/computer/computerUtils.js";
+import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
   updateFiles,
@@ -102,7 +102,7 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, skillUrls } = req.body || {};
+      const { userId, cId, skillUrls, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
 
@@ -117,6 +117,16 @@ const routes = [
         }
       }
 
+      // hookScripts 可能是 JSON 字符串（multipart form 传数组会序列化）
+      let normalizedHookScripts = hookScripts;
+      if (typeof hookScripts === "string") {
+        try {
+          normalizedHookScripts = JSON.parse(hookScripts);
+        } catch {
+          normalizedHookScripts = null;
+        }
+      }
+
       log(logId, "INFO", "Create workspace v2 request", {
         userId,
         cId,
@@ -124,9 +134,13 @@ const routes = [
         fileName: file?.originalname,
         fileSize: file?.size,
         skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
+        hasMcpServersConfig: !!mcpServersConfig,
+        hasHooksConfig: !!hooksConfig,
+        hasPermissionsConfig: !!permissionsConfig,
+        hookScriptsCount: Array.isArray(normalizedHookScripts) ? normalizedHookScripts.length : 0,
       });
 
-      const result = await createWorkspace(userId, cId, file, normalizedSkillUrls);
+      const result = await createWorkspace(userId, cId, file, normalizedSkillUrls, mcpServersConfig, permissionsConfig, hooksConfig, normalizedHookScripts);
 
       res.status(200).json({
         success: true,
@@ -342,6 +356,32 @@ const routes = [
     }),
   },
   {
+    path: "/init-project-template",
+    method: "post",
+    middleware: upload.single("file"),
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, enableGit } = req.body || {};
+      const file = req.file || null;
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Init project template request", {
+        userId,
+        cId,
+        hasFile: !!file,
+        fileName: file?.originalname,
+        fileSize: file?.size,
+        enableGit,
+      });
+
+      const result = await initProjectTemplate(userId, cId, file, enableGit);
+
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+    }),
+  },
+  {
     path: "/download-all-files",
     method: "get",
     handler: asyncHandler(async (req, res) => {
@@ -373,6 +413,23 @@ const routes = [
 
       archive.pipe(res);
       archive.finalize();
+    }),
+  },
+  {
+    path: "/execute-command",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, command } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Execute command request", {
+        userId,
+        cId,
+        command,
+      });
+
+      const result = await executeCommand(userId, cId, command);
+      res.status(200).json({ success: true, ...result });
     }),
   },
 ];

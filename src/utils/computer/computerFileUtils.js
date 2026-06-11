@@ -22,7 +22,7 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
   for (const entry of entries) {
     const fullPath = path.join(targetDir, entry.name);
 
-    if (entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith(".") && entry.name !== ".gitignore") continue;
 
     const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
     if (excludeFiles.includes(entry.name)) continue;

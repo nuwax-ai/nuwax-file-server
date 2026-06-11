@@ -162,6 +162,14 @@ const config = {
       : path.join("/tmp", "nuwax-file-server", "logs")
   ),
   CLI_IS_WINDOWS: process.platform === "win32",
+  GIT_DEFAULT_AUTHOR_NAME: process.env.GIT_DEFAULT_AUTHOR_NAME || "Nuwax File Server",
+  GIT_DEFAULT_AUTHOR_EMAIL: process.env.GIT_DEFAULT_AUTHOR_EMAIL || "git@nuwax.local",
+  GIT_AUTO_GITIGNORE:
+    process.env.GIT_AUTO_GITIGNORE?.toLowerCase() === "false" ? false : true,
+  GIT_GITIGNORE_ENTRIES: process.env.GIT_GITIGNORE_ENTRIES
+    ? process.env.GIT_GITIGNORE_ENTRIES.split("|").map((s) => s.trim()).filter(Boolean)
+    : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store", ".agents/", ".claude/", ".opencode/", ".codex/"],
+  GIT_ENABLED: process.env.GIT_ENABLED?.toLowerCase() === "true",
 };
 
 export default config;
