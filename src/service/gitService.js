@@ -382,8 +382,15 @@ async function discard(options = {}) {
     }
 
     // 1) 已跟踪文件：restore --staged --worktree
+    //    若 restore 失败（文件实际未被 git 跟踪），降级为从磁盘删除
     if (trackedFiles.length > 0) {
-      await git.raw(["restore", "--staged", "--worktree", "--", ...trackedFiles]);
+      for (const f of trackedFiles) {
+        try {
+          await git.raw(["restore", "--staged", "--worktree", "--", f]);
+        } catch (_) {
+          untrackedFiles.push(f);
+        }
+      }
     }
 
     // 2) 新增文件：先从暂存区移除，再从磁盘删除
