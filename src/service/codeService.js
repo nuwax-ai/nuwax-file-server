@@ -885,10 +885,132 @@ async function rollbackVersion(
   }
 }
 
-export { specifiedFilesUpdate, allFilesUpdate, uploadSingleFile, rollbackVersion };
+/**
+ * 批量上传文件到项目
+ * 一次请求上传多个文件，只做一次备份，提高效率
+ */
+async function uploadBatchFiles(
+  projectId,
+  codeVersion,
+  files,
+  filePaths,
+  req,
+  isolationContext = {}
+) {
+  const startTime = Date.now();
+  if (!projectId) {
+    throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
+  }
+  const versionNum = Number(codeVersion);
+  if (!Number.isFinite(versionNum)) {
+    throw new ValidationError("codeVersion must be a number", { field: "codeVersion" });
+  }
+  if (!files || files.length === 0) {
+    throw new ValidationError("Files cannot be empty", { field: "files" });
+  }
+  if (!filePaths || filePaths.length !== files.length) {
+    throw new ValidationError("filePaths and files count mismatch", { field: "filePaths" });
+  }
+
+  const projectPath = resolveProjectPath(projectId, isolationContext);
+  if (!fs.existsSync(projectPath)) {
+    log(projectId, "ERROR", "Project does not exist", { projectId, projectPath });
+    throw new ResourceError("Project does not exist", { projectId });
+  }
+
+  let backupZipPath = "";
+  try {
+    // 1) 备份（只做一次）
+    const backupDir = path.join(config.UPLOAD_PROJECT_DIR, projectId);
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const zipName = `${projectId}-v${versionNum}.zip`;
+    backupZipPath = path.join(backupDir, zipName);
+    log(projectId, "DEBUG", "Start backing up project", { projectId, backupZipPath });
+    if (!config.GIT_ENABLED) {
+      await backupProjectToZip(projectId, projectPath, backupZipPath);
+    }
+    log(projectId, "INFO", `Project backed up: ${backupZipPath}`, { projectId, zipPath: backupZipPath });
+
+    // 2) 逐个写入文件
+    const uploadedFiles = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const filePath = filePaths[i];
+
+      if (!file || !file.buffer) {
+        log(projectId, "WARN", "Skip empty file", { index: i, filePath });
+        continue;
+      }
+      if (!filePath || typeof filePath !== "string") {
+        log(projectId, "WARN", "Skip invalid filePath", { index: i, filePath });
+        continue;
+      }
+
+      // 规范化文件路径
+      const normalizedPath = path.normalize(filePath).replace(/^[\/\\]+/, "");
+      const targetPath = path.join(projectPath, normalizedPath);
+
+      // 安全检查
+      const resolvedTargetPath = path.resolve(targetPath);
+      const resolvedProjectPath = path.resolve(projectPath);
+      if (!resolvedTargetPath.startsWith(resolvedProjectPath)) {
+        log(projectId, "WARN", "Skip unsafe file path", { filePath, resolvedTargetPath });
+        continue;
+      }
+
+      // 确保目标目录存在，写入文件
+      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.promises.writeFile(targetPath, file.buffer);
+      uploadedFiles.push({ filePath: normalizedPath, size: file.buffer.length });
+    }
+
+    log(projectId, "INFO", "Batch files uploaded successfully", {
+      projectId,
+      fileCount: uploadedFiles.length,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    return {
+      success: true,
+      message: `${uploadedFiles.length} files uploaded successfully`,
+      projectId,
+      fileCount: uploadedFiles.length,
+      files: uploadedFiles,
+      restarted: false,
+    };
+  } catch (e) {
+    // 回滚
+    log(projectId, "ERROR", "Batch upload failed, rolling back", {
+      projectId,
+      error: e && e.message,
+      elapsedMs: Date.now() - startTime,
+    });
+    let restoreErr = null;
+    if (backupZipPath && fs.existsSync(backupZipPath)) {
+      try {
+        await restoreProjectFromZip(projectId, projectPath, backupZipPath);
+        log(projectId, "INFO", "Rollback completed after batch upload failure");
+      } catch (restoreException) {
+        restoreErr = restoreException;
+        log(projectId, "ERROR", "Rollback failed", {
+          error: restoreException && restoreException.message,
+        });
+      }
+    }
+    if (restoreErr) {
+      throw restoreErr;
+    }
+    throw e;
+  }
+}
+
+export { specifiedFilesUpdate, allFilesUpdate, uploadSingleFile, uploadBatchFiles, rollbackVersion };
 export default {
   specifiedFilesUpdate,
   allFilesUpdate,
   uploadSingleFile,
+  uploadBatchFiles,
   rollbackVersion,
 };

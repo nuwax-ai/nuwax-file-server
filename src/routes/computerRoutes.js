@@ -5,7 +5,7 @@ import path from "path";
 import { ValidationError, asyncHandler } from "../utils/error/errorHandler.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
-import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, } from "../utils/computer/computerUtils.js";
+import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
   updateFiles,
@@ -429,6 +429,22 @@ const routes = [
       });
 
       const result = await executeCommand(userId, cId, command);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/delete-workspace",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Delete workspace request", {
+        userId,
+        cId,
+      });
+
+      const result = await deleteWorkspace(userId, cId);
       res.status(200).json({ success: true, ...result });
     }),
   },

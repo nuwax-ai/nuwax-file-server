@@ -1164,27 +1164,58 @@ async function executeCommand(userId, cId, command) {
     command,
   });
 
-  const timeoutMs = 5 * 60 * 1000; // 5 minutes
+  const timeoutMs = 10 * 60 * 1000; // 10 minutes
 
   return new Promise((resolve, reject) => {
     exec(
       command,
       { cwd: workDir, timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 },
       (error, stdout, stderr) => {
-        const exitCode = error ? error.code || 1 : 0;
+        const exitCode = error ? (error.killed ? -1 : (error.code || 1)) : 0;
+        const resolvedStderr = error && error.killed
+          ? (stderr || "") + `\nCommand timed out after ${timeoutMs / 1000}s`
+          : stderr || "";
         log(logId, "INFO", "Execute command completed", {
           userId,
           cId,
           exitCode,
+          killed: error ? error.killed : false,
           stdoutLength: stdout ? stdout.length : 0,
-          stderrLength: stderr ? stderr.length : 0,
+          stderrLength: resolvedStderr.length,
         });
-        resolve({ stdout: stdout || "", stderr: stderr || "", exitCode });
+        resolve({ stdout: stdout || "", stderr: resolvedStderr, exitCode });
       }
     );
   });
 }
 
-export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand };
+/**
+ * 删除工作空间目录
+ * 删除 $COMPUTER_WORKSPACE_DIR/userId/cId/ 整个目录
+ */
+async function deleteWorkspace(userId, cId) {
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (fs.existsSync(targetDir)) {
+    await fs.promises.rm(targetDir, { recursive: true, force: true });
+    log(logId, "INFO", "Workspace deleted", { userId, cId, targetDir });
+  } else {
+    log(logId, "WARN", "Workspace not found, skip delete", { userId, cId, targetDir });
+  }
+
+  return { deleted: true };
+}
+
+export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace };
 
 
