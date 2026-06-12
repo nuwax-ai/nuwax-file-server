@@ -1189,6 +1189,33 @@ async function executeCommand(userId, cId, command) {
   });
 }
 
-export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand };
+/**
+ * 删除工作空间目录
+ * 删除 $COMPUTER_WORKSPACE_DIR/userId/cId/ 整个目录
+ */
+async function deleteWorkspace(userId, cId) {
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (fs.existsSync(targetDir)) {
+    await fs.promises.rm(targetDir, { recursive: true, force: true });
+    log(logId, "INFO", "Workspace deleted", { userId, cId, targetDir });
+  } else {
+    log(logId, "WARN", "Workspace not found, skip delete", { userId, cId, targetDir });
+  }
+
+  return { deleted: true };
+}
+
+export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace };
 
 

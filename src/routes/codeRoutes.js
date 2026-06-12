@@ -171,6 +171,63 @@ const routes = [
     }),
   },
   {
+    path: "/upload-batch-files",
+    method: "post",
+    middleware: upload.array("files"),
+    handler: asyncHandler(async (req, res) => {
+      const { projectId, codeVersion, filePaths } = req.body || {};
+      const isolationContext = extractIsolationContext(req.body || {});
+      const files = req.files; // multer array
+
+      log(projectId, "INFO", "批量上传文件", {
+        projectId,
+        codeVersion,
+        fileCount: files ? files.length : 0,
+      });
+
+      if (!projectId) {
+        throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
+      }
+      if (codeVersion === undefined || codeVersion === null) {
+        throw new ValidationError("codeVersion cannot be empty", { field: "codeVersion" });
+      }
+      if (!files || files.length === 0) {
+        throw new ValidationError("Files cannot be empty", { field: "files" });
+      }
+
+      // filePaths 可以是字符串（单文件时 multer 不转数组）或数组
+      let pathsList = filePaths;
+      if (typeof pathsList === "string") {
+        pathsList = [pathsList];
+      }
+      if (!pathsList || pathsList.length !== files.length) {
+        throw new ValidationError("filePaths and files count mismatch", {
+          field: "filePaths",
+          filePathsCount: pathsList ? pathsList.length : 0,
+          filesCount: files.length,
+        });
+      }
+
+      // 构建文件对象列表
+      const fileObjects = files.map((f) => ({
+        buffer: f.buffer,
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+      }));
+
+      const result = await codeService.uploadBatchFiles(
+        String(projectId),
+        String(codeVersion),
+        fileObjects,
+        pathsList,
+        req,
+        isolationContext
+      );
+      res.status(200).json(result);
+    }),
+  },
+  {
     path: "/rollback-version",
     method: "post",
     handler: asyncHandler(async (req, res) => {
