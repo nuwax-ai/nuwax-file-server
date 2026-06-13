@@ -12,6 +12,7 @@ import {
   uploadFile,
   uploadFiles,
   downloadAllFiles,
+  getLatestLogs,
 } from "../utils/computer/computerFileUtils.js";
 
 const computerRouter = express.Router();
@@ -445,6 +446,18 @@ const routes = [
       });
 
       const result = await deleteWorkspace(userId, cId);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/get-logs",
+    method: "get",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, tailLines } = req.query;
+      const parsed = tailLines ? parseInt(tailLines, 10) : 200;
+      const safeTailLines = Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
+
+      const result = await getLatestLogs(userId, cId, safeTailLines);
       res.status(200).json({ success: true, ...result });
     }),
   },

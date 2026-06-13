@@ -976,4 +976,82 @@ async function downloadAllFiles(userId, cId) {
   return { archive, zipFileName };
 }
 
-export { getFileList, updateFiles, uploadFile, uploadFiles, downloadAllFiles };
+/**
+ * 获取沙盒最新日志
+ * - 日志目录：COMPUTER_LOG_DIR/<userId>/<cId>/
+ * - 取该目录下最后修改的 .log 文件，读取最后 N 行
+ * - 使用纯 Node.js 实现，跨平台兼容
+ * @param {string|number} userId 用户ID
+ * @param {string|number} cId 会话ID
+ * @param {number} tailLines 读取最后 N 行，默认 200
+ * @returns {Promise<{ fileName: string|null, fileSize: number, lines: string[] }>}
+ */
+async function getLatestLogs(userId, cId, tailLines = 200) {
+  const startTime = Date.now();
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+
+  const normalizedUserId = String(userId);
+  const normalizedCId = String(cId);
+  const computerLogDir = config.COMPUTER_LOG_DIR;
+
+  if (!computerLogDir) {
+    log(logId, "WARN", "COMPUTER_LOG_DIR is not configured");
+    return { fileName: null, fileSize: 0, lines: [] };
+  }
+
+  const logDir = path.join(computerLogDir, normalizedUserId, normalizedCId);
+
+  if (!fs.existsSync(logDir)) {
+    log(logId, "DEBUG", "Log directory does not exist", { logDir });
+    return { fileName: null, fileSize: 0, lines: [] };
+  }
+
+  // 列出所有 .log 文件
+  const entries = await fs.promises.readdir(logDir);
+  const logFiles = entries.filter((f) => f.endsWith(".log"));
+
+  if (logFiles.length === 0) {
+    log(logId, "DEBUG", "No log file found", { logDir });
+    return { fileName: null, fileSize: 0, lines: [] };
+  }
+
+  // 获取每个文件的修改时间和大小，按修改时间倒序取最新文件
+  const fileInfos = [];
+  for (const f of logFiles) {
+    const fullPath = path.join(logDir, f);
+    const stat = await fs.promises.stat(fullPath);
+    fileInfos.push({ name: f, fullPath, mtime: stat.mtimeMs, size: stat.size });
+  }
+  fileInfos.sort((a, b) => b.mtime - a.mtime);
+
+  const latestFile = fileInfos[0];
+
+  // 读取文件内容，取最后 N 行
+  const content = await fs.promises.readFile(latestFile.fullPath, "utf8");
+  const allLines = content.split("\n").filter((l) => l.length > 0);
+  const maxLines = Math.max(1, tailLines);
+  const lines = allLines.slice(-maxLines);
+
+  log(logId, "DEBUG", "Get latest logs", {
+    fileName: latestFile.name,
+    fileSize: latestFile.size,
+    totalLines: allLines.length,
+    returnedLines: lines.length,
+    elapsedMs: Date.now() - startTime,
+  });
+
+  return {
+    fileName: latestFile.name,
+    fileSize: latestFile.size,
+    lines,
+  };
+}
+
+export { getFileList, updateFiles, uploadFile, uploadFiles, downloadAllFiles, getLatestLogs };
