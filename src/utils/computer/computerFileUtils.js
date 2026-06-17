@@ -978,8 +978,8 @@ async function downloadAllFiles(userId, cId) {
 
 /**
  * 获取沙盒最新日志
- * - 日志目录：COMPUTER_LOG_DIR/<userId>/<cId>/
- * - 取该目录下最后修改的 .log 文件，读取最后 N 行
+ * - 日志目录：COMPUTER_LOG_DIR/<userId>/<cId>/.logs/
+ * - 取该目录下最后修改的文件（不限制后缀），读取最后 N 行
  * - 使用纯 Node.js 实现，跨平台兼容
  * @param {string|number} userId 用户ID
  * @param {string|number} cId 会话ID
@@ -1006,16 +1006,18 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
     return { fileName: null, fileSize: 0, lines: [] };
   }
 
-  const logDir = path.join(computerLogDir, normalizedUserId, normalizedCId);
+  const logDir = path.join(computerLogDir, normalizedUserId, normalizedCId, ".logs");
 
   if (!fs.existsSync(logDir)) {
     log(logId, "DEBUG", "Log directory does not exist", { logDir });
     return { fileName: null, fileSize: 0, lines: [] };
   }
 
-  // 列出所有 .log 文件
-  const entries = await fs.promises.readdir(logDir);
-  const logFiles = entries.filter((f) => f.endsWith(".log"));
+  // 列出所有文件（不限制后缀），排除目录
+  const entries = await fs.promises.readdir(logDir, { withFileTypes: true });
+  const logFiles = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
 
   if (logFiles.length === 0) {
     log(logId, "DEBUG", "No log file found", { logDir });
