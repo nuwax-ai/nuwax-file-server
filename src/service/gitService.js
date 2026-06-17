@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import git from "isomorphic-git";
 import { createPatch } from "diff";
 import config from "../appConfig/index.js";
@@ -81,15 +82,30 @@ function isBinaryBuffer(buf) {
 }
 
 /**
- * 生成 unified diff 文本并统计行数变更
+ * 计算 git blob hash（SHA1 of "blob <size>\0<content>"）
+ * @param {Buffer} buf
+ * @returns {string} 40 字符的 hex hash
+ */
+function gitBlobHash(buf) {
+  const header = Buffer.from(`blob ${buf.length}\0`);
+  return crypto.createHash("sha1").update(Buffer.concat([header, buf])).digest("hex");
+}
+
+/**
+ * 生成 git diff 格式的差异文本并统计行数变更。
+ * createPatch 生成 unified diff，但头部格式与 git diff 不同（Index:/===  vs diff --git）。
+ * 这里保留 createPatch 的 hunk 内容不变，替换头部为 git diff 格式。
+ *
  * @param {string} filepath  文件相对路径
  * @param {string} oldContent  旧内容（文本）
  * @param {string} newContent  新内容（文本）
  * @param {boolean} hasOld  是否存在旧版本
  * @param {boolean} hasNew  是否存在新版本
+ * @param {Buffer|null} oldBuf  旧内容 Buffer（用于计算 blob hash）
+ * @param {Buffer|null} newBuf  新内容 Buffer（用于计算 blob hash）
  * @returns {{ diff: string, insertions: number, deletions: number }}
  */
-function makeDiffPatch(filepath, oldContent, newContent, hasOld, hasNew) {
+function makeDiffPatch(filepath, oldContent, newContent, hasOld, hasNew, oldBuf, newBuf) {
   const patch = createPatch(
     filepath,
     hasOld ? oldContent : "",
@@ -98,14 +114,102 @@ function makeDiffPatch(filepath, oldContent, newContent, hasOld, hasNew) {
     hasNew ? `b/${filepath}` : "/dev/null"
   );
 
+  // createPatch 前 4 行是头部（Index: / === / --- / +++），第 5 行起是 hunks
+  const lines = patch.split("\n");
+  const rawHunks = lines.slice(4);
+  if (rawHunks.length > 0 && rawHunks[rawHunks.length - 1] === "") rawHunks.pop();
+
+  // Pass 1: 修正 @@ 行（count=1 时省略），统计增删行数
+  const fixedHunks = [];
   let insertions = 0;
   let deletions = 0;
-  for (const line of patch.split("\n")) {
+
+  for (const line of rawHunks) {
+    if (line.startsWith("@@")) {
+      const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (m) {
+        const oldStart = m[1];
+        const oldLines = m[2] !== undefined ? parseInt(m[2], 10) : 1;
+        const newStart = m[3];
+        const newLines = m[4] !== undefined ? parseInt(m[4], 10) : 1;
+        const oldPart = oldLines === 1 ? oldStart : `${oldStart},${oldLines}`;
+        const newPart = newLines === 1 ? newStart : `${newStart},${newLines}`;
+        fixedHunks.push(`@@ -${oldPart} +${newPart} @@`);
+        continue;
+      }
+    }
     if (line.startsWith("+") && !line.startsWith("+++")) insertions++;
     else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
+    fixedHunks.push(line);
   }
 
-  return { diff: patch, insertions, deletions };
+  // Pass 2: 在最后一个 hunk 的尾部补充 \ No newline at end of file
+  const oldNoNewline = hasOld && oldContent !== "" && !oldContent.endsWith("\n");
+  const newNoNewline = hasNew && newContent !== "" && !newContent.endsWith("\n");
+
+  if ((oldNoNewline || newNoNewline) && fixedHunks.length > 0) {
+    // 找到最后一个 hunk 的起始位置
+    let lastHunkStart = 0;
+    for (let i = 0; i < fixedHunks.length; i++) {
+      if (fixedHunks[i].startsWith("@@")) lastHunkStart = i;
+    }
+    // 在最后一个 hunk 中，从后往前找最后一行各类型的位置
+    let lastDel = -1, lastAdd = -1, lastCtx = -1;
+    for (let i = fixedHunks.length - 1; i > lastHunkStart; i--) {
+      const l = fixedHunks[i];
+      if (l.startsWith("-") && !l.startsWith("---") && lastDel < 0) lastDel = i;
+      else if (l.startsWith("+") && !l.startsWith("++") && lastAdd < 0) lastAdd = i;
+      else if (l.startsWith(" ") && lastCtx < 0) lastCtx = i;
+    }
+    const lastIdx = Math.max(lastDel, lastAdd, lastCtx);
+
+    if (lastIdx >= 0) {
+      const lastLine = fixedHunks[lastIdx];
+      if (lastLine.startsWith(" ")) {
+        // 上下文行：新旧两侧内容相同
+        if (oldNoNewline || newNoNewline) {
+          fixedHunks.splice(lastIdx + 1, 0, "\\ No newline at end of file");
+        }
+      } else if (lastLine.startsWith("+")) {
+        // 新增行结尾：找前面最近的 - 行判断是否是替换
+        let prevIdx = -1;
+        for (let i = lastIdx - 1; i > lastHunkStart; i--) {
+          if (fixedHunks[i].startsWith("-") && !fixedHunks[i].startsWith("---")) { prevIdx = i; break; }
+        }
+        if (prevIdx >= 0 && oldNoNewline) {
+          fixedHunks.splice(prevIdx + 1, 0, "\\ No newline at end of file");
+          if (newNoNewline) fixedHunks.splice(lastIdx + 2, 0, "\\ No newline at end of file");
+        } else if (newNoNewline) {
+          fixedHunks.splice(lastIdx + 1, 0, "\\ No newline at end of file");
+        }
+      } else if (lastLine.startsWith("-") && oldNoNewline) {
+        fixedHunks.splice(lastIdx + 1, 0, "\\ No newline at end of file");
+      }
+    }
+  }
+
+  // 构建 git diff 头部
+  const oldHash = hasOld && oldBuf ? gitBlobHash(oldBuf).substring(0, 7) : "0000000";
+  const newHash = hasNew && newBuf ? gitBlobHash(newBuf).substring(0, 7) : "0000000";
+
+  const header = [];
+  header.push(`diff --git a/${filepath} b/${filepath}`);
+
+  if (!hasOld) {
+    header.push("new file mode 100644");
+    header.push(`index 0000000..${newHash}`);
+  } else if (!hasNew) {
+    header.push("deleted file mode 100644");
+    header.push(`index ${oldHash}..0000000`);
+  } else {
+    header.push(`index ${oldHash}..${newHash} 100644`);
+  }
+
+  header.push(`--- ${hasOld ? `a/${filepath}` : "/dev/null"}`);
+  header.push(`+++ ${hasNew ? `b/${filepath}` : "/dev/null"}`);
+
+  const gitDiff = [...header, ...fixedHunks].join("\n") + "\n";
+  return { diff: gitDiff, insertions, deletions };
 }
 
 /**
@@ -554,7 +658,20 @@ async function diff(options = {}) {
       if (hasNew && !isBinary && isBinaryBuffer(newResult.buf)) isBinary = true;
 
       if (isBinary) {
-        diffText += `Binary files a/${filepath} and b/${filepath} differ\n`;
+        const oldHash = hasOld ? gitBlobHash(oldResult.buf).substring(0, 7) : "0000000";
+        const newHash = hasNew ? gitBlobHash(newResult.buf).substring(0, 7) : "0000000";
+        const binHeader = [`diff --git a/${filepath} b/${filepath}`];
+        if (!hasOld) {
+          binHeader.push("new file mode 100644");
+          binHeader.push(`index 0000000..${newHash}`);
+        } else if (!hasNew) {
+          binHeader.push("deleted file mode 100644");
+          binHeader.push(`index ${oldHash}..0000000`);
+        } else {
+          binHeader.push(`index ${oldHash}..${newHash} 100644`);
+        }
+        binHeader.push(`Binary files ${hasOld ? `a/${filepath}` : "/dev/null"} and ${hasNew ? `b/${filepath}` : "/dev/null"} differ`);
+        diffText += binHeader.join("\n") + "\n";
         summaryFiles.push({ file: filepath, changes: 0, insertions: 0, deletions: 0, binary: true });
         return;
       }
@@ -563,7 +680,9 @@ async function diff(options = {}) {
         filepath,
         hasOld ? oldResult.content : "",
         hasNew ? newResult.content : "",
-        hasOld, hasNew
+        hasOld, hasNew,
+        hasOld ? oldResult.buf : null,
+        hasNew ? newResult.buf : null
       );
       diffText += patch;
       summaryFiles.push({ file: filepath, changes: insertions + deletions, insertions, deletions, binary: false });
@@ -616,10 +735,11 @@ async function diff(options = {}) {
         if (pathFilter && !pathFilter.has(f)) continue;
 
         if (source === "staged") {
-          // staged：只看 index vs HEAD（S !== 1）
-          if (S === 1) continue;
+          // staged：只看 index vs HEAD（S !== 1），排除 untracked
+          if (S === 1 || (H === 0 && S === 0)) continue;
         } else {
-          // worktree：看所有与 HEAD 的差异
+          // worktree：看所有与 HEAD 的差异，排除 untracked
+          if (H === 0 && S === 0) continue;
           if (H === 1 && W === 1 && S === 1) continue;
         }
 
