@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
+import spawn from "cross-spawn";
+import archiver from "archiver";
 import config from "../../appConfig/index.js";
 import { extractZip } from "../common/zipUtils.js";
 import {
@@ -1166,10 +1168,18 @@ async function executeCommand(userId, cId, command) {
 
   const timeoutMs = 10 * 60 * 1000; // 10 minutes
 
+  const execOptions = { cwd: workDir, timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 };
+  if (config.BASH_PATH) {
+    execOptions.shell = config.BASH_PATH;
+  }
+  if (config.GIT_PATH) {
+    execOptions.env = { ...process.env, PATH: `${config.GIT_PATH}${path.delimiter}${process.env.PATH}` };
+  }
+
   return new Promise((resolve, reject) => {
     exec(
       command,
-      { cwd: workDir, timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 },
+      execOptions,
       (error, stdout, stderr) => {
         const exitCode = error ? (error.killed ? -1 : (error.code || 1)) : 0;
         const resolvedStderr = error && error.killed
@@ -1187,6 +1197,366 @@ async function executeCommand(userId, cId, command) {
       }
     );
   });
+}
+
+/**
+ * 打包工作空间文件为 zip
+ * 参照 downloadAllFiles 的 archiver 模式，用 archive.directory 过滤排除目录
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {string[]|null} excludeDirs 排除目录列表，为 null 时使用默认列表
+ * @returns {Promise<{ archive: import("archiver").Archiver, zipFileName: string }>}
+ */
+async function zipWorkspace(userId, cId, excludeDirs) {
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (!fs.existsSync(targetDir)) {
+    throw new ValidationError("workspace directory does not exist", {
+      field: "workDir",
+      workDir: targetDir,
+    });
+  }
+
+  // env 中配置的是必须排除的目录，调用方传入的 excludeDirs 作为补充
+  const mandatoryExcludeDirs = config.ZIP_WORKSPACE_EXCLUDE_DIRS || [];
+  const extraExcludeDirs = Array.isArray(excludeDirs) ? excludeDirs : [];
+  const excludeSet = new Set([...mandatoryExcludeDirs, ...extraExcludeDirs]);
+
+  const zipFileName = `${userId}_${cId}.zip`;
+  const startTime = Date.now();
+
+  log(logId, "INFO", "Zip workspace request", {
+    userId, cId, targetDir, excludeDirs: [...excludeSet],
+  });
+
+  const archive = archiver("zip", { zlib: { level: 9 } });
+
+  // false 表示不添加顶层目录前缀，条目直接相对于 targetDir
+  archive.directory(targetDir, false, (entry) => {
+    const name = entry.name || "";
+    const segments = name.split(/[\/\\]/).filter(Boolean);
+
+    // 任一路径片段在排除列表中则跳过
+    if (segments.some((seg) => excludeSet.has(seg))) {
+      return false;
+    }
+
+    // 跳过符号链接
+    try {
+      const fullPath = path.join(targetDir, name);
+      if (fs.lstatSync(fullPath).isSymbolicLink()) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    return entry;
+  });
+
+  archive.on("warning", (err) => {
+    if (err.code === "ENOENT") {
+      log(logId, "WARN", "Encountered file problem when creating zip", {
+        message: err.message, code: err.code,
+      });
+    } else {
+      log(logId, "ERROR", "Encountered warning when creating zip", {
+        message: err.message, code: err.code,
+      });
+    }
+  });
+
+  archive.on("error", (err) => {
+    log(logId, "ERROR", "Failed to create zip", {
+      message: err.message, elapsedMs: Date.now() - startTime,
+    });
+  });
+
+  archive.on("end", () => {
+    log(logId, "INFO", "Workspace zip created successfully", {
+      targetDir, zipFileName, elapsedMs: Date.now() - startTime,
+    });
+  });
+
+  return { archive, zipFileName };
+}
+
+/** 查找 package-platforms.mjs 时跳过的目录：复用 env 配置 + 构建产物目录 */
+const PACKAGE_SEARCH_SKIP_DIRS = new Set([
+  ...(config.ZIP_WORKSPACE_EXCLUDE_DIRS || []),
+  "dist-packages",
+]);
+
+/**
+ * 递归查找 scripts/package-platforms.mjs，返回所在的项目目录
+ * @param {string} rootDir 搜索根目录
+ * @returns {string|null} projectDir 或 null
+ */
+function findPackageScript(rootDir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  // 检查当前目录是否包含 scripts/package-platforms.mjs
+  const scriptPath = path.join(rootDir, "scripts", "package-platforms.mjs");
+  if (fs.existsSync(scriptPath)) {
+    return rootDir;
+  }
+
+  // 递归搜索子目录
+  for (const entry of entries) {
+    if (entry.isDirectory() && !PACKAGE_SEARCH_SKIP_DIRS.has(entry.name)) {
+      const result = findPackageScript(path.join(rootDir, entry.name));
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+/**
+ * 用 cross-spawn 执行命令，返回 stdout/stderr/exitCode
+ * @param {string} command
+ * @param {string[]} args
+ * @param {object} options spawn options
+ * @param {number} timeoutMs 超时（毫秒）
+ * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
+ */
+function runSpawn(command, args, options, timeoutMs = 10 * 60 * 1000) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { ...options, timeout: timeoutMs });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (data) => { stdout += data.toString(); });
+    child.stderr?.on("data", (data) => { stderr += data.toString(); });
+
+    child.on("error", (err) => {
+      resolve({
+        stdout,
+        stderr: stderr + `\nFailed to spawn ${command}: ${err.message}`,
+        exitCode: 1,
+      });
+    });
+
+    child.on("close", (code, signal) => {
+      if (code === null && signal) {
+        resolve({
+          stdout,
+          stderr: stderr + `\nProcess killed by signal ${signal} (timeout after ${timeoutMs / 1000}s)`,
+          exitCode: -1,
+        });
+      } else {
+        resolve({ stdout, stderr, exitCode: code ?? 1 });
+      }
+    });
+  });
+}
+
+/**
+ * 从产物文件名中提取平台标识
+ * 文件名格式: agent-{id}-{platform}-{version}.{ext}
+ * @param {string} fileName
+ * @returns {string|null}
+ */
+function extractPlatformFromFileName(fileName) {
+  if (!fileName) return null;
+  let name = fileName;
+  if (name.endsWith(".tar.gz")) name = name.slice(0, -".tar.gz".length);
+  else if (name.endsWith(".tar.bz2")) name = name.slice(0, -".tar.bz2".length);
+  else if (name.endsWith(".tgz")) name = name.slice(0, -".tgz".length);
+  else if (name.endsWith(".zip")) name = name.slice(0, -".zip".length);
+
+  const parts = name.split("-");
+  if (parts.length < 4) return null;
+
+  // 从末尾查找版本号（匹配 x.y.z 格式）
+  let versionIdx = -1;
+  for (let i = parts.length - 1; i >= 2; i--) {
+    if (/^\d+\.\d+\.\d+$/.test(parts[i])) {
+      versionIdx = i;
+      break;
+    }
+  }
+  if (versionIdx < 3) return null;
+
+  // platform 是 parts[2] 到 parts[versionIdx-1] 的拼接
+  return parts.slice(2, versionIdx).join("-");
+}
+
+/**
+ * 在沙箱工作空间中构建 agent 打包产物
+ * 用纯 Node.js 替代 find + pnpm install + node build 的 shell 命令链
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {string|number} agentId
+ * @param {string} version
+ * @returns {Promise<{ artifacts: Array<{path: string, fileName: string, platform: string}> }>}
+ */
+async function buildAgentPackage(userId, cId, agentId, version) {
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!agentId) {
+    throw new ValidationError("agentId cannot be empty", { field: "agentId" });
+  }
+  if (!version) {
+    throw new ValidationError("version cannot be empty", { field: "version" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const workspaceDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (!fs.existsSync(workspaceDir)) {
+    throw new ValidationError("workspace directory does not exist", {
+      field: "workDir",
+      workDir: workspaceDir,
+    });
+  }
+
+  log(logId, "INFO", "Build agent package request", { userId, cId, agentId, version });
+
+  // 1. 查找 scripts/package-platforms.mjs
+  const projectDir = findPackageScript(workspaceDir);
+  if (!projectDir) {
+    throw new ValidationError("package-platforms.mjs not found in workspace", {
+      field: "script",
+    });
+  }
+  log(logId, "INFO", "Found package script", { projectDir });
+
+  // 构建子进程环境变量
+  const spawnEnv = { ...process.env, CI: "true" };
+  if (config.GIT_PATH) {
+    spawnEnv.PATH = `${config.GIT_PATH}${path.delimiter}${process.env.PATH}`;
+  }
+
+  // 2. pnpm install
+  const installResult = await runSpawn("pnpm", ["install"], {
+    cwd: projectDir, env: spawnEnv,
+  });
+  log(logId, "INFO", "pnpm install completed", {
+    exitCode: installResult.exitCode,
+    stderrLength: installResult.stderr.length,
+  });
+
+  if (installResult.exitCode !== 0) {
+    log(logId, "ERROR", "pnpm install failed", { stderr: installResult.stderr });
+    throw new SystemError(`pnpm install failed: ${installResult.stderr}`);
+  }
+
+  // 3. 构建
+  const distPackagesDir = path.join(projectDir, "dist-packages");
+  const buildArgs = [
+    "scripts/package-platforms.mjs",
+    `agent-${agentId}`,
+    version,
+    distPackagesDir,
+    "--print-artifacts",
+  ];
+
+  const buildResult = await runSpawn("node", buildArgs, {
+    cwd: projectDir, env: spawnEnv,
+  });
+  log(logId, "INFO", "Build completed", {
+    exitCode: buildResult.exitCode,
+    stdoutLength: buildResult.stdout.length,
+  });
+
+  if (buildResult.exitCode !== 0) {
+    log(logId, "ERROR", "Build failed", { stderr: buildResult.stderr });
+    throw new SystemError(`Build failed: ${buildResult.stderr}`);
+  }
+
+  // 4. 解析产物
+  const artifactExtensions = [".tar.gz", ".tar.bz2", ".zip", ".tgz"];
+  const artifacts = [];
+  const lines = buildResult.stdout.split("\n");
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+
+    const lowerLine = trimmedLine.toLowerCase();
+    if (!artifactExtensions.some((ext) => lowerLine.endsWith(ext))) {
+      continue;
+    }
+
+    // 转为 workspace 相对路径（统一用正斜杠，便于跨平台下载）
+    const absArtifactPath = path.resolve(projectDir, trimmedLine);
+    let relativePath = path.relative(workspaceDir, absArtifactPath);
+    relativePath = relativePath.split(path.sep).join("/");
+
+    const fileName = path.basename(trimmedLine);
+    const platform = extractPlatformFromFileName(fileName);
+
+    artifacts.push({ path: relativePath, fileName, platform: platform || "" });
+  }
+
+  log(logId, "INFO", "Build agent package completed", {
+    artifactsCount: artifacts.length, artifacts,
+  });
+
+  return { artifacts };
+}
+
+/**
+ * 清理沙箱工作空间中的构建产物
+ * 用 Node.js fs 替代 find + rm -rf dist-packages
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @returns {Promise<{ cleaned: boolean }>}
+ */
+async function cleanupBuildArtifacts(userId, cId) {
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const workspaceDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (!fs.existsSync(workspaceDir)) {
+    log(logId, "WARN", "Workspace not found, skip cleanup", { userId, cId });
+    return { cleaned: false };
+  }
+
+  const projectDir = findPackageScript(workspaceDir);
+  if (!projectDir) {
+    log(logId, "WARN", "package-platforms.mjs not found, skip cleanup", { userId, cId });
+    return { cleaned: false };
+  }
+
+  const distPackagesDir = path.join(projectDir, "dist-packages");
+  if (fs.existsSync(distPackagesDir)) {
+    fs.rmSync(distPackagesDir, { recursive: true, force: true });
+    log(logId, "INFO", "Cleaned dist-packages", { distPackagesDir });
+    return { cleaned: true };
+  }
+
+  log(logId, "INFO", "dist-packages not found, nothing to clean", { distPackagesDir });
+  return { cleaned: false };
 }
 
 /**
@@ -1216,6 +1586,7 @@ async function deleteWorkspace(userId, cId) {
   return { deleted: true };
 }
 
-export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace };
+export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace,
+  zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, };
 
 

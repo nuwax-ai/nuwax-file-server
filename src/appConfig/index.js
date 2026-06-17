@@ -170,6 +170,13 @@ const config = {
     ? process.env.GIT_GITIGNORE_ENTRIES.split("|").map((s) => s.trim()).filter(Boolean)
     : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store", ".agents/", ".claude/", ".opencode/", ".codex/"],
   GIT_ENABLED: process.env.GIT_ENABLED?.toLowerCase() === "true",
+  GIT_PATH: process.env.GIT_PATH || "",
+  BASH_PATH: process.env.BASH_PATH || "",
+  ZIP_WORKSPACE_EXCLUDE_DIRS: process.env.ZIP_WORKSPACE_EXCLUDE_DIRS
+    ? process.env.ZIP_WORKSPACE_EXCLUDE_DIRS.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [".git", ".tmp", ".claude", ".agents", ".codex", ".opencode", ".logs", "__pycache__", "node_modules", "dist"],
 };
 
 export default config;

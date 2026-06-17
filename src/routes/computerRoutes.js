@@ -5,7 +5,7 @@ import path from "path";
 import { ValidationError, asyncHandler } from "../utils/error/errorHandler.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
-import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace, } from "../utils/computer/computerUtils.js";
+import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace, zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
   updateFiles,
@@ -458,6 +458,64 @@ const routes = [
       const safeTailLines = Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
 
       const result = await getLatestLogs(userId, cId, safeTailLines);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/zip-workspace",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, excludeDirs } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Zip workspace request", {
+        userId, cId, hasExcludeDirs: !!excludeDirs,
+      });
+
+      const { archive, zipFileName } = await zipWorkspace(userId, cId, excludeDirs || null);
+
+      res.setHeader("Content-Type", "application/zip");
+      const encodedName = encodeURIComponent(zipFileName);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${encodedName}"; filename*=UTF-8''${encodedName}`
+      );
+
+      archive.on("error", (err) => {
+        res.destroy(err);
+      });
+
+      archive.pipe(res);
+      archive.finalize();
+    }),
+  },
+  {
+    path: "/build-agent-package",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, agentId, version } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Build agent package request", {
+        userId, cId, agentId, version,
+      });
+
+      const result = await buildAgentPackage(userId, cId, agentId, version);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/cleanup-build-artifacts",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Cleanup build artifacts request", {
+        userId, cId,
+      });
+
+      const result = await cleanupBuildArtifacts(userId, cId);
       res.status(200).json({ success: true, ...result });
     }),
   },
