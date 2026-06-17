@@ -1172,9 +1172,6 @@ async function executeCommand(userId, cId, command) {
   if (config.BASH_PATH) {
     execOptions.shell = config.BASH_PATH;
   }
-  if (config.GIT_PATH) {
-    execOptions.env = { ...process.env, PATH: `${config.GIT_PATH}${path.delimiter}${process.env.PATH}` };
-  }
 
   return new Promise((resolve, reject) => {
     exec(
@@ -1444,9 +1441,6 @@ async function buildAgentPackage(userId, cId, agentId, version) {
 
   // 构建子进程环境变量
   const spawnEnv = { ...process.env, CI: "true" };
-  if (config.GIT_PATH) {
-    spawnEnv.PATH = `${config.GIT_PATH}${path.delimiter}${process.env.PATH}`;
-  }
 
   // 2. pnpm install
   const installResult = await runSpawn("pnpm", ["install"], {

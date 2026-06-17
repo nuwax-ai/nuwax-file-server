@@ -197,23 +197,6 @@ const routes = [
     }),
   },
   {
-    path: "/revert",
-    method: "post",
-    handler: asyncHandler(async (req, res) => {
-      const { target } = req.body || {};
-      const params = { ...extractGitParams(req.body), target };
-
-      if (!target) {
-        throw new ValidationError("Revert target cannot be empty", { field: "target" });
-      }
-
-      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git revert", { target });
-
-      const result = await gitService.revert(params);
-      res.status(200).json(result);
-    }),
-  },
-  {
     path: "/tags",
     method: "get",
     handler: asyncHandler(async (req, res) => {
@@ -317,43 +300,6 @@ const routes = [
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git delete branch", { branchName, force });
 
       const result = await gitService.deleteBranch(params);
-      res.status(200).json(result);
-    }),
-  },
-  {
-    path: "/stash",
-    method: "post",
-    handler: asyncHandler(async (req, res) => {
-      const { message: stashMessage, files } = req.body || {};
-      const params = { ...extractGitParams(req.body), message: stashMessage, files };
-
-      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git stash push", params);
-
-      const result = await gitService.stashPush(params);
-      res.status(200).json(result);
-    }),
-  },
-  {
-    path: "/stash-pop",
-    method: "post",
-    handler: asyncHandler(async (req, res) => {
-      const { index, files } = req.body || {};
-      const params = { ...extractGitParams(req.body), index, files };
-
-      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git stash pop", { index });
-
-      const result = await gitService.stashPop(params);
-      res.status(200).json(result);
-    }),
-  },
-  {
-    path: "/stash-list",
-    method: "get",
-    handler: asyncHandler(async (req, res) => {
-      const params = extractGitParams(req.query);
-      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git stash list", params);
-
-      const result = await gitService.stashList(params);
       res.status(200).json(result);
     }),
   },

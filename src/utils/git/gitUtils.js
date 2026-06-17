@@ -1,16 +1,7 @@
 import path from "path";
 import fs from "fs";
-import { simpleGit } from "simple-git";
+import git from "isomorphic-git";
 import config from "../../appConfig/index.js";
-
-/**
- * 创建 simple-git 实例
- * @param {string} projectPath 项目绝对路径
- * @returns {import('simple-git').SimpleGit}
- */
-function getGitInstance(projectPath) {
-  return simpleGit(projectPath);
-}
 
 /**
  * 检查目录下是否存在 .git（即是否已初始化 Git 仓库）
@@ -22,23 +13,75 @@ function isGitRepo(projectPath) {
 }
 
 /**
+ * 获取默认 author 对象（供 isomorphic-git commit 使用）
+ * @returns {{name: string, email: string}}
+ */
+function getDefaultAuthor() {
+  return {
+    name: config.GIT_DEFAULT_AUTHOR_NAME,
+    email: config.GIT_DEFAULT_AUTHOR_EMAIL,
+  };
+}
+
+/**
+ * 暂存所有变更（等价于 git add --all）。
+ * 基于 statusMatrix 找出变更/新增/删除的文件，逐个 add/remove。
+ * @param {string} dir 项目绝对路径
+ */
+async function addAll(dir) {
+  const matrix = await git.statusMatrix({ fs, dir });
+  await Promise.all(
+    matrix.map(([filepath, head, workdir]) => {
+      if (workdir === 2) {
+        // 工作区有变更或新增文件
+        return git.add({ fs, dir, filepath }).catch(() => {});
+      }
+      if (head === 1 && workdir === 0) {
+        // 已跟踪文件被删除
+        return git.remove({ fs, dir, filepath }).catch(() => {});
+      }
+      return undefined;
+    })
+  );
+}
+
+/**
  * 确保项目已初始化 Git，未初始化则自动执行 git init 并生成 .gitignore。
+ * isomorphic-git 不支持 --allow-empty 提交，因此初始提交需要至少一个文件。
  * @param {string} projectPath
  */
 async function ensureGitRepo(projectPath) {
   if (!isGitRepo(projectPath)) {
-    const git = simpleGit(projectPath);
-    await git.init(["-b", "main"]);
-    await git.addConfig("user.name", config.GIT_DEFAULT_AUTHOR_NAME, false, "local");
-    await git.addConfig("user.email", config.GIT_DEFAULT_AUTHOR_EMAIL, false, "local");
-    await git.addConfig("init.defaultBranch", "main", false, "local");
-    // 创建初始提交，确保 HEAD 存在
-    await git.commit("Initial commit", ["--allow-empty"]);
-  }
-  ensureGitignore(projectPath);
-}
+    await git.init({ fs, dir: projectPath, defaultBranch: "main" });
+    await git.setConfig({ fs, dir: projectPath, path: "user.name", value: config.GIT_DEFAULT_AUTHOR_NAME });
+    await git.setConfig({ fs, dir: projectPath, path: "user.email", value: config.GIT_DEFAULT_AUTHOR_EMAIL });
 
-export { getGitInstance, isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd };
+    // 先创建 .gitignore，确保有文件可提交
+    ensureGitignore(projectPath);
+
+    // 初始提交：添加 .gitignore（若存在）
+    const gitignorePath = path.join(projectPath, ".gitignore");
+    if (fs.existsSync(gitignorePath)) {
+      await git.add({ fs, dir: projectPath, filepath: ".gitignore" });
+    }
+
+    // 若 .gitignore 不存在（GIT_AUTO_GITIGNORE=false），创建占位文件
+    const stagedFiles = await git.listFiles({ fs, dir: projectPath });
+    if (stagedFiles.length === 0) {
+      fs.writeFileSync(path.join(projectPath, ".gitkeep"), "");
+      await git.add({ fs, dir: projectPath, filepath: ".gitkeep" });
+    }
+
+    await git.commit({
+      fs,
+      dir: projectPath,
+      message: "Initial commit",
+      author: getDefaultAuthor(),
+    });
+  } else {
+    ensureGitignore(projectPath);
+  }
+}
 
 /**
  * 文件操作后自动 git add，非阻塞（失败不影响主流程）
@@ -48,11 +91,14 @@ export { getGitInstance, isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd }
 async function autoGitAdd(projectPath, files) {
   if (!isGitRepo(projectPath)) return;
   try {
-    const git = getGitInstance(projectPath);
     if (Array.isArray(files) && files.length > 0) {
-      await git.add(files);
+      await Promise.all(
+        files
+          .filter((f) => fs.existsSync(path.join(projectPath, f)))
+          .map((f) => git.add({ fs, dir: projectPath, filepath: f }))
+      );
     } else {
-      await git.add("--all");
+      await addAll(projectPath);
     }
   } catch (_) {
     // non-blocking
@@ -85,3 +131,5 @@ function ensureGitignore(projectPath) {
     fs.appendFileSync(gitignorePath, content, "utf8");
   }
 }
+
+export { isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd, addAll, getDefaultAuthor };
