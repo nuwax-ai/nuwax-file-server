@@ -9,7 +9,7 @@ const DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const DOWNLOAD_MAX_FILE_SIZE_BYTES =
   config.DOWNLOAD_MAX_FILE_SIZE_BYTES || DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES;
 
-async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
+async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTargetDir) {
   const files = [];
   const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
 
@@ -32,7 +32,7 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
     }
 
     if (entry.isDirectory()) {
-      const sub = await traverseDirectory(fullPath, basePath, logId, proxyPath);
+      const sub = await traverseDirectory(fullPath, basePath, logId, proxyPath, customTargetDir);
       if (sub.length === 0) {
         // 空目录，返回目录信息
         const referencePath = basePath || targetDir;
@@ -61,6 +61,9 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath) {
             .map((seg) => encodeURIComponent(seg))
             .join("/");
           fileProxyUrl = `${proxyPath}/${encodedPath}`;
+          if (customTargetDir) {
+            fileProxyUrl += `?customTargetDir=${encodeURIComponent(customTargetDir)}`;
+          }
         }
 
         const fileInfo = {
@@ -161,9 +164,11 @@ async function calculateDownloadableDirectorySize(
  * 获取文件列表
  * @param {string|number} userId 用户ID
  * @param {string|number} cId 会话ID
+ * @param {string} proxyPath 代理路径
+ * @param {string} [customTargetDir] 自定义目标目录，非空时直接扫描该目录，为空则按默认规则拼接 workspaceRoot/userId/cId
  * @returns {Promise<{files: Array}>}
  */
-async function getFileList(userId, cId, proxyPath) {
+async function getFileList(userId, cId, proxyPath, customTargetDir) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
@@ -177,7 +182,9 @@ async function getFileList(userId, cId, proxyPath) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = path.join(workspaceRoot, normalizedUserId, normalizedCId);
+  const targetDir = (customTargetDir && customTargetDir.trim())
+    ? customTargetDir
+    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
   
 
   if (!fs.existsSync(targetDir)) {
@@ -196,7 +203,7 @@ async function getFileList(userId, cId, proxyPath) {
   });
 
   try {
-    const files = await traverseDirectory(targetDir, targetDir, logId, proxyPath);
+    const files = await traverseDirectory(targetDir, targetDir, logId, proxyPath, customTargetDir);
 
     log(logId, "INFO", "User file list obtained successfully", {
       fileCount: files.length,
@@ -230,7 +237,7 @@ async function getFileList(userId, cId, proxyPath) {
  * @param {Array} files 文件操作列表
  * @returns {Promise<Object>} 更新结果
  */
-async function updateFiles(userId, cId, files) {
+async function updateFiles(userId, cId, files, customTargetDir) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
@@ -247,7 +254,9 @@ async function updateFiles(userId, cId, files) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = path.join(workspaceRoot, normalizedUserId, normalizedCId);
+  const targetDir = (customTargetDir && customTargetDir.trim())
+    ? customTargetDir
+    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
@@ -536,7 +545,7 @@ async function updateFiles(userId, cId, files) {
  * @param {string} filePath 文件在用户目录中的相对路径
  * @returns {Promise<Object>} 上传结果
  */
-async function uploadFile(userId, cId, file, filePath) {
+async function uploadFile(userId, cId, file, filePath, customTargetDir) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
@@ -556,7 +565,9 @@ async function uploadFile(userId, cId, file, filePath) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = path.join(workspaceRoot, normalizedUserId, normalizedCId);
+  const targetDir = (customTargetDir && customTargetDir.trim())
+    ? customTargetDir
+    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
@@ -651,7 +662,7 @@ async function uploadFile(userId, cId, file, filePath) {
  * @param {Array<string>} filePaths 文件路径数组，与files数组一一对应
  * @returns {Promise<Object>} 批量上传结果
  */
-async function uploadFiles(userId, cId, files, filePaths) {
+async function uploadFiles(userId, cId, files, filePaths, customTargetDir) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
@@ -716,7 +727,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
       }
 
       try {
-        const result = await uploadFile(userId, cId, file, filePath);
+        const result = await uploadFile(userId, cId, file, filePath, customTargetDir);
         results.push({
           success: true,
           filePath,
@@ -789,7 +800,7 @@ async function uploadFiles(userId, cId, files, filePaths) {
  * @param {string|number} cId 会话ID
  * @returns {Promise<{ archive: import("archiver").Archiver, zipFileName: string }>}
  */
-async function downloadAllFiles(userId, cId) {
+async function downloadAllFiles(userId, cId, customTargetDir) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
@@ -806,7 +817,9 @@ async function downloadAllFiles(userId, cId) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = path.join(workspaceRoot, normalizedUserId, normalizedCId);
+  const targetDir = (customTargetDir && customTargetDir.trim())
+    ? customTargetDir
+    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     // 目录不存在时，返回一个仅包含顶层目录的空压缩包
@@ -1057,3 +1070,4 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
 }
 
 export { getFileList, updateFiles, uploadFile, uploadFiles, downloadAllFiles, getLatestLogs };
+
