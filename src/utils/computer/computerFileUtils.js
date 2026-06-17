@@ -991,7 +991,7 @@ async function downloadAllFiles(userId, cId, customTargetDir) {
 
 /**
  * 获取沙盒最新日志
- * - 日志目录：COMPUTER_LOG_DIR/<userId>/<cId>/.logs/
+ * - 日志目录：COMPUTER_WORKSPACE_DIR/<userId>/<cId>/.logs/
  * - 取该目录下最后修改的文件（不限制后缀），读取最后 N 行
  * - 使用纯 Node.js 实现，跨平台兼容
  * @param {string|number} userId 用户ID
@@ -1012,14 +1012,14 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const computerLogDir = config.COMPUTER_LOG_DIR;
+  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
-  if (!computerLogDir) {
-    log(logId, "WARN", "COMPUTER_LOG_DIR is not configured");
+  if (!workspaceRoot) {
+    log(logId, "WARN", "COMPUTER_WORKSPACE_DIR is not configured");
     return { fileName: null, fileSize: 0, lines: [] };
   }
 
-  const logDir = path.join(computerLogDir, normalizedUserId, normalizedCId, ".logs");
+  const logDir = path.join(workspaceRoot, normalizedUserId, normalizedCId, ".logs");
 
   if (!fs.existsSync(logDir)) {
     log(logId, "DEBUG", "Log directory does not exist", { logDir });
