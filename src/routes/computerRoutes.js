@@ -219,8 +219,8 @@ const routes = [
     path: "/get-file-list",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, proxyPath } = req.query;
-      const result = await getFileList(userId, cId, proxyPath);
+      const { userId, cId, proxyPath, customTargetDir } = req.query;
+      const result = await getFileList(userId, cId, proxyPath, customTargetDir);
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -228,7 +228,7 @@ const routes = [
     path: "/files-update",
     method: "post",
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, files } = req.body || {};
+      const { userId, cId, files, customTargetDir } = req.body || {};
       const logId = `computer:${userId}:${cId}`;
       log(logId, "INFO", "Files update", {
         userId,
@@ -256,7 +256,7 @@ const routes = [
         });
       }
 
-      const result = await updateFiles(userId, cId, files);
+      const result = await updateFiles(userId, cId, files, customTargetDir);
       res.status(200).json(result);
     }),
   },
@@ -265,7 +265,7 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, filePath } = req.body || {};
+      const { userId, cId, filePath, customTargetDir } = req.body || {};
       const file = req.file; // 从 multer 中间件获取上传的文件
       const logId = `computer:${userId}:${cId}`;
 
@@ -287,7 +287,7 @@ const routes = [
       };
 
       try {
-        const result = await uploadFile(userId, cId, fileObj, filePath);
+        const result = await uploadFile(userId, cId, fileObj, filePath, customTargetDir);
         res.status(200).json(result);
       } finally {
         // 清理临时文件
@@ -302,7 +302,7 @@ const routes = [
     method: "post",
     middleware: upload.array("files"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, filePaths } = req.body || {};
+      const { userId, cId, filePaths, customTargetDir } = req.body || {};
       const files = req.files || []; // 从 multer 中间件获取上传的文件数组
       const logId = `computer:${userId}:${cId}`;
 
@@ -337,7 +337,7 @@ const routes = [
         }
 
         // 调用批量上传工具函数
-        const result = await uploadFiles(userId, cId, fileObjects, normalizedFilePaths);
+        const result = await uploadFiles(userId, cId, fileObjects, normalizedFilePaths, customTargetDir);
         res.status(200).json(result);
       } finally {
         // 清理所有临时文件
@@ -386,7 +386,7 @@ const routes = [
     path: "/download-all-files",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId } = req.query || {};
+      const { userId, cId, customTargetDir } = req.query || {};
       const logId = `computer:${userId}:${cId}`;
 
       log(logId, "INFO", "Download all files request", {
@@ -396,7 +396,8 @@ const routes = [
 
       const { archive, zipFileName } = await downloadAllFiles(
         userId,
-        cId
+        cId,
+        customTargetDir
       );
 
       res.setHeader("Content-Type", "application/zip");

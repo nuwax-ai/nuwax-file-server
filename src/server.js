@@ -144,12 +144,11 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
   // 安全多次解码，解决 "%25E4%25BD%25A0" 这种双重编码的中文
   const decodedPath = safeDecodePath(filePath);
 
-  const fullPath = path.join(
-    config.COMPUTER_WORKSPACE_DIR,
-    userId,
-    cId,
-    decodedPath
-  );
+  // customTargetDir 非空时直接从该目录解析文件，否则按默认规则拼接
+  const { customTargetDir } = req.query;
+  const fullPath = (customTargetDir && customTargetDir.trim())
+    ? path.join(customTargetDir, decodedPath)
+    : path.join(config.COMPUTER_WORKSPACE_DIR, userId, cId, decodedPath);
 
   // 使用 headers 选项确保 CORS 头被保留
   const corsHeaders = {
