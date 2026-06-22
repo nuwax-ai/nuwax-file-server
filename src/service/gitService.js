@@ -920,6 +920,11 @@ async function reset(options = {}) {
           }
         }
       }
+
+      // 确保 .gitignore 包含服务端必选条目，避免后续 git 操作中
+      // ensureGitignore 追加内容导致 .gitignore 变成 modified
+      ensureGitignore(targetPath);
+      await git.add({ fs, dir: targetPath, filepath: ".gitignore" });
     }
 
     log(logId, "INFO", "Git reset successful", { logId, target, mode, previousHead });
@@ -1040,6 +1045,12 @@ async function revert(options = {}) {
       await cleanEmptyParentDirs(targetPath, removedFiles);
     }
 
+    // 6.5 确保 .gitignore 包含服务端必选条目（GIT_GITIGNORE_ENTRIES），
+    //     避免 commit 后下一次 git 操作中 ensureGitignore 追加内容
+    //     导致 .gitignore 出现在 modified 列表
+    ensureGitignore(targetPath);
+    await git.add({ fs, dir: targetPath, filepath: ".gitignore" });
+
     // 7. 检查是否有实际变更（HEAD 可能已经等于 target）
     const afterMatrix = await git.statusMatrix({ fs, dir: targetPath });
     const hasRealChanges = afterMatrix.some(([, , , S]) => S !== 1);
@@ -1125,6 +1136,11 @@ async function checkout(options = {}) {
       // 加入暂存区
       await git.add({ fs, dir: targetPath, filepath });
     }
+
+    // 确保 .gitignore 包含服务端必选条目，避免后续 git 操作中
+    // ensureGitignore 追加内容导致 .gitignore 变成 modified
+    ensureGitignore(targetPath);
+    await git.add({ fs, dir: targetPath, filepath: ".gitignore" });
 
     log(logId, "INFO", "Git checkout files successful", { logId, target });
     return { success: true, message: `Checkout files from ${target} successful`, logId, target };
