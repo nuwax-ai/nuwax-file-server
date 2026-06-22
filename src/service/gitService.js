@@ -939,6 +939,161 @@ async function reset(options = {}) {
   }
 }
 
+// ──────────────────────────── revert ────────────────────────────
+
+/**
+ * 通过新建 commit 的方式将仓库文件树回退到 target 版本（保留完整历史）。
+ *
+ * 与 reset 的核心区别：
+ *   - reset：移动分支指针向后回退，target 之后的 commit 从分支上消失
+ *   - revert：不移动分支指针，而是新建一个 commit 使文件树等于 target
+ *
+ * 行为说明：
+ *   - target 中存在的文件：用 target 版本覆盖 workdir + index
+ *   - HEAD 中存在但 target 不存在的文件：从 workdir + index 删除
+ *   - 未跟踪文件不受影响
+ *
+ * 要求工作区 clean（未跟踪文件除外），否则抛出 BusinessError。
+ *
+ * @param {Object} options
+ * @param {string} options.target 目标 commit hash（支持短 hash）
+ * @param {string} [options.message] 自定义 commit message，默认 "Revert to <short-hash>"
+ * @param {string} [options.authorName]
+ * @param {string} [options.authorEmail]
+ * @returns {Promise<{ success: boolean, message: string, logId: string, commit: string, target: string, previousHead: string }>}
+ */
+async function revert(options = {}) {
+  const { target, message, authorName, authorEmail } = options;
+  if (!target) {
+    throw new ValidationError("Revert target cannot be empty", { field: "target" });
+  }
+
+  const { targetPath, logId } = resolveAndCheck(options);
+  await ensureGitRepo(targetPath);
+
+  try {
+    // 1. 验证 target 存在并解析为完整 OID
+    let targetOid;
+    try {
+      const result = await git.readCommit({ fs, dir: targetPath, oid: target });
+      targetOid = result.oid;
+    } catch (_) {
+      throw new ValidationError("Revert target commit does not exist", {
+        field: "target",
+        target,
+      });
+    }
+
+    // 2. 检查工作区是否 clean（未跟踪文件不阻止）
+    const beforeMatrix = await git.statusMatrix({ fs, dir: targetPath });
+    const hasUncommitted = beforeMatrix.some(([f, H, W, S]) => {
+      if (H === 0 && S === 0) return false; // 未跟踪文件不阻止
+      return W !== 1 || S !== 1;
+    });
+    if (hasUncommitted) {
+      const tracked = beforeMatrix.filter(([, H]) => H !== 0);
+      const modified = tracked.filter(([, , W]) => W !== 1).map(([f]) => f);
+      const staged = tracked.filter(([, , , S]) => S !== 1).map(([f]) => f);
+      throw new BusinessError(
+        "Working directory is not clean, please commit or stash your changes before reverting",
+        { staged, modified }
+      );
+    }
+
+    // 3. 获取 target 和当前 HEAD 的文件列表
+    const targetFiles = new Set(
+      await git.listFiles({ fs, dir: targetPath, ref: targetOid })
+    );
+    const headOid = await getHeadOid(targetPath);
+    const headFiles = new Set(
+      await git.listFiles({ fs, dir: targetPath, ref: headOid })
+    );
+
+    const removedFiles = [];
+
+    // 4. 写入 target 中存在的文件（覆盖 workdir + index）
+    for (const filepath of targetFiles) {
+      const result = await readFileAtCommit(targetPath, targetOid, filepath);
+      if (!result) continue;
+      const fullPath = path.join(targetPath, filepath);
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, result.buf);
+      await git.add({ fs, dir: targetPath, filepath });
+    }
+
+    // 5. 删除 target 不存在但 HEAD 中存在的文件（workdir + index）
+    for (const filepath of headFiles) {
+      if (!targetFiles.has(filepath)) {
+        removedFiles.push(filepath);
+        try {
+          await git.remove({ fs, dir: targetPath, filepath });
+        } catch (_) {}
+        const fullPath = path.join(targetPath, filepath);
+        if (fs.existsSync(fullPath)) {
+          await fs.promises.unlink(fullPath);
+        }
+      }
+    }
+
+    // 6. 清理因删除产生的空目录
+    if (removedFiles.length > 0) {
+      await cleanEmptyParentDirs(targetPath, removedFiles);
+    }
+
+    // 7. 检查是否有实际变更（HEAD 可能已经等于 target）
+    const afterMatrix = await git.statusMatrix({ fs, dir: targetPath });
+    const hasRealChanges = afterMatrix.some(([, , , S]) => S !== 1);
+    if (!hasRealChanges) {
+      log(logId, "INFO", "Nothing to revert, current HEAD already matches target", {
+        logId,
+        target: targetOid,
+      });
+      return {
+        success: true,
+        message: "Nothing to revert, already at target state",
+        logId,
+        nothingToCommit: true,
+        target: targetOid,
+      };
+    }
+
+    // 8. 创建新 commit（分支指针向前推进，历史完整保留）
+    const author = {
+      name: authorName || config.GIT_DEFAULT_AUTHOR_NAME,
+      email: authorEmail || config.GIT_DEFAULT_AUTHOR_EMAIL,
+    };
+    const revertMessage = message || `Revert to ${targetOid.substring(0, 7)}`;
+
+    const commitHash = await git.commit({
+      fs,
+      dir: targetPath,
+      message: revertMessage,
+      author,
+    });
+
+    log(logId, "INFO", "Git revert successful", {
+      logId,
+      target: targetOid,
+      commitHash,
+      previousHead: headOid,
+      removedFilesCount: removedFiles.length,
+    });
+
+    return {
+      success: true,
+      message: "Revert successful",
+      logId,
+      commit: commitHash,
+      target: targetOid,
+      previousHead: headOid,
+    };
+  } catch (e) {
+    if (e instanceof ValidationError || e instanceof BusinessError) throw e;
+    log(logId, "ERROR", "Failed to revert", { logId, target, error: e.message });
+    throw new SystemError("Failed to revert", { originalError: e.message });
+  }
+}
+
 // ──────────────────────────── checkout ────────────────────────────
 
 /**
@@ -1186,6 +1341,7 @@ export {
   diff,
   fileContent,
   reset,
+  revert,
   checkout,
   listTags,
   createTag,
@@ -1207,6 +1363,7 @@ export default {
   diff,
   fileContent,
   reset,
+  revert,
   checkout,
   listTags,
   createTag,
