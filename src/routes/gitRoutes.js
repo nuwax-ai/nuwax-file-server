@@ -180,6 +180,23 @@ const routes = [
     }),
   },
   {
+    path: "/revert",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { target, message, authorName, authorEmail } = req.body || {};
+      const params = { ...extractGitParams(req.body), target, message, authorName, authorEmail };
+
+      if (!target) {
+        throw new ValidationError("Revert target cannot be empty", { field: "target" });
+      }
+
+      log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git revert", { target });
+
+      const result = await gitService.revert(params);
+      res.status(200).json(result);
+    }),
+  },
+  {
     path: "/checkout",
     method: "post",
     handler: asyncHandler(async (req, res) => {
