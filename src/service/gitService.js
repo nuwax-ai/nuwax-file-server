@@ -284,27 +284,36 @@ async function status(options = {}) {
     const deleted = [];
     const untracked = [];
 
+    // statusMatrix 列语义（见 isomorphic-git 源码 docs）：
+    //   HEAD:    0=absent, 1=present
+    //   WORKDIR: 0=absent, 1=与 HEAD 一致, 2=与 HEAD 不同
+    //   STAGE:   0=absent, 1=与 HEAD 一致, 2=与 WORKDIR 一致, 3=与 WORKDIR 不同
     for (const [f, H, W, S] of matrix) {
-      // 暂存区变更（index vs HEAD）
-      if (S === 3) {
+      // staged: HEAD 与 STAGE 不一致（下次 commit 会发生变化的文件）
+      if (H !== S) {
         staged.push(f);
+      }
+
+      // created: 新增并已加入暂存区（HEAD 没有，STAGE 有）
+      if (H === 0 && S !== 0) {
         created.push(f);
-      } else if (S === 2) {
-        staged.push(f);
-      } else if (S === 0 && H === 1) {
-        staged.push(f);
+      }
+
+      // deleted: 已删除
+      //   - 暂存区删除：H=1 且 S=0
+      //   - 工作区删除：W=0 且 S≠0（STAGE 有但 WORKDIR 没有）
+      if ((H === 1 && S === 0) || (W === 0 && S !== 0)) {
         deleted.push(f);
       }
 
-      // 工作区变更（workdir vs index，仅针对 index 中已存在的文件）
-      if (W === 2 && S !== 0) {
+      // modified: 工作区有未 stage 的改动（WORKDIR 与 STAGE 不一致）
+      //   要求 STAGE 和 WORKDIR 都存在文件，且两者内容不同
+      if (S !== 0 && W !== 0 && W !== S) {
         modified.push(f);
-      } else if (W === 0 && S !== 0) {
-        deleted.push(f);
       }
 
-      // 未跟踪文件（不在 index 中但在工作区存在）
-      if (S === 0 && W !== 0) {
+      // untracked: 工作区有，但 HEAD 和 STAGE 都没有
+      if (H === 0 && S === 0 && W !== 0) {
         untracked.push(f);
       }
     }
