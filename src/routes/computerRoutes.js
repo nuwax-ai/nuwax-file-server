@@ -459,7 +459,7 @@ const routes = [
       const safeTailLines = Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
 
       const result = await getLatestLogs(userId, cId, safeTailLines);
-      res.status(200).json({ success: true, ...result });
+      res.status(200).json(result);
     }),
   },
   {

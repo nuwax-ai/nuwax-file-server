@@ -993,11 +993,12 @@ async function downloadAllFiles(userId, cId, customTargetDir) {
  * 获取沙盒最新日志
  * - 日志目录：COMPUTER_WORKSPACE_DIR/<userId>/<cId>/.logs/
  * - 取该目录下最后修改的文件（不限制后缀），读取最后 N 行
+ * - 返回结构与 getDevLog 保持一致（不含 projectId、cacheHit、fileTooLarge）
  * - 使用纯 Node.js 实现，跨平台兼容
  * @param {string|number} userId 用户ID
  * @param {string|number} cId 会话ID
  * @param {number} tailLines 读取最后 N 行，默认 200
- * @returns {Promise<{ fileName: string|null, fileSize: number, lines: string[] }>}
+ * @returns {Promise<{ success: boolean, message: string, logs: Array<{line: number, content: string}>, totalLines: number, startIndex: number, logFileName: string|null }>}
  */
 async function getLatestLogs(userId, cId, tailLines = 200) {
   const startTime = Date.now();
@@ -1016,14 +1017,28 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
 
   if (!workspaceRoot) {
     log(logId, "WARN", "COMPUTER_WORKSPACE_DIR is not configured");
-    return { fileName: null, fileSize: 0, lines: [] };
+    return {
+      success: true,
+      message: "Log workspace is not configured",
+      logs: [],
+      totalLines: 0,
+      startIndex: 1,
+      logFileName: null,
+    };
   }
 
   const logDir = path.join(workspaceRoot, normalizedUserId, normalizedCId, ".logs");
 
   if (!fs.existsSync(logDir)) {
     log(logId, "DEBUG", "Log directory does not exist", { logDir });
-    return { fileName: null, fileSize: 0, lines: [] };
+    return {
+      success: true,
+      message: "Log directory does not exist",
+      logs: [],
+      totalLines: 0,
+      startIndex: 1,
+      logFileName: null,
+    };
   }
 
   // 列出所有文件（不限制后缀），排除目录
@@ -1034,7 +1049,14 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
 
   if (logFiles.length === 0) {
     log(logId, "DEBUG", "No log file found", { logDir });
-    return { fileName: null, fileSize: 0, lines: [] };
+    return {
+      success: true,
+      message: "No log file found",
+      logs: [],
+      totalLines: 0,
+      startIndex: 1,
+      logFileName: null,
+    };
   }
 
   // 获取每个文件的修改时间和大小，按修改时间倒序取最新文件
@@ -1051,21 +1073,36 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
   // 读取文件内容，取最后 N 行
   const content = await fs.promises.readFile(latestFile.fullPath, "utf8");
   const allLines = content.split("\n").filter((l) => l.length > 0);
+  const totalLines = allLines.length;
+
   const maxLines = Math.max(1, tailLines);
-  const lines = allLines.slice(-maxLines);
+  // 计算实际起始位置（数组索引与用户视角行号）
+  const arrayStartIndex = Math.max(0, totalLines - maxLines);
+  const startIndex = arrayStartIndex + 1; // 用户视角行号从 1 开始
+
+  const relevantLines = allLines.slice(arrayStartIndex);
+
+  // 构建带行号的日志数据，与 getDevLog 结构保持一致
+  const logs = relevantLines.map((lineContent, index) => ({
+    line: startIndex + index,
+    content: lineContent,
+  }));
 
   log(logId, "DEBUG", "Get latest logs", {
     fileName: latestFile.name,
     fileSize: latestFile.size,
-    totalLines: allLines.length,
-    returnedLines: lines.length,
+    totalLines,
+    returnedLines: logs.length,
     elapsedMs: Date.now() - startTime,
   });
 
   return {
-    fileName: latestFile.name,
-    fileSize: latestFile.size,
-    lines,
+    success: true,
+    message: "Get log successfully",
+    logs,
+    totalLines,
+    startIndex,
+    logFileName: latestFile.name,
   };
 }
 
