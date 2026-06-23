@@ -11,6 +11,7 @@ import {
   FileError,
 } from "../error/errorHandler.js";
 import { log } from "../log/logUtils.js";
+import { createPnpmNpmrc } from "../common/npmrcUtils.js";
 import {
   ensurePrimaryAgentDirs,
   syncAgents,
@@ -1612,6 +1613,92 @@ function findNodeProjectDir(rootDir) {
 }
 
 /**
+ * 为项目安装准备 pnpm 配置，与 build 流程保持一致
+ * @param {string} projectDir
+ * @param {string} logId
+ */
+async function ensurePnpmInstallConfig(projectDir, logId) {
+  await createPnpmNpmrc(projectDir, logId);
+
+  const npmrcPath = path.join(projectDir, ".npmrc");
+  let content = "";
+  if (fs.existsSync(npmrcPath)) {
+    content = await fs.promises.readFile(npmrcPath, "utf8");
+  }
+
+  const additions = [];
+  if (!/dangerously-allow-all-builds\s*=/.test(content)) {
+    additions.push("dangerously-allow-all-builds=true");
+  }
+
+  if (additions.length > 0) {
+    const suffix = content && !content.endsWith("\n") ? "\n" : "";
+    await fs.promises.writeFile(
+      npmrcPath,
+      `${content}${suffix}${additions.join("\n")}\n`,
+      "utf8"
+    );
+    log(logId, "INFO", "Updated .npmrc for pnpm install", {
+      projectDir,
+      additions,
+    });
+  }
+}
+
+/**
+ * 构建适合依赖安装的环境变量，避免继承服务端 production/CI 配置导致安装不完整
+ * @returns {NodeJS.ProcessEnv}
+ */
+function buildInstallEnv() {
+  const env = { ...process.env };
+  delete env.CI;
+  env.NODE_ENV = "development";
+  return env;
+}
+
+/**
+ * 在工作空间执行 pnpm install，行为与 dependencyManager 对齐
+ * @param {string} projectDir
+ * @param {string} logId
+ * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
+ */
+async function runPnpmInstall(projectDir, logId) {
+  await ensurePnpmInstallConfig(projectDir, logId);
+  const spawnEnv = buildInstallEnv();
+
+  let result = await runSpawn(
+    "pnpm",
+    ["install", "--prefer-offline"],
+    { cwd: projectDir, env: spawnEnv }
+  );
+
+  const output = `${result.stdout}\n${result.stderr}`;
+  if (output.includes("Ignored build scripts")) {
+    log(logId, "WARN", "Detected ignored pnpm build scripts, approving and reinstalling", {
+      projectDir,
+    });
+
+    const approveResult = await runSpawn(
+      "pnpm",
+      ["approve-builds", "--all"],
+      { cwd: projectDir, env: spawnEnv }
+    );
+    log(logId, "INFO", "pnpm approve-builds completed", {
+      exitCode: approveResult.exitCode,
+      stderrLength: approveResult.stderr.length,
+    });
+
+    result = await runSpawn(
+      "pnpm",
+      ["install", "--prefer-offline"],
+      { cwd: projectDir, env: spawnEnv }
+    );
+  }
+
+  return result;
+}
+
+/**
  * 递归查找 Python 项目目录（pyproject.toml 或 requirements.txt）
  * @param {string} rootDir
  * @returns {string|null}
@@ -1684,7 +1771,7 @@ async function installProjectDependencies(userId, cId, programmingLanguage) {
     programmingLanguage: normalizedLang,
   });
 
-  const spawnEnv = { ...process.env, CI: "true" };
+  const spawnEnv = buildInstallEnv();
   let projectDir = null;
   let installResult = null;
 
@@ -1696,10 +1783,7 @@ async function installProjectDependencies(userId, cId, programmingLanguage) {
       });
     }
 
-    installResult = await runSpawn("pnpm", ["install"], {
-      cwd: projectDir,
-      env: spawnEnv,
-    });
+    installResult = await runPnpmInstall(projectDir, logId);
   } else if (normalizedLang === "python" || normalizedLang === "py") {
     projectDir = findPythonProjectDir(workspaceDir);
     if (!projectDir) {
