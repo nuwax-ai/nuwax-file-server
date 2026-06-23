@@ -163,14 +163,14 @@ const config = {
     process.env.GIT_AUTO_GITIGNORE?.toLowerCase() === "false" ? false : true,
   GIT_GITIGNORE_ENTRIES: process.env.GIT_GITIGNORE_ENTRIES
     ? process.env.GIT_GITIGNORE_ENTRIES.split("|").map((s) => s.trim()).filter(Boolean)
-    : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store", ".agents/", ".claude/", ".opencode/", ".codex/", ".tmp/", ".logs/"],
+    : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store", ".npmrc", ".agents/", ".claude/", ".opencode/", ".codex/", ".tmp/", ".logs/"],
   GIT_ENABLED: process.env.GIT_ENABLED?.toLowerCase() === "true",
   BASH_PATH: process.env.BASH_PATH || "",
-  ZIP_WORKSPACE_EXCLUDE_DIRS: process.env.ZIP_WORKSPACE_EXCLUDE_DIRS
-    ? process.env.ZIP_WORKSPACE_EXCLUDE_DIRS.split(",")
+  ZIP_WORKSPACE_EXCLUDE: process.env.ZIP_WORKSPACE_EXCLUDE
+    ? process.env.ZIP_WORKSPACE_EXCLUDE.split(",")
         .map((s) => s.trim())
         .filter(Boolean)
-    : [".git", ".tmp", ".claude", ".agents", ".codex", ".opencode", ".logs", "__pycache__", "node_modules", "dist"],
+    : [".git", ".tmp", ".claude", ".agents", ".codex", ".opencode", ".logs", ".npmrc", "__pycache__", "node_modules", "dist"],
 };
 
 export default config;
