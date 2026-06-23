@@ -1440,13 +1440,8 @@ async function buildAgentPackage(userId, cId, agentId, version) {
   }
   log(logId, "INFO", "Found package script", { projectDir });
 
-  // 构建子进程环境变量
-  const spawnEnv = { ...process.env, CI: "true" };
-
-  // 2. pnpm install
-  const installResult = await runSpawn("pnpm", ["install"], {
-    cwd: projectDir, env: spawnEnv,
-  });
+  // 2. pnpm install（需包含 devDependencies，esbuild/typescript 等在 devDependencies 中）
+  const installResult = await runPnpmInstall(projectDir, logId);
   log(logId, "INFO", "pnpm install completed", {
     exitCode: installResult.exitCode,
     stderrLength: installResult.stderr.length,
@@ -1468,7 +1463,7 @@ async function buildAgentPackage(userId, cId, agentId, version) {
   ];
 
   const buildResult = await runSpawn("node", buildArgs, {
-    cwd: projectDir, env: spawnEnv,
+    cwd: projectDir, env: buildInstallEnv(),
   });
   log(logId, "INFO", "Build completed", {
     exitCode: buildResult.exitCode,
@@ -1630,6 +1625,9 @@ async function ensurePnpmInstallConfig(projectDir, logId) {
   if (!/dangerously-allow-all-builds\s*=/.test(content)) {
     additions.push("dangerously-allow-all-builds=true");
   }
+  if (!/production\s*=/.test(content)) {
+    additions.push("production=false");
+  }
 
   if (additions.length > 0) {
     const suffix = content && !content.endsWith("\n") ? "\n" : "";
@@ -1652,7 +1650,10 @@ async function ensurePnpmInstallConfig(projectDir, logId) {
 function buildInstallEnv() {
   const env = { ...process.env };
   delete env.CI;
+  delete env.NPM_CONFIG_PRODUCTION;
+  delete env.npm_config_production;
   env.NODE_ENV = "development";
+  env.NPM_CONFIG_PRODUCTION = "false";
   return env;
 }
 
@@ -1668,7 +1669,7 @@ async function runPnpmInstall(projectDir, logId) {
 
   let result = await runSpawn(
     "pnpm",
-    ["install", "--prefer-offline"],
+    ["install", "--prefer-offline", "--config.production=false"],
     { cwd: projectDir, env: spawnEnv }
   );
 
@@ -1690,7 +1691,7 @@ async function runPnpmInstall(projectDir, logId) {
 
     result = await runSpawn(
       "pnpm",
-      ["install", "--prefer-offline"],
+      ["install", "--prefer-offline", "--config.production=false"],
       { cwd: projectDir, env: spawnEnv }
     );
   }
