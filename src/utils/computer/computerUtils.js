@@ -1225,10 +1225,10 @@ async function zipWorkspace(userId, cId, excludeDirs) {
     });
   }
 
-  // env 中配置的是必须排除的目录，调用方传入的 excludeDirs 作为补充
-  const mandatoryExcludeDirs = config.ZIP_WORKSPACE_EXCLUDE_DIRS || [];
+  // env 中配置的是必须排除的路径片段，调用方传入的 excludeDirs 作为补充
+  const mandatoryExclude = config.ZIP_WORKSPACE_EXCLUDE || [];
   const extraExcludeDirs = Array.isArray(excludeDirs) ? excludeDirs : [];
-  const excludeSet = new Set([...mandatoryExcludeDirs, ...extraExcludeDirs]);
+  const excludeSet = new Set([...mandatoryExclude, ...extraExcludeDirs]);
 
   const zipFileName = `${userId}_${cId}.zip`;
   const startTime = Date.now();
@@ -1291,7 +1291,7 @@ async function zipWorkspace(userId, cId, excludeDirs) {
 
 /** 查找 package-platforms.mjs 时跳过的目录：复用 env 配置 + 构建产物目录 */
 const PACKAGE_SEARCH_SKIP_DIRS = new Set([
-  ...(config.ZIP_WORKSPACE_EXCLUDE_DIRS || []),
+  ...(config.ZIP_WORKSPACE_EXCLUDE || []),
   "dist-packages",
 ]);
 
