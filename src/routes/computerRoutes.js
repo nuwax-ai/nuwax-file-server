@@ -5,7 +5,7 @@ import path from "path";
 import { ValidationError, asyncHandler } from "../utils/error/errorHandler.js";
 import { log } from "../utils/log/logUtils.js";
 import config from "../appConfig/index.js";
-import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace, zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, } from "../utils/computer/computerUtils.js";
+import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, installProjectDependencies, executeCommand, deleteWorkspace, zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
   updateFiles,
@@ -354,6 +354,23 @@ const routes = [
           }
         }
       }
+    }),
+  },
+  {
+    path: "/install-project",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, programmingLanguage } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Install project request", {
+        userId,
+        cId,
+        programmingLanguage,
+      });
+
+      const result = await installProjectDependencies(userId, cId, programmingLanguage);
+      res.status(200).json({ success: true, ...result });
     }),
   },
   {

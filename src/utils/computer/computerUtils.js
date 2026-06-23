@@ -1580,7 +1580,184 @@ async function deleteWorkspace(userId, cId) {
   return { deleted: true };
 }
 
+/**
+ * 递归查找包含 package.json 的项目目录
+ * @param {string} rootDir
+ * @returns {string|null}
+ */
+function findNodeProjectDir(rootDir) {
+  const packageJsonPath = path.join(rootDir, "package.json");
+  if (fs.existsSync(packageJsonPath)) {
+    return rootDir;
+  }
+
+  let entries;
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (
+      entry.isDirectory()
+      && !PACKAGE_SEARCH_SKIP_DIRS.has(entry.name)
+      && entry.name !== "node_modules"
+    ) {
+      const result = findNodeProjectDir(path.join(rootDir, entry.name));
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+/**
+ * 递归查找 Python 项目目录（pyproject.toml 或 requirements.txt）
+ * @param {string} rootDir
+ * @returns {string|null}
+ */
+function findPythonProjectDir(rootDir) {
+  const pyprojectPath = path.join(rootDir, "pyproject.toml");
+  const requirementsPath = path.join(rootDir, "requirements.txt");
+  if (fs.existsSync(pyprojectPath) || fs.existsSync(requirementsPath)) {
+    return rootDir;
+  }
+
+  let entries;
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (
+      entry.isDirectory()
+      && !PACKAGE_SEARCH_SKIP_DIRS.has(entry.name)
+      && entry.name !== ".venv"
+      && entry.name !== "venv"
+      && entry.name !== "__pycache__"
+    ) {
+      const result = findPythonProjectDir(path.join(rootDir, entry.name));
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+/**
+ * 安装沙箱工作空间中的项目依赖
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {string} programmingLanguage typescript | python
+ * @returns {Promise<{ message: string, projectDir: string, programmingLanguage: string }>}
+ */
+async function installProjectDependencies(userId, cId, programmingLanguage) {
+  const logId = `computer:${userId}:${cId}`;
+  const normalizedLang = String(programmingLanguage || "").trim().toLowerCase();
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!normalizedLang) {
+    throw new ValidationError("programmingLanguage cannot be empty", {
+      field: "programmingLanguage",
+    });
+  }
+
+  const workspaceRoot = await ensureWorkspaceRoot(logId);
+  const workspaceDir = path.join(workspaceRoot, String(userId), String(cId));
+
+  if (!fs.existsSync(workspaceDir)) {
+    throw new ValidationError("workspace directory does not exist", {
+      field: "workDir",
+      workDir: workspaceDir,
+    });
+  }
+
+  log(logId, "INFO", "Install project dependencies request", {
+    userId,
+    cId,
+    programmingLanguage: normalizedLang,
+  });
+
+  const spawnEnv = { ...process.env, CI: "true" };
+  let projectDir = null;
+  let installResult = null;
+
+  if (normalizedLang === "typescript" || normalizedLang === "ts") {
+    projectDir = findPackageScript(workspaceDir) || findNodeProjectDir(workspaceDir);
+    if (!projectDir) {
+      throw new ValidationError("TypeScript project not found in workspace", {
+        field: "projectDir",
+      });
+    }
+
+    installResult = await runSpawn("pnpm", ["install"], {
+      cwd: projectDir,
+      env: spawnEnv,
+    });
+  } else if (normalizedLang === "python" || normalizedLang === "py") {
+    projectDir = findPythonProjectDir(workspaceDir);
+    if (!projectDir) {
+      throw new ValidationError("Python project not found in workspace", {
+        field: "projectDir",
+      });
+    }
+
+    const pyprojectPath = path.join(projectDir, "pyproject.toml");
+    const requirementsPath = path.join(projectDir, "requirements.txt");
+    if (fs.existsSync(pyprojectPath)) {
+      installResult = await runSpawn("pip", ["install", "-e", "."], {
+        cwd: projectDir,
+        env: spawnEnv,
+      });
+    } else if (fs.existsSync(requirementsPath)) {
+      installResult = await runSpawn("pip", ["install", "-r", "requirements.txt"], {
+        cwd: projectDir,
+        env: spawnEnv,
+      });
+    } else {
+      throw new ValidationError("No pyproject.toml or requirements.txt found in workspace", {
+        field: "projectDir",
+      });
+    }
+  } else {
+    throw new ValidationError("Unsupported programmingLanguage", {
+      field: "programmingLanguage",
+      programmingLanguage: normalizedLang,
+    });
+  }
+
+  log(logId, "INFO", "Project dependencies install completed", {
+    projectDir,
+    programmingLanguage: normalizedLang,
+    exitCode: installResult.exitCode,
+    stderrLength: installResult.stderr.length,
+  });
+
+  if (installResult.exitCode !== 0) {
+    log(logId, "ERROR", "Project dependencies install failed", {
+      projectDir,
+      programmingLanguage: normalizedLang,
+      stderr: installResult.stderr,
+    });
+    throw new SystemError(
+      `Project dependencies install failed: ${installResult.stderr || installResult.stdout}`
+    );
+  }
+
+  return {
+    message: "Project dependencies installed successfully",
+    projectDir,
+    programmingLanguage: normalizedLang,
+  };
+}
+
 export { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, executeCommand, deleteWorkspace,
-  zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, };
+  zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, installProjectDependencies, };
 
 
