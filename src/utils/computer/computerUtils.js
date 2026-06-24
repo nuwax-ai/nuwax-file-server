@@ -1628,6 +1628,10 @@ async function ensurePnpmInstallConfig(projectDir, logId) {
   if (!/production\s*=/.test(content)) {
     additions.push("production=false");
   }
+  // 非 TTY 环境（Docker/CI）下允许自动重建 node_modules，避免 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
+  if (!/confirm-modules-purge\s*=/.test(content)) {
+    additions.push("confirm-modules-purge=false");
+  }
 
   if (additions.length > 0) {
     const suffix = content && !content.endsWith("\n") ? "\n" : "";
@@ -1667,9 +1671,16 @@ async function runPnpmInstall(projectDir, logId) {
   await ensurePnpmInstallConfig(projectDir, logId);
   const spawnEnv = buildInstallEnv();
 
+  const pnpmInstallArgs = [
+    "install",
+    "--prefer-offline",
+    "--config.production=false",
+    "--config.confirmModulesPurge=false",
+  ];
+
   let result = await runSpawn(
     "pnpm",
-    ["install", "--prefer-offline", "--config.production=false"],
+    pnpmInstallArgs,
     { cwd: projectDir, env: spawnEnv }
   );
 
@@ -1691,7 +1702,7 @@ async function runPnpmInstall(projectDir, logId) {
 
     result = await runSpawn(
       "pnpm",
-      ["install", "--prefer-offline", "--config.production=false"],
+      pnpmInstallArgs,
       { cwd: projectDir, env: spawnEnv }
     );
   }
