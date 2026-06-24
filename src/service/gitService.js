@@ -17,6 +17,7 @@ import {
   ensureGitRepo,
   ensureGitignore,
   addAll,
+  stageFiles,
   getDefaultAuthor,
 } from "../utils/git/gitUtils.js";
 
@@ -353,12 +354,9 @@ async function commit(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    // 暂存文件
+    // 暂存文件（存在的 add，不存在的被跟踪文件 remove）
     if (Array.isArray(files) && files.length > 0) {
-      const existingFiles = files.filter((f) => fs.existsSync(path.join(targetPath, f)));
-      await Promise.all(
-        existingFiles.map((f) => git.add({ fs, dir: targetPath, filepath: f }))
-      );
+      await stageFiles(targetPath, files);
     } else {
       await addAll(targetPath);
     }
@@ -409,9 +407,7 @@ async function add(options = {}) {
 
   try {
     if (Array.isArray(files) && files.length > 0) {
-      await Promise.all(
-        files.map((f) => git.add({ fs, dir: targetPath, filepath: f }))
-      );
+      await stageFiles(targetPath, files);
     } else {
       await addAll(targetPath);
     }

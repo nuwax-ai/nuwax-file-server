@@ -46,6 +46,26 @@ async function addAll(dir) {
 }
 
 /**
+ * 暂存指定文件列表（等价于对每个文件执行 git add，并能处理删除）：
+ *   - 磁盘上存在的文件 → git.add
+ *   - 磁盘上不存在但已被跟踪的文件 → git.remove（暂存删除，如目录重命名/文件删除场景）
+ *   - 既不存在也未被跟踪 → 忽略
+ * @param {string} dir 项目绝对路径
+ * @param {string[]} files 相对路径文件列表
+ */
+async function stageFiles(dir, files) {
+  for (const f of files) {
+    const fullPath = path.join(dir, f);
+    if (fs.existsSync(fullPath)) {
+      await git.add({ fs, dir, filepath: f });
+    } else {
+      // 工作区已不存在该文件：若已被 git 跟踪则暂存其删除，否则忽略
+      await git.remove({ fs, dir, filepath: f }).catch(() => {});
+    }
+  }
+}
+
+/**
  * 确保项目已初始化 Git，未初始化则自动执行 git init 并生成 .gitignore。
  * isomorphic-git 不支持 --allow-empty 提交，因此初始提交需要至少一个文件。
  * @param {string} projectPath
@@ -92,11 +112,7 @@ async function autoGitAdd(projectPath, files) {
   if (!isGitRepo(projectPath)) return;
   try {
     if (Array.isArray(files) && files.length > 0) {
-      await Promise.all(
-        files
-          .filter((f) => fs.existsSync(path.join(projectPath, f)))
-          .map((f) => git.add({ fs, dir: projectPath, filepath: f }))
-      );
+      await stageFiles(projectPath, files);
     } else {
       await addAll(projectPath);
     }
@@ -132,4 +148,4 @@ function ensureGitignore(projectPath) {
   }
 }
 
-export { isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd, addAll, getDefaultAuthor };
+export { isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd, addAll, stageFiles, getDefaultAuthor };
