@@ -1607,6 +1607,157 @@ function findNodeProjectDir(rootDir) {
   return null;
 }
 
+/** pnpm 构建脚本互斥配置项（不能同时存在 never/only 两类） */
+const PNPM_BUILT_DEPS_PACKAGE_JSON_KEYS = [
+  "neverBuiltDependencies",
+  "onlyBuiltDependencies",
+  "ignoredBuiltDependencies",
+];
+
+/** 继承环境变量中可能引入冲突的 pnpm 构建脚本配置 */
+const PNPM_BUILT_DEPS_ENV_KEYS = [
+  "NPM_CONFIG_NEVER_BUILT_DEPENDENCIES",
+  "npm_config_never_built_dependencies",
+  "NPM_CONFIG_ONLY_BUILT_DEPENDENCIES",
+  "npm_config_only_built_dependencies",
+  "NPM_CONFIG_IGNORED_BUILT_DEPENDENCIES",
+  "npm_config_ignored_built_dependencies",
+];
+
+/**
+ * 从 package.json 的 pnpm 字段移除互斥的构建脚本配置
+ * @param {string} projectDir
+ * @param {string} logId
+ */
+async function sanitizePackageJsonBuiltDepsConfig(projectDir, logId) {
+  const packageJsonPath = path.join(projectDir, "package.json");
+  if (!fs.existsSync(packageJsonPath)) {
+    return;
+  }
+
+  const raw = await fs.promises.readFile(packageJsonPath, "utf8");
+  let pkg;
+  try {
+    pkg = JSON.parse(raw);
+  } catch {
+    log(logId, "WARN", "Skip sanitizing package.json: invalid JSON", { projectDir });
+    return;
+  }
+
+  if (!pkg.pnpm || typeof pkg.pnpm !== "object") {
+    return;
+  }
+
+  const removedKeys = PNPM_BUILT_DEPS_PACKAGE_JSON_KEYS.filter((key) => key in pkg.pnpm);
+  if (removedKeys.length === 0) {
+    return;
+  }
+
+  for (const key of removedKeys) {
+    delete pkg.pnpm[key];
+  }
+  if (Object.keys(pkg.pnpm).length === 0) {
+    delete pkg.pnpm;
+  }
+
+  await fs.promises.writeFile(
+    packageJsonPath,
+    `${JSON.stringify(pkg, null, 2)}\n`,
+    "utf8"
+  );
+  log(logId, "INFO", "Removed conflicting pnpm built dependency settings from package.json", {
+    projectDir,
+    removedKeys,
+  });
+}
+
+/**
+ * 从 pnpm-workspace.yaml 移除互斥的构建脚本配置
+ * @param {string} projectDir
+ * @param {string} logId
+ */
+async function sanitizePnpmWorkspaceBuiltDepsConfig(projectDir, logId) {
+  const workspaceYamlPath = path.join(projectDir, "pnpm-workspace.yaml");
+  if (!fs.existsSync(workspaceYamlPath)) {
+    return;
+  }
+
+  const content = await fs.promises.readFile(workspaceYamlPath, "utf8");
+  const lines = content.split("\n");
+  const result = [];
+  let skipUntilIndent = -1;
+  let removedKeys = [];
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+    const matchedKey = PNPM_BUILT_DEPS_PACKAGE_JSON_KEYS.find((key) =>
+      new RegExp(`^${key}:\\s*(.*)$`).test(trimmed)
+    );
+
+    if (matchedKey) {
+      removedKeys.push(matchedKey);
+      const inlineValue = trimmed.slice(matchedKey.length + 1).trim();
+      if (!inlineValue || inlineValue === "|" || inlineValue === ">") {
+        skipUntilIndent = indent;
+      }
+      continue;
+    }
+
+    if (skipUntilIndent >= 0) {
+      if (trimmed === "" || indent > skipUntilIndent) {
+        continue;
+      }
+      skipUntilIndent = -1;
+    }
+
+    result.push(line);
+  }
+
+  if (removedKeys.length === 0) {
+    return;
+  }
+
+  await fs.promises.writeFile(workspaceYamlPath, result.join("\n"), "utf8");
+  log(logId, "INFO", "Removed conflicting pnpm built dependency settings from pnpm-workspace.yaml", {
+    projectDir,
+    removedKeys,
+  });
+}
+
+/**
+ * 从 .npmrc 移除互斥的构建脚本配置（保留 dangerously-allow-all-builds）
+ * @param {string} npmrcPath
+ * @returns {Promise<string>} 清理后的内容
+ */
+async function sanitizeNpmrcBuiltDepsConfig(npmrcPath) {
+  if (!fs.existsSync(npmrcPath)) {
+    return "";
+  }
+
+  const content = await fs.promises.readFile(npmrcPath, "utf8");
+  const filtered = content
+    .split("\n")
+    .filter((line) => !/^\s*(never-built-dependencies|only-built-dependencies|ignored-built-dependencies)\b/.test(line))
+    .join("\n");
+
+  if (filtered !== content) {
+    await fs.promises.writeFile(npmrcPath, filtered, "utf8");
+  }
+  return filtered;
+}
+
+/**
+ * 清理项目内与 dangerously-allow-all-builds 冲突的 pnpm 构建脚本配置
+ * @param {string} projectDir
+ * @param {string} logId
+ */
+async function sanitizePnpmBuiltDependenciesConfig(projectDir, logId) {
+  await sanitizePackageJsonBuiltDepsConfig(projectDir, logId);
+  await sanitizePnpmWorkspaceBuiltDepsConfig(projectDir, logId);
+  await sanitizeNpmrcBuiltDepsConfig(path.join(projectDir, ".npmrc"));
+}
+
 /**
  * 为项目安装准备 pnpm 配置，与 build 流程保持一致
  * @param {string} projectDir
@@ -1614,12 +1765,10 @@ function findNodeProjectDir(rootDir) {
  */
 async function ensurePnpmInstallConfig(projectDir, logId) {
   await createPnpmNpmrc(projectDir, logId);
+  await sanitizePnpmBuiltDependenciesConfig(projectDir, logId);
 
   const npmrcPath = path.join(projectDir, ".npmrc");
-  let content = "";
-  if (fs.existsSync(npmrcPath)) {
-    content = await fs.promises.readFile(npmrcPath, "utf8");
-  }
+  let content = await sanitizeNpmrcBuiltDepsConfig(npmrcPath);
 
   const additions = [];
   if (!/dangerously-allow-all-builds\s*=/.test(content)) {
@@ -1656,6 +1805,9 @@ function buildInstallEnv() {
   delete env.CI;
   delete env.NPM_CONFIG_PRODUCTION;
   delete env.npm_config_production;
+  for (const key of PNPM_BUILT_DEPS_ENV_KEYS) {
+    delete env[key];
+  }
   env.NODE_ENV = "development";
   env.NPM_CONFIG_PRODUCTION = "false";
   return env;
@@ -1676,38 +1828,14 @@ async function runPnpmInstall(projectDir, logId) {
     "--prefer-offline",
     "--config.production=false",
     "--config.confirmModulesPurge=false",
+    "--config.dangerouslyAllowAllBuilds=true",
   ];
 
-  let result = await runSpawn(
+  return runSpawn(
     "pnpm",
     pnpmInstallArgs,
     { cwd: projectDir, env: spawnEnv }
   );
-
-  const output = `${result.stdout}\n${result.stderr}`;
-  if (output.includes("Ignored build scripts")) {
-    log(logId, "WARN", "Detected ignored pnpm build scripts, approving and reinstalling", {
-      projectDir,
-    });
-
-    const approveResult = await runSpawn(
-      "pnpm",
-      ["approve-builds", "--all"],
-      { cwd: projectDir, env: spawnEnv }
-    );
-    log(logId, "INFO", "pnpm approve-builds completed", {
-      exitCode: approveResult.exitCode,
-      stderrLength: approveResult.stderr.length,
-    });
-
-    result = await runSpawn(
-      "pnpm",
-      pnpmInstallArgs,
-      { cwd: projectDir, env: spawnEnv }
-    );
-  }
-
-  return result;
 }
 
 /**
