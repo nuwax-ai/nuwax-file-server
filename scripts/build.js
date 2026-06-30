@@ -166,6 +166,7 @@ async function build() {
     if (path.basename(file) === "cli.js") continue;
     // vendored 插件保持原样，便于调试且避免 minify 引入风险
     if (file.includes(`${path.sep}assets${path.sep}opencode-hooks-plugin${path.sep}`)) continue;
+    if (file.includes(`${path.sep}assets${path.sep}opencode-platform-env-plugin${path.sep}`)) continue;
 
     const code = fs.readFileSync(file, "utf8");
     const result = await esbuild.transform(code, {
