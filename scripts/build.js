@@ -135,7 +135,7 @@ async function build() {
   const srcRoot = path.join(projectRoot, "src");
 
   // 复制子目录（与 src 结构同步：appConfig、routes、scheduler、service、utils）
-  const subdirs = ["appConfig", "routes", "scheduler", "service", "utils"];
+  const subdirs = ["appConfig", "routes", "scheduler", "service", "utils", "assets"];
   for (const subdir of subdirs) {
     const srcPath = path.join(srcRoot, subdir);
     const destPath = path.join(distRoot, subdir);
@@ -164,6 +164,8 @@ async function build() {
   for (const file of distJsFiles) {
     // 跳过已压缩的 cli.js
     if (path.basename(file) === "cli.js") continue;
+    // vendored 插件保持原样，便于调试且避免 minify 引入风险
+    if (file.includes(`${path.sep}assets${path.sep}opencode-hooks-plugin${path.sep}`)) continue;
 
     const code = fs.readFileSync(file, "utf8");
     const result = await esbuild.transform(code, {
