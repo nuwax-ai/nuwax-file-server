@@ -11,6 +11,12 @@ const OPENCODE_HOOKS_PLUGIN_ASSETS = path.join(
   "../../assets/opencode-hooks-plugin"
 );
 
+/** OpenCode 平台变量注入插件（直改 tool.execute.before，与用户 PreToolUse hook 解耦） */
+const OPENCODE_PLATFORM_ENV_PLUGIN_ASSETS = path.join(
+  __dirname,
+  "../../assets/opencode-platform-env-plugin"
+);
+
 /** Codex 官方文档支持的生命周期事件 */
 const CODEX_HOOK_EVENTS = new Set([
   "SessionStart",
@@ -27,6 +33,8 @@ const CODEX_HOOK_EVENTS = new Set([
 
 const OPENCODE_PLUGIN_ENTRY = "opencode-hooks-plugin.js";
 const OPENCODE_PLUGIN_DIR = "opencode-hooks-plugin";
+const OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY = "opencode-platform-env-plugin.js";
+const PLATFORM_ENV_SCRIPT_PATH = "hooks/platform-env.sh";
 
 /**
  * @param {unknown} value
@@ -406,6 +414,44 @@ async function installOpencodeHooksPlugin(opencodePluginsDir, logId) {
 }
 
 /**
+ * @param {Array<{path: string, content: string}>|undefined} hookScripts
+ */
+function hasPlatformEnvScript(hookScripts) {
+  if (!Array.isArray(hookScripts)) {
+    return false;
+  }
+  return hookScripts.some(
+    (script) => script && script.path === PLATFORM_ENV_SCRIPT_PATH
+  );
+}
+
+/**
+ * 安装 OpenCode platform-env 插件到 `.opencode/plugins/`
+ * @param {string} opencodePluginsDir
+ * @param {string} logId
+ */
+async function installOpencodePlatformEnvPlugin(opencodePluginsDir, logId) {
+  const sourceFile = path.join(OPENCODE_PLATFORM_ENV_PLUGIN_ASSETS, "platform-env-plugin.js");
+  if (!fs.existsSync(sourceFile)) {
+    log(logId, "WARN", "opencode-platform-env-plugin assets missing, skipping install", {
+      sourceFile,
+    });
+    return false;
+  }
+
+  await fs.promises.mkdir(opencodePluginsDir, { recursive: true });
+  await fs.promises.copyFile(
+    sourceFile,
+    path.join(opencodePluginsDir, OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY)
+  );
+
+  log(logId, "INFO", "Installed opencode-platform-env-plugin into .opencode/plugins", {
+    entryFile: OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY,
+  });
+  return true;
+}
+
+/**
  * @param {string} settingsPath
  * @returns {Promise<{ settings: Record<string, unknown>, corrupt: boolean }>}
  */
@@ -465,6 +511,7 @@ async function clearHookArtifacts(userWorkspaceRoot) {
     path.join(userWorkspaceRoot, ".codex", "hooks"),
     path.join(userWorkspaceRoot, ".opencode", "plugins", OPENCODE_PLUGIN_ENTRY),
     path.join(userWorkspaceRoot, ".opencode", "plugins", OPENCODE_PLUGIN_DIR),
+    path.join(userWorkspaceRoot, ".opencode", "plugins", OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY),
     path.join(userWorkspaceRoot, ".claude", "hooks"),
   ];
 
@@ -500,7 +547,7 @@ async function clearAgentHookConfigs(userWorkspaceRoot) {
  * @param {Record<string, unknown[]>} hooksMap
  * @param {string} logId
  */
-async function stageRuntimeHookArtifacts(userWorkspaceRoot, hooksMap, logId) {
+async function stageRuntimeHookArtifacts(userWorkspaceRoot, hooksMap, logId, installPlatformEnvPlugin = false) {
   const stagingRoot = path.join(
     userWorkspaceRoot,
     ".tmp",
@@ -514,19 +561,23 @@ async function stageRuntimeHookArtifacts(userWorkspaceRoot, hooksMap, logId) {
 
   const codexHooks = await transformHooksForCodex(hooksMap, codexHooksDir, logId);
   const pluginInstalled = await installOpencodeHooksPlugin(opencodePluginsStaging, logId);
+  const platformEnvPluginInstalled = installPlatformEnvPlugin
+    ? await installOpencodePlatformEnvPlugin(opencodePluginsStaging, logId)
+    : false;
 
   return {
     stagingRoot,
     codexStagingRoot,
     codexHooks,
     pluginInstalled,
+    platformEnvPluginInstalled,
   };
 }
 
 /**
  * 将 staging 中的 Codex/OpenCode 产物应用到工作区
  * @param {string} userWorkspaceRoot
- * @param {{ stagingRoot: string, codexStagingRoot: string, codexHooks: Record<string, unknown[]>|null, pluginInstalled: boolean }} staged
+ * @param {{ stagingRoot: string, codexStagingRoot: string, codexHooks: Record<string, unknown[]>|null, pluginInstalled: boolean, platformEnvPluginInstalled?: boolean }} staged
  * @param {string} logId
  */
 async function applyStagedRuntimeHookArtifacts(userWorkspaceRoot, staged, logId) {
@@ -567,6 +618,22 @@ async function applyStagedRuntimeHookArtifacts(userWorkspaceRoot, staged, logId)
         recursive: true,
         force: true,
       });
+    }
+  }
+
+  if (staged.platformEnvPluginInstalled) {
+    await fs.promises.mkdir(opencodePluginsTarget, { recursive: true });
+    const stagedPlatformEnvPlugin = path.join(
+      staged.stagingRoot,
+      "opencode",
+      "plugins",
+      OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY
+    );
+    if (fs.existsSync(stagedPlatformEnvPlugin)) {
+      await fs.promises.copyFile(
+        stagedPlatformEnvPlugin,
+        path.join(opencodePluginsTarget, OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY)
+      );
     }
   }
 }
@@ -632,6 +699,7 @@ async function writeAgentHookConfigs(
 
   const shouldUpdateHooks = hooksStatus.attempted && !hooksStatus.error;
   const shouldUpdateHookScripts = hasScripts;
+  const installPlatformEnvPlugin = hasPlatformEnvScript(hookScripts);
 
   if (!shouldUpdateMcp && !shouldUpdateHooks && !shouldUpdatePermissions && !shouldUpdateHookScripts) {
     return;
@@ -645,7 +713,12 @@ async function writeAgentHookConfigs(
     await fs.promises.mkdir(claudeDir, { recursive: true });
 
     if (shouldUpdateHooks && hooksStatus.hooksMap) {
-      stagedRuntime = await stageRuntimeHookArtifacts(userWorkspaceRoot, hooksStatus.hooksMap, logId);
+      stagedRuntime = await stageRuntimeHookArtifacts(
+        userWorkspaceRoot,
+        hooksStatus.hooksMap,
+        logId,
+        installPlatformEnvPlugin
+      );
     }
 
     if (shouldUpdateMcp) {
@@ -702,6 +775,11 @@ async function writeAgentHookConfigs(
         await fs.promises.rm(claudeHooksDir, { recursive: true, force: true });
       }
       await writeHookScripts(claudeDir, hookScripts, logId);
+
+      const opencodePluginsDir = path.join(userWorkspaceRoot, ".opencode", "plugins");
+      if (installPlatformEnvPlugin) {
+        await installOpencodePlatformEnvPlugin(opencodePluginsDir, logId);
+      }
     }
   } catch (e) {
     log(logId, "ERROR", "Failed to write agent hook configs, keeping previous files when possible", {
@@ -728,6 +806,8 @@ export {
   writeFileAtomic,
   writeJsonFileAtomic,
   installOpencodeHooksPlugin,
+  installOpencodePlatformEnvPlugin,
+  hasPlatformEnvScript,
   clearAgentHookConfigs,
   clearHookArtifacts,
   writeAgentHookConfigs,

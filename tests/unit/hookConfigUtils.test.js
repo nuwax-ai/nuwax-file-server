@@ -321,6 +321,50 @@ describe("hookConfigUtils", () => {
     expect(fs.readFileSync(path.join(tmpDir, ".claude", "hooks", "new.sh"), "utf-8")).toContain("echo new");
   });
 
+  test("writeAgentHookConfigs writes platform PreToolUse env inject hooks", async () => {
+    const hooksConfig = JSON.stringify({
+      PreToolUse: [
+        {
+          matcher: "Bash",
+          hooks: [
+            {
+              type: "command",
+              command: "bash .claude/hooks/inject-platform-env.sh",
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+    });
+    const hookScripts = [
+      {
+        path: "hooks/platform-env.sh",
+        content: "#!/usr/bin/env bash\nexport MY_API_KEY='secret'\n",
+      },
+      {
+        path: "hooks/inject-platform-env.sh",
+        content: "#!/usr/bin/env bash\necho inject\n",
+      },
+    ];
+
+    await writeAgentHookConfigs(tmpDir, { hooksConfig, hookScripts }, "test");
+
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".claude", "settings.json"), "utf-8")
+    );
+    expect(settings.hooks.PreToolUse[0].matcher).toBe("Bash");
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("inject-platform-env");
+
+    const envScript = fs.readFileSync(
+      path.join(tmpDir, ".claude", "hooks", "platform-env.sh"),
+      "utf-8"
+    );
+    expect(envScript).toContain("export MY_API_KEY='secret'");
+
+    expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin.js"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-platform-env-plugin.js"))).toBe(true);
+  });
+
   test("installOpencodeHooksPlugin writes plugin entry re-export", async () => {
     const pluginsDir = path.join(tmpDir, ".opencode", "plugins");
     await installOpencodeHooksPlugin(pluginsDir, "test");
