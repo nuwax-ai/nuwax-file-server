@@ -321,11 +321,21 @@ describe("hookConfigUtils", () => {
     expect(fs.readFileSync(path.join(tmpDir, ".claude", "hooks", "new.sh"), "utf-8")).toContain("echo new");
   });
 
-  test("writeAgentHookConfigs writes platform PreToolUse env inject hooks", async () => {
+  test("writeAgentHookConfigs writes platform env hooks and OpenCode plugin", async () => {
     const hooksConfig = JSON.stringify({
-      PreToolUse: [
+      SessionStart: [
         {
-          matcher: "Bash",
+          hooks: [
+            {
+              type: "command",
+              command: "bash .claude/hooks/inject-platform-env.sh",
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+      UserPromptSubmit: [
+        {
           hooks: [
             {
               type: "command",
@@ -352,8 +362,9 @@ describe("hookConfigUtils", () => {
     const settings = JSON.parse(
       fs.readFileSync(path.join(tmpDir, ".claude", "settings.json"), "utf-8")
     );
-    expect(settings.hooks.PreToolUse[0].matcher).toBe("Bash");
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("inject-platform-env");
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain("inject-platform-env");
+    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toContain("inject-platform-env");
+    expect(settings.hooks.PreToolUse).toBeUndefined();
 
     const envScript = fs.readFileSync(
       path.join(tmpDir, ".claude", "hooks", "platform-env.sh"),
