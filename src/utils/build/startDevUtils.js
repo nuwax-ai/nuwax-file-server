@@ -11,6 +11,8 @@ import {
   startDev_NonBlocking,
 } from "./processManager.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
+import { createPnpmNpmrc } from "../common/npmrcUtils.js";
+import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
 import {
   extractIsolationContext,
   resolveProjectPath,
@@ -18,13 +20,13 @@ import {
 
 // 启动开发服务器
 async function startDevServer(req, projectId) {
-  
-  // if (isProjectStarting(projectId)) {
-  //   throw new BusinessError("该项目正在启动中，请稍后重试", {
-  //     projectId,
-  //     code: ERROR_CODES.PROJECT_STARTING,
-  //   });
-  // }
+
+  if (isProjectStarting(projectId)) {
+    throw new BusinessError("该项目正在启动中，请稍后重试", {
+      projectId,
+      code: ERROR_CODES.PROJECT_STARTING,
+    });
+  }
 
   addStartingProject(projectId);
   try {
@@ -106,6 +108,48 @@ async function startDevServer(req, projectId) {
       process.env.ROLLUP_WASM = process.env.ROLLUP_WASM || "1";
       process.env.ROLLUP_DISABLE_NATIVE = process.env.ROLLUP_DISABLE_NATIVE || "1";
     } catch (_) {}
+
+    // 检测 symlink 断链并从缓存恢复（Pod 重建后 /local-cache 可能丢失）
+    try {
+      const nodeModulesPath = path.join(projectPath, "node_modules");
+      let needCopy = false;
+
+      try {
+        const lstat = fs.lstatSync(nodeModulesPath);
+        if (lstat.isSymbolicLink()) {
+          if (!fs.existsSync(nodeModulesPath)) {
+            log(projectId, "WARN", "node_modules symlink is broken, will restore from cache", {
+              projectId,
+              requestId: req.requestId,
+            });
+            needCopy = true;
+          }
+        }
+      } catch (e) {
+        log(projectId, "INFO", "node_modules not found, will try to copy from cache", {
+          projectId,
+          requestId: req.requestId,
+        });
+        needCopy = true;
+      }
+
+      if (needCopy) {
+        log(projectId, "INFO", "Attempting to restore node_modules from template cache", {
+          projectId,
+          requestId: req.requestId,
+        });
+        await copyNodeModulesFromCache(projectPath, projectId);
+      }
+    } catch (e) {
+      log(projectId, "WARN", "Failed to check/restore node_modules, will proceed anyway", {
+        projectId,
+        requestId: req.requestId,
+        error: e && e.message,
+      });
+    }
+
+    // 确保 .npmrc 存在且使用 copy 模式（避免 pnpm 默认 hardlink 在 JuiceFS 上失败）
+    await createPnpmNpmrc(projectPath, projectId);
 
     // 如果已在运行，则直接返回信息
     // if (getRunningProcess(projectId)) {

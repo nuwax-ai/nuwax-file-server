@@ -12,6 +12,7 @@ import ERROR_CODES from "../error/errorCodes.js";
 import { stopDevServer } from "./stopDevUtils.js";
 import { removeNodeModules } from "../buildDependency/dependencyManager.js";
 import { createPnpmNpmrc } from "../common/npmrcUtils.js";
+import { copyNodeModulesFromCache } from "../common/templateCacheUtils.js";
 import {
   extractIsolationContext,
   resolveProjectPath,
@@ -61,13 +62,13 @@ async function restartDevServer(req, projectId) {
     throw new BusinessError("Project missing dev script", { projectId });
   }
 
-  // 如果项目正在启动中，等待完成
-  // if (isProjectStarting(projectId)) {
-  //   throw new BusinessError("Project is starting, please try again later", {
-  //     projectId,
-  //     code: ERROR_CODES.PROJECT_STARTING,
-  //   });
-  // }
+  // 如果项目正在启动中，拒绝并发请求
+  if (isProjectStarting(projectId)) {
+    throw new BusinessError("该项目正在重启中，请稍后重试", {
+      projectId,
+      code: ERROR_CODES.PROJECT_STARTING,
+    });
+  }
 
   addStartingProject(projectId);
 
@@ -80,21 +81,24 @@ async function restartDevServer(req, projectId) {
       waitForStop: true, // 等待进程完全停止
     });
 
-    // 2. 删除node_modules
-    log(projectId, "INFO", "Start deleting node_modules and lock file", {
+    // 删除 node_modules + 从缓存恢复
+    // - symlink 模式: 只删 symlink (快), 保留 PVC 上的目标作为缓存
+    // - 普通目录: rm -rf (JuiceFS 上较慢, 但必须做)
+    log(projectId, "INFO", "Remove node_modules and restore from cache", {
       projectId,
       requestId: req.requestId,
     });
     await removeNodeModules(projectPath, projectId);
+    await copyNodeModulesFromCache(projectPath, projectId);
 
-    // 3. 创建.npmrc文件
-    log(projectId, "INFO", "Create .npmrc file", {
+    // 确保 .npmrc 存在且使用 copy 模式（避免 pnpm 默认 hardlink 在 JuiceFS 上失败）
+    log(projectId, "INFO", "Ensure .npmrc with copy mode", {
       projectId,
       requestId: req.requestId,
     });
     await createPnpmNpmrc(projectPath, projectId);
 
-    // 4. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行）
+    // 3. 启动dev服务器（依赖安装会在 startDev_NonBlocking 中执行，增量 pnpm install）
     log(projectId, "INFO", "Start starting dev server", {
       projectId,
       requestId: req.requestId,

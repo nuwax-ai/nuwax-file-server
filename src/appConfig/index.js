@@ -47,6 +47,11 @@ loadEnvFile(env);
 const config = {
   NODE_ENV: env,
   PORT: parseInt(process.env.PORT),
+
+  // 部署模式: "docker-compose" (默认) 或 "k8s"
+  // docker-compose: 使用 symlink + 模板缓存策略（本地磁盘 node_modules）
+  // k8s: 不使用 symlink，node_modules 直接放 workspace（JuiceFS 跨节点共享）
+  DEPLOYMENT_MODE: process.env.DEPLOYMENT_MODE || "docker-compose",
   INIT_PROJECT_NAME_REACT:
     process.env.INIT_PROJECT_NAME_REACT || "react-vite-template",
   INIT_PROJECT_NAME_VUE3:

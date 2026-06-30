@@ -44,6 +44,11 @@ function shouldInstallDeps(projectPath) {
 
 /**
  * 检查并删除 node_modules 文件夹和 lock 文件
+ *
+ * 支持 symlink 优化：如果 node_modules 是 symlink（指向本地磁盘），
+ * 则先 unlink symlink（1 次 JuiceFS 元数据操作），再 rm -rf 本地目标（本地磁盘，快）。
+ * 避免在 JuiceFS FUSE 上遍历删除 3000+ 文件（10+ 秒）。
+ *
  * @param {string} projectPath - 项目路径
  * @param {string} projectId - 项目ID（可选，用于日志）
  * @returns {Promise<void>}
@@ -52,24 +57,64 @@ async function removeNodeModules(projectPath, projectId = null) {
   const nodeModulesPath = path.join(projectPath, "node_modules");
   const logId = projectId || path.basename(projectPath);
 
-  if (fs.existsSync(nodeModulesPath)) {
-    log(logId, "INFO", "Found node_modules folder, deleting", {
-      projectPath,
-      nodeModulesPath,
-    });
+  // 检查 node_modules 是否存在（包括 symlink）
+  let exists = false;
+  let isSymlink = false;
+  let symlinkTarget = null;
 
-    try {
-      await fs.promises.rm(nodeModulesPath, { recursive: true, force: true });
-      log(logId, "INFO", "node_modules folder deleted successfully", {
+  try {
+    const lstat = await fs.promises.lstat(nodeModulesPath);
+    exists = true;
+    isSymlink = lstat.isSymbolicLink();
+    if (isSymlink) {
+      symlinkTarget = await fs.promises.readlink(nodeModulesPath);
+    }
+  } catch (_) {
+    // 不存在，跳过
+  }
+
+  if (exists) {
+    if (isSymlink) {
+      // symlink 策略：只删除 symlink（快），保留本地目标作为缓存
+      // 下次 copyNodeModulesFromCache 会检测到目标已存在，直接复用
+      log(logId, "INFO", "Found node_modules symlink, removing symlink only (preserving target as cache)", {
+        projectPath,
+        symlink: nodeModulesPath,
+        target: symlinkTarget,
+      });
+
+      try {
+        // 删除 symlink（1 次 JuiceFS 元数据操作，< 5ms）
+        await fs.promises.unlink(nodeModulesPath);
+        log(logId, "INFO", "Symlink removed, target preserved for cache reuse", {
+          nodeModulesPath,
+          target: symlinkTarget,
+        });
+      } catch (error) {
+        log(logId, "WARN", `Failed to remove node_modules symlink: ${error.message}`, {
+          error: error.message,
+        });
+      }
+    } else {
+      // 普通目录：直接删除（JuiceFS 上较慢，但必须这样做）
+      log(logId, "INFO", "Found node_modules folder, deleting", {
         projectPath,
         nodeModulesPath,
       });
-    } catch (error) {
-      log(logId, "WARN", `Failed to delete node_modules folder: ${error.message}`, {
-        projectPath,
-        nodeModulesPath,
-        error: error.message,
-      });
+
+      try {
+        await fs.promises.rm(nodeModulesPath, { recursive: true, force: true });
+        log(logId, "INFO", "node_modules folder deleted successfully", {
+          projectPath,
+          nodeModulesPath,
+        });
+      } catch (error) {
+        log(logId, "WARN", `Failed to delete node_modules folder: ${error.message}`, {
+          projectPath,
+          nodeModulesPath,
+          error: error.message,
+        });
+      }
     }
   }
 
@@ -103,6 +148,80 @@ async function removeNodeModules(projectPath, projectId = null) {
 }
 
 /**
+ * 预检：检测会导致 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY 的条件
+ * 如果检测到，主动清理 node_modules（我们有 TTY 控制权，pnpm 没有）
+ *
+ * 触发场景：
+ * - Pod 重启后，emptyDir 销毁，但 JuiceFS 上的 node_modules 引用旧的 store 路径
+ * - pnpm store 从 JuiceFS 迁移到本地磁盘后，旧项目的 .modules.yaml 记录旧路径
+ * - pnpm 检测到 store 不匹配，想清理但非 TTY 模式下直接中止
+ *
+ * @param {string} projectPath - 项目路径
+ * @param {string} projectId - 项目ID（用于日志）
+ * @returns {Promise<void>}
+ */
+async function preflightCleanNodeModules(projectPath, projectId) {
+  const nodeModulesPath = path.join(projectPath, "node_modules");
+  const logId = projectId || path.basename(projectPath);
+
+  // 检查 node_modules 是否存在
+  if (!fs.existsSync(nodeModulesPath)) {
+    return; // 不存在，无需清理
+  }
+
+  // 检查 1: 断链 symlink（Pod 迁移后常见）
+  try {
+    const lstat = await fs.promises.lstat(nodeModulesPath);
+    if (lstat.isSymbolicLink() && !fs.existsSync(nodeModulesPath)) {
+      log(logId, "WARN", "Broken node_modules symlink detected, removing before install", {
+        projectPath,
+        nodeModulesPath,
+      });
+      await fs.promises.unlink(nodeModulesPath);
+      return;
+    }
+  } catch (e) {
+    log(logId, "WARN", `Failed to check node_modules symlink: ${e.message}`);
+  }
+
+  // 检查 2: store 路径不匹配（主要触发原因）
+  // pnpm 在 node_modules/.modules.yaml 中记录 store 路径
+  // 如果当前 PNPM_STORE_DIR 与记录的不一致，pnpm 会尝试清理
+  try {
+    const modulesYamlPath = path.join(nodeModulesPath, ".modules.yaml");
+    if (fs.existsSync(modulesYamlPath)) {
+      const content = await fs.promises.readFile(modulesYamlPath, "utf8");
+      const storeMatch = content.match(/storeDir:\s*(.+)/);
+
+      if (storeMatch) {
+        const recordedStore = storeMatch[1].trim();
+        const currentStore = process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "";
+
+        if (currentStore && recordedStore !== currentStore) {
+          log(logId, "WARN",
+            `Store path mismatch detected (node_modules from different store), ` +
+            "removing .modules.yaml to let pnpm rewrite it (preserving node_modules)", {
+              projectPath,
+              recordedStoreDir: recordedStore,
+              currentStoreDir: currentStore,
+            });
+          // 只删除 .modules.yaml, 不删除 node_modules
+          // pnpm install 会重新生成 .modules.yaml, 已有的包会被复用
+          try {
+            await fs.promises.unlink(modulesYamlPath);
+            log(logId, "INFO", "Removed stale .modules.yaml, node_modules preserved", {
+              modulesYamlPath,
+            });
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (e) {
+    log(logId, "WARN", `Pre-flight store check failed: ${e.message}`);
+  }
+}
+
+/**
  * 安装项目依赖
  * @param {Object} req 请求对象
  * @param {string} projectId 项目ID
@@ -113,23 +232,37 @@ async function removeNodeModules(projectPath, projectId = null) {
  * @param {Function} options.safeWrite 安全写入函数（可选）
  * @returns {Promise<string>} 安装输出
  */
-function installDependencies(req, projectId, projectPath, options = {}) {
+async function installDependencies(req, projectId, projectPath, options = {}) {
+  // 预检清理：检测并修复会导致 TTY abort 的条件
+  await preflightCleanNodeModules(projectPath, projectId);
+
   const { outStream, tempOutStream, safeWrite } = options;
+
+  // 检测 node_modules 是否已存在（可能从模板缓存复制而来）
+  // 如果已存在，pnpm install 只做增量验证和安装，速度更快
+  const nodeModulesPath = path.join(projectPath, "node_modules");
+  const isIncremental = fs.existsSync(nodeModulesPath);
+
+  // pnpm store 路径：双重保险，除了 .npmrc 中的 store-dir，命令行也传递 --store-dir
+  // pnpm 不识别 PNPM_STORE_DIR 环境变量（它用 npm 约定 npm_config_store_dir）
+  const storeDir =
+    process.env.npm_config_store_dir || process.env.PNPM_STORE_DIR || "";
+  const storeDirFlag = storeDir ? ` --store-dir=${storeDir}` : "";
 
   // 如果提供了日志流，使用 spawn 获取实时输出
   if (outStream && tempOutStream && safeWrite) {
     return new Promise((resolve, reject) => {
       // 优化 pnpm install 命令，提升在 Docker/容器环境中的性能
       // --prefer-offline: 优先使用本地缓存，减少网络请求
-      // --reporter=silent: 静默模式，不输出进度信息，大幅提升 pipe 性能
-      // 注意：--loglevel=error 只显示错误，避免频繁的 I/O 操作
-      const command = `cd ${projectPath} && pnpm install --prefer-offline`;
+      // --store-dir: 显式指定 store 路径（双重保险，.npmrc 也有配置）
+      const command = `cd ${projectPath} && pnpm install --prefer-offline${storeDirFlag}`;
 
       // 记录开始时间
       const startTime = Date.now();
-      
+
       // 写入开始安装的日志（safeWrite 会自动添加时间戳）
-      const startMessage = `Start installing dependencies\nCommand: pnpm install --prefer-offline\n`;
+      const installMode = isIncremental ? "incremental (node_modules from cache)" : "full install";
+      const startMessage = `Start installing dependencies (${installMode})\nCommand: pnpm install --prefer-offline${storeDirFlag}\n`;
       safeWrite(outStream, startMessage, "Main log");
       safeWrite(tempOutStream, startMessage, "Temp log");
       
@@ -232,11 +365,12 @@ function installDependencies(req, projectId, projectPath, options = {}) {
   // 如果没有提供日志流，使用原来的 exec 方式（保持向后兼容）
   return new Promise((resolve, reject) => {
     // 优化 pnpm install 命令，提升性能
-    const command = `cd ${projectPath} && pnpm install --prefer-offline --reporter=silent --loglevel=error`;
+    const command = `cd ${projectPath} && pnpm install --prefer-offline${storeDirFlag} --reporter=silent --loglevel=error`;
 
     log(projectId, "INFO", "Start executing dependency installation command", {
       command,
       projectPath,
+      installMode: isIncremental ? "incremental" : "full",
     });
 
     exec(
@@ -276,4 +410,4 @@ function installDependencies(req, projectId, projectPath, options = {}) {
   });
 }
 
-export { getFileMtime, shouldInstallDeps, installDependencies, removeNodeModules };
+export { getFileMtime, shouldInstallDeps, installDependencies, removeNodeModules, preflightCleanNodeModules };

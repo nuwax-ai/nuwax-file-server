@@ -20,6 +20,7 @@ import {
   copyDirectoryFiltered,
 } from "../utils/project/backupUtils.js";
 import { createPnpmNpmrc } from "../utils/common/npmrcUtils.js";
+import { copyNodeModulesFromCache } from "../utils/common/templateCacheUtils.js";
 import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 import {
   ensurePrimaryAgentDirs,
@@ -118,7 +119,16 @@ async function createProject(projectId, templateType = "react", isolationContext
       }
     }
 
-    // 为项目创建 .npmrc 配置文件
+    // 尝试从模板缓存复制 node_modules（加速项目初始化）
+    log(projectId, "DEBUG", "Try copying node_modules from template cache", { projectPath });
+    const cacheResult = await copyNodeModulesFromCache(projectPath, projectId);
+    if (cacheResult.cached) {
+      log(projectId, "INFO", `node_modules copied from cache: ${cacheResult.templateType}`, {
+        elapsed: cacheResult.elapsed,
+      });
+    }
+
+    // 为项目创建 .npmrc 配置文件（根据文件系统自动选择 import-method）
     log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectPath });
     await createPnpmNpmrc(projectPath, projectId);
 
@@ -190,21 +200,40 @@ async function removeTopLevelFolder(projectPath) {
   // 如果过滤后只有一个目录，则认为是顶层文件夹
   if (filteredEntries.length === 1 && filteredEntries[0].isDirectory()) {
     const topLevelDir = path.join(projectPath, filteredEntries[0].name);
-    const tempDir = path.join(projectPath, "..", `temp_${Date.now()}`);
+    // tempDir 放在 projectPath 同级目录下（而非 ".."），避免跨挂载点 EXDEV
+    const tempDir = path.join(projectPath, `temp_${Date.now()}`);
 
     // 将顶层文件夹内容移动到临时目录
-    await fs.promises.rename(topLevelDir, tempDir);
+    try {
+      await fs.promises.rename(topLevelDir, tempDir);
+    } catch (renameErr) {
+      if (renameErr.code === "EXDEV") {
+        await fs.promises.cp(topLevelDir, tempDir, { recursive: true });
+        await fs.promises.rm(topLevelDir, { recursive: true, force: true });
+      } else {
+        throw renameErr;
+      }
+    }
 
     // 将临时目录内容移回项目目录
     const tempEntries = await fs.promises.readdir(tempDir);
     for (const entry of tempEntries) {
       const srcPath = path.join(tempDir, entry);
       const destPath = path.join(projectPath, entry);
-      await fs.promises.rename(srcPath, destPath);
+      try {
+        await fs.promises.rename(srcPath, destPath);
+      } catch (renameErr) {
+        if (renameErr.code === "EXDEV") {
+          await fs.promises.cp(srcPath, destPath, { recursive: true });
+          await fs.promises.rm(srcPath, { recursive: true, force: true });
+        } else {
+          throw renameErr;
+        }
+      }
     }
 
     // 删除临时目录
-    await fs.promises.rmdir(tempDir);
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
   }
 }
 
@@ -374,6 +403,10 @@ async function uploadProject(
     log(projectId, "DEBUG", "Check and remove node_modules folder", { projectId });
     await removeNodeModules(projectPath);
 
+    // 尝试从模板缓存复制 node_modules（加速项目初始化）
+    log(projectId, "DEBUG", "Try copying node_modules from template cache", { projectId });
+    await copyNodeModulesFromCache(projectPath, projectId);
+
     // 为项目创建 .npmrc 配置文件
     log(projectId, "DEBUG", "Start creating .npmrc configuration file", { projectId });
     await createPnpmNpmrc(projectPath, projectId);
@@ -503,7 +536,17 @@ async function handleFileUpload(projectId, codeVersion, file) {
   );
 
   try {
-    fs.renameSync(tempFilePath, projectFilePath);
+    try {
+      fs.renameSync(tempFilePath, projectFilePath);
+    } catch (renameErr) {
+      if (renameErr.code === "EXDEV") {
+        // 跨设备 rename 降级为 copy + delete（multer temp 和 JuiceFS 可能在不同挂载点）
+        fs.copyFileSync(tempFilePath, projectFilePath);
+        fs.unlinkSync(tempFilePath);
+      } else {
+        throw renameErr;
+      }
+    }
     log(projectId, "INFO", "File saved successfully", {
       projectId,
       codeVersion,
