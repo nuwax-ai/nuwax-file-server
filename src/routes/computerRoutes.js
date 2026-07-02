@@ -13,6 +13,7 @@ import {
   uploadFiles,
   downloadAllFiles,
   getLatestLogs,
+  importProject,
 } from "../utils/computer/computerFileUtils.js";
 
 const computerRouter = express.Router();
@@ -295,6 +296,30 @@ const routes = [
           await fs.promises.unlink(file.path);
         }
       }
+    }),
+  },
+  {
+    path: "/import-project",
+    method: "post",
+    middleware: upload.single("file"),
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, customTargetDir } = req.body || {};
+      const file = req.file;
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Import project request", {
+        userId,
+        cId,
+        fileName: file?.originalname,
+        fileSize: file?.size,
+      });
+
+      if (!file) {
+        throw new ValidationError("file is required", { field: "file" });
+      }
+
+      const result = await importProject(userId, cId, file, customTargetDir);
+      res.status(200).json(result);
     }),
   },
   {

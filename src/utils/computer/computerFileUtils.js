@@ -3,7 +3,20 @@ import path from "path";
 import archiver from "archiver";
 import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
-import { ValidationError, SystemError } from "../error/errorHandler.js";
+import { ValidationError, SystemError, FileError } from "../error/errorHandler.js";
+import { extractZip } from "../common/zipUtils.js";
+import { moveDirectory, movePath } from "../common/fileSystemUtils.js";
+
+/** 导入项目时保留的目录/文件 */
+const IMPORT_PROJECT_PRESERVED_ENTRIES = new Set([
+  ".git",
+  ".agents",
+  ".claude",
+  ".codex",
+  ".opencode",
+  ".tmp",
+  ".logs",
+]);
 
 const DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const DOWNLOAD_MAX_FILE_SIZE_BYTES =
@@ -1106,5 +1119,317 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
   };
 }
 
-export { getFileList, updateFiles, uploadFile, uploadFiles, downloadAllFiles, getLatestLogs };
+/**
+ * 若解压目录仅含一个非隐藏顶层目录，则将其内容上移一层
+ */
+async function removeTopLevelDir(dirPath, logId) {
+  try {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    const filtered = entries.filter(
+      (entry) => !entry.name.startsWith(".") && entry.name !== "node_modules"
+    );
 
+    if (filtered.length !== 1 || !filtered[0].isDirectory()) {
+      return;
+    }
+
+    const topDir = path.join(dirPath, filtered[0].name);
+    const tmpDir = path.join(
+      dirPath,
+      `..tmp_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+    );
+
+    try {
+      await fs.promises.rename(topDir, tmpDir);
+    } catch (renameErr) {
+      if (renameErr.code === "EXDEV") {
+        await fs.promises.cp(topDir, tmpDir, { recursive: true });
+        await fs.promises.rm(topDir, { recursive: true, force: true });
+      } else {
+        throw renameErr;
+      }
+    }
+
+    const tmpEntries = await fs.promises.readdir(tmpDir);
+    for (const entry of tmpEntries) {
+      const src = path.join(tmpDir, entry);
+      const dest = path.join(dirPath, entry);
+      try {
+        await fs.promises.rename(src, dest);
+      } catch (err) {
+        if (err.code === "EXDEV") {
+          const stat = await fs.promises.lstat(src);
+          if (stat.isDirectory()) {
+            await moveDirectory(src, dest);
+          } else {
+            await fs.promises.copyFile(src, dest);
+            await fs.promises.unlink(src);
+          }
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    log(logId, "INFO", "Removed single top-level directory from imported zip", {
+      removedDir: filtered[0].name,
+    });
+  } catch (error) {
+    log(logId, "WARN", "Failed to remove top-level directory from imported zip, continuing", {
+      error: error.message,
+    });
+  }
+}
+
+/**
+ * 清空工作目录，保留白名单内的目录/文件
+ */
+async function clearWorkspaceExceptPreserved(targetDir, logId) {
+  if (!fs.existsSync(targetDir)) {
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    return;
+  }
+
+  const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (IMPORT_PROJECT_PRESERVED_ENTRIES.has(entry.name)) {
+      continue;
+    }
+    const fullPath = path.join(targetDir, entry.name);
+    await fs.promises.rm(fullPath, { recursive: true, force: true });
+    log(logId, "DEBUG", "Removed workspace entry during import", { name: entry.name });
+  }
+}
+
+/**
+ * 将非白名单内容移动到备份目录（用于导入失败时回滚）
+ */
+async function backupWorkspaceExceptPreserved(targetDir, backupDir, logId) {
+  await fs.promises.mkdir(backupDir, { recursive: true });
+  if (!fs.existsSync(targetDir)) {
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    return;
+  }
+
+  const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (IMPORT_PROJECT_PRESERVED_ENTRIES.has(entry.name)) {
+      continue;
+    }
+    const srcPath = path.join(targetDir, entry.name);
+    const destPath = path.join(backupDir, entry.name);
+    await movePath(srcPath, destPath);
+    log(logId, "DEBUG", "Backed up workspace entry before import", { name: entry.name });
+  }
+}
+
+/**
+ * 从备份目录恢复工作区内容
+ */
+async function restoreWorkspaceFromBackup(backupDir, targetDir, logId) {
+  if (!fs.existsSync(backupDir)) {
+    return;
+  }
+
+  const entries = await fs.promises.readdir(backupDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (IMPORT_PROJECT_PRESERVED_ENTRIES.has(entry.name)) {
+      continue;
+    }
+    const srcPath = path.join(backupDir, entry.name);
+    const destPath = path.join(targetDir, entry.name);
+    await movePath(srcPath, destPath);
+  }
+
+  log(logId, "INFO", "Workspace restored from backup after import failure");
+}
+
+/**
+ * 将解压后的内容合并到工作目录，跳过白名单目录
+ */
+async function mergeExtractedIntoWorkspace(extractRoot, targetDir, logId) {
+  const items = await fs.promises.readdir(extractRoot, { withFileTypes: true });
+  const mergedEntries = [];
+
+  try {
+    for (const item of items) {
+      if (IMPORT_PROJECT_PRESERVED_ENTRIES.has(item.name)) {
+        log(logId, "INFO", "Skipping preserved entry from imported zip", { name: item.name });
+        continue;
+      }
+
+      const srcPath = path.join(extractRoot, item.name);
+      const destPath = path.join(targetDir, item.name);
+      await movePath(srcPath, destPath);
+      mergedEntries.push(item.name);
+    }
+  } catch (error) {
+    error.mergedEntries = mergedEntries;
+    throw error;
+  }
+}
+
+/**
+ * 导入项目：解压 zip 后替换工作目录（保留白名单），失败时回滚
+ * @param {string|number} userId
+ * @param {string|number} cId
+ * @param {Object} file multer 文件对象（zip）
+ * @param {string} [customTargetDir]
+ */
+async function importProject(userId, cId, file, customTargetDir) {
+  const startTime = Date.now();
+  const logId = `computer:${userId}:${cId}`;
+  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+
+  if (!userId) {
+    throw new ValidationError("userId cannot be empty", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId cannot be empty", { field: "cId" });
+  }
+  if (!file || !file.path) {
+    throw new ValidationError("file is required", { field: "file" });
+  }
+  if (!workspaceRoot) {
+    throw new SystemError("COMPUTER_WORKSPACE_DIR is not configured");
+  }
+
+  const ext = path.extname(file.originalname || file.filename || "").toLowerCase();
+  if (ext !== ".zip") {
+    throw new ValidationError("Only zip files are supported", {
+      field: "file",
+      originalName: file.originalname,
+    });
+  }
+
+  const normalizedUserId = String(userId);
+  const normalizedCId = String(cId);
+  const targetDir =
+    customTargetDir && customTargetDir.trim()
+      ? customTargetDir.trim()
+      : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+  const tmpRoot = path.join(targetDir, ".tmp");
+  const extractRoot = path.join(
+    tmpRoot,
+    `import_project_extract_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+  );
+  let backupDir = null;
+
+  log(logId, "INFO", "Start importing project from zip", {
+    userId: normalizedUserId,
+    cId: normalizedCId,
+    targetDir,
+    fileName: file.originalname,
+  });
+
+  try {
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    await fs.promises.mkdir(tmpRoot, { recursive: true });
+    await fs.promises.mkdir(extractRoot, { recursive: true });
+
+    // 1. 先解压并校验 zip，失败时不改动现有工作区
+    await extractZip(file.path, extractRoot);
+    await removeTopLevelDir(extractRoot, logId);
+
+    // 2. 备份当前非白名单内容，再合并新文件
+    backupDir = path.join(
+      tmpRoot,
+      `import_backup_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+    );
+    await backupWorkspaceExceptPreserved(targetDir, backupDir, logId);
+
+    try {
+      await mergeExtractedIntoWorkspace(extractRoot, targetDir, logId);
+    } catch (mergeError) {
+      log(logId, "ERROR", "Merge imported project failed, restoring workspace", {
+        error: mergeError.message,
+        mergedEntries: mergeError.mergedEntries || [],
+      });
+      await clearWorkspaceExceptPreserved(targetDir, logId);
+      await restoreWorkspaceFromBackup(backupDir, targetDir, logId);
+      throw mergeError;
+    }
+
+    if (fs.existsSync(backupDir)) {
+      await fs.promises.rm(backupDir, { recursive: true, force: true });
+      backupDir = null;
+    }
+
+    log(logId, "INFO", "Project imported successfully", {
+      userId: normalizedUserId,
+      cId: normalizedCId,
+      targetDir,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    return {
+      success: true,
+      message: "Project imported successfully",
+      userId: normalizedUserId,
+      cId: normalizedCId,
+      targetDir,
+    };
+  } catch (error) {
+    log(logId, "ERROR", "Failed to import project", {
+      userId: normalizedUserId,
+      cId: normalizedCId,
+      targetDir,
+      error: error.message,
+      elapsedMs: Date.now() - startTime,
+    });
+
+    if (error instanceof ValidationError || error instanceof SystemError || error instanceof FileError) {
+      throw error;
+    }
+
+    throw new SystemError(`Failed to import project: ${error.message}`, {
+      userId: normalizedUserId,
+      cId: normalizedCId,
+      originalError: error.message,
+    });
+  } finally {
+    if (fs.existsSync(extractRoot)) {
+      try {
+        await fs.promises.rm(extractRoot, { recursive: true, force: true });
+      } catch (cleanupError) {
+        log(logId, "WARN", "Failed to clean import extract directory", {
+          extractRoot,
+          error: cleanupError.message,
+        });
+      }
+    }
+    if (backupDir && fs.existsSync(backupDir)) {
+      try {
+        await fs.promises.rm(backupDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        log(logId, "WARN", "Failed to clean import backup directory", {
+          backupDir,
+          error: cleanupError.message,
+        });
+      }
+    }
+    if (file?.path && fs.existsSync(file.path)) {
+      try {
+        await fs.promises.unlink(file.path);
+      } catch (cleanupError) {
+        log(logId, "WARN", "Failed to clean uploaded zip file", {
+          tempZipPath: file.path,
+          error: cleanupError.message,
+        });
+      }
+    }
+  }
+}
+
+export {
+  getFileList,
+  updateFiles,
+  uploadFile,
+  uploadFiles,
+  downloadAllFiles,
+  getLatestLogs,
+  importProject,
+  IMPORT_PROJECT_PRESERVED_ENTRIES,
+  removeTopLevelDir,
+};

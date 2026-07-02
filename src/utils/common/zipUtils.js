@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import yauzl from "yauzl";
 import { FileError } from "../error/errorHandler.js";
+import { assertSafeZipEntryPath } from "./fileSystemUtils.js";
 
 /**
  * 解压zip文件到指定目录
@@ -23,11 +24,18 @@ function extractZip(zipPath, extractPath) {
 
       zipfile.readEntry();
       zipfile.on("entry", (entry) => {
+        let safeTargetPath;
+        try {
+          safeTargetPath = assertSafeZipEntryPath(extractPath, entry.fileName);
+        } catch (pathErr) {
+          zipfile.close();
+          return reject(pathErr);
+        }
+
         if (/\/$/.test(entry.fileName)) {
           // 目录条目
-          const dirPath = path.join(extractPath, entry.fileName);
           try {
-            fs.mkdirSync(dirPath, { recursive: true });
+            fs.mkdirSync(safeTargetPath, { recursive: true });
           } catch (mkdirErr) {
             // 线上实测：某些 zip 中会出现「文件路径和目录路径冲突」或其他奇怪目录结构，
             // 在深层路径上 mkdir 时可能抛出 ENOTDIR / EEXIST / 其它错误。
@@ -38,7 +46,7 @@ function extractZip(zipPath, extractPath) {
             console.warn(
               "[extractZip] mkdir for directory entry failed, skip this dir",
               {
-                dirPath,
+                dirPath: safeTargetPath,
                 code: mkdirErr.code,
                 message: mkdirErr.message,
               }
@@ -59,7 +67,7 @@ function extractZip(zipPath, extractPath) {
               );
             }
 
-            const filePath = path.join(extractPath, entry.fileName);
+            const filePath = safeTargetPath;
             const dirPath = path.dirname(filePath);
 
             try {
