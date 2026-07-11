@@ -52,6 +52,12 @@ const config = {
   // docker-compose: 使用 symlink + 模板缓存策略（本地磁盘 node_modules）
   // k8s: 不使用 symlink，node_modules 直接放 workspace（JuiceFS 跨节点共享）
   DEPLOYMENT_MODE: process.env.DEPLOYMENT_MODE || "docker-compose",
+  // restart-dev 快路径开关 (k8s 烤入, 见 rcoder-k8s 镜像构建 --build-arg FAST_RESTART_ENABLED=true)。
+  // 开启后: 跳过 rm -rf node_modules + 保留 lockfile, 改由 pnpm install 增量 reconcile
+  // (installDependencies 内的 preflightCleanNodeModules 负责外科式坏态修复, 无需粗暴全删)。
+  // 默认 false → docker-compose 行为不变。
+  FAST_RESTART_ENABLED:
+    process.env.FAST_RESTART_ENABLED?.toLowerCase() === "true",
   INIT_PROJECT_NAME_REACT:
     process.env.INIT_PROJECT_NAME_REACT || "react-vite-template",
   INIT_PROJECT_NAME_VUE3:
