@@ -354,16 +354,22 @@ async function commit(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
+    // 同一次 commit 内复用 isomorphic-git cache，避免重复读 index
+    const cache = {};
+    let hasChanges;
+
     // 暂存文件（存在的 add，不存在的被跟踪文件 remove）
     if (Array.isArray(files) && files.length > 0) {
-      await stageFiles(targetPath, files);
+      // API 显式指定路径：force 对齐 git add -f，避免被 gitignore 静默跳过
+      await stageFiles(targetPath, files, { cache, force: true });
+      // 只扫指定路径，避免大仓库下全量 statusMatrix
+      const matrix = await git.statusMatrix({ fs, dir: targetPath, cache, filepaths: files });
+      hasChanges = matrix.some(([, , , S]) => S !== 1);
     } else {
-      await addAll(targetPath);
+      // addAll 内部已扫过一次 statusMatrix，直接复用其 hasChanges，避免二次全量扫描
+      ({ hasChanges } = await addAll(targetPath, { cache }));
     }
 
-    // 检查是否有可提交的变更
-    const matrix = await git.statusMatrix({ fs, dir: targetPath });
-    const hasChanges = matrix.some(([, , , S]) => S !== 1);
     if (!hasChanges) {
       return { success: true, message: "Nothing to commit", logId, nothingToCommit: true };
     }
@@ -378,6 +384,7 @@ async function commit(options = {}) {
       dir: targetPath,
       message,
       author,
+      cache,
     });
 
     log(logId, "INFO", "Git commit successful", { logId, commitHash, message });
@@ -406,10 +413,12 @@ async function add(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
+    const cache = {};
     if (Array.isArray(files) && files.length > 0) {
-      await stageFiles(targetPath, files);
+      // API 显式指定路径：force 对齐 git add -f
+      await stageFiles(targetPath, files, { cache, force: true });
     } else {
-      await addAll(targetPath);
+      await addAll(targetPath, { cache });
     }
 
     log(logId, "INFO", "Git add successful", { logId, filesCount: files ? files.length : "all" });
