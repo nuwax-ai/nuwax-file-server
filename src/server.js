@@ -10,6 +10,10 @@ import router from "./routes/router.js";
 import { cleanupInitProjectOnStartup } from "./utils/project/initProjectCleanupUtils.js";
 import { startScheduler, stopScheduler } from "./scheduler/pnpmPruneScheduler.js";
 import path from "path";
+import {
+  parseOpenUiRuntimePath,
+  proxyOpenUiRuntimeRequest,
+} from "./utils/computer/openUiRuntimeProxy.js";
 
 const app = express();
 
@@ -118,6 +122,13 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
 
   if (!userId || !cId || filePath === "/") {
     return res.status(404).send("Not Found");
+  }
+
+  // OpenUI Runtime 白名单路径：转发到本机 NUWAX_OPENUI_PORT（默认 8787），
+  // 不走本地工作区磁盘，避免与普通静态文件逻辑混用。
+  const openUiRuntimePath = parseOpenUiRuntimePath(filePath);
+  if (openUiRuntimePath) {
+    return proxyOpenUiRuntimeRequest(req, res, openUiRuntimePath);
   }
 
   // 设置 CORS 头，允许跨域访问静态资源（必须在 sendFile 之前设置）
