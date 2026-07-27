@@ -6,10 +6,27 @@ const AGENT_ROOT_MAP = {
   claudecode: ".claude",
   opencode: ".opencode",
   codex: ".codex",
+  // 对齐 Rust SYNC_TARGET_DIRS: grok_build / pi-agent skills 的 fan-out 目标。
+  // syncAgents 遍历 ALL_AGENT_TYPES 会自动覆盖, 无需改 syncAgents 主体。
+  grok: ".grok",
+  pi: ".pi",
 };
 
 const ALL_AGENT_TYPES = Object.keys(AGENT_ROOT_MAP);
 const PRIMARY_AGENT_TYPE = "agents";
+
+/**
+ * fan-out 版本标识 (从 AGENT_ROOT_MAP 派生, 排除 PRIMARY .agents)。
+ * syncAgents 写入 .agents/.sync_version; 启动 reconciler 据此 O(1) 判断是否需补 sync。
+ * 加新 agent 改 AGENT_ROOT_MAP 即自动变版本 → 触发下次启动 reconcile。
+ * 对齐 Rust skills.rs sync_target_version()。
+ */
+function syncTargetVersion() {
+  return Object.values(AGENT_ROOT_MAP)
+    .filter((dir) => dir !== AGENT_ROOT_MAP[PRIMARY_AGENT_TYPE])
+    .join(",");
+  // → ".claude,.opencode,.codex,.grok,.pi"
+}
 
 async function removePathIfExists(targetPath) {
   if (!fs.existsSync(targetPath)) return;
@@ -88,10 +105,23 @@ async function syncAgents(workspaceRoot) {
     }
   }
 
+  // 版本 marker: 启动 reconciler 据此 O(1) 判断是否需补 sync (对齐 Rust skills.rs)。
+  // 写失败不阻断 sync 结果 (最坏 reconciler 下次多 sync 一次, 幂等兜底)。
+  try {
+    await fs.promises.writeFile(
+      path.join(workspaceRoot, ".agents", ".sync_version"),
+      syncTargetVersion(),
+      "utf8"
+    );
+  } catch {
+    // marker 仅优化用途, 写失败忽略 (不 log, 对齐 Rust `let _ = fs::write`)
+  }
+
   return { agentTypes: ALL_AGENT_TYPES };
 }
 
 export {
   ensurePrimaryAgentDirs,
   syncAgents,
+  syncTargetVersion,
 };
