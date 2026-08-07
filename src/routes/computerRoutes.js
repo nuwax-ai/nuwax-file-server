@@ -11,6 +11,7 @@ import {
   updateFiles,
   uploadFile,
   uploadFiles,
+  generateFile,
   downloadAllFiles,
   getLatestLogs,
   importProject,
@@ -296,6 +297,24 @@ const routes = [
           await fs.promises.unlink(file.path);
         }
       }
+    }),
+  },
+  {
+    path: "/generate-file",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, fileName, content, customTargetDir } = req.body || {};
+      const logId = `computer:${userId}:${cId}`;
+
+      log(logId, "INFO", "Generate file request", {
+        userId,
+        cId,
+        fileName,
+        contentLength: typeof content === "string" ? content.length : 0,
+      });
+
+      const result = await generateFile(userId, cId, fileName, content, customTargetDir);
+      res.status(200).json(result);
     }),
   },
   {

@@ -1422,11 +1422,60 @@ async function importProject(userId, cId, file, customTargetDir) {
   }
 }
 
+/**
+ * 根据文本内容生成文件到用户工作目录
+ * @param {string|number} userId 用户ID
+ * @param {string|number} cId 会话ID
+ * @param {string} fileName 文件名（含后缀，可为相对路径）
+ * @param {string} content 文本内容
+ * @param {string} [customTargetDir] 自定义目标目录
+ * @returns {Promise<Object>} 生成结果
+ */
+async function generateFile(userId, cId, fileName, content, customTargetDir) {
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!fileName || typeof fileName !== "string" || !fileName.trim()) {
+    throw new ValidationError("fileName cannot be empty", { field: "fileName" });
+  }
+  if (content !== undefined && content !== null && typeof content !== "string") {
+    throw new ValidationError("content must be a string", { field: "content" });
+  }
+
+  const normalizedFileName = fileName.trim();
+  const textContent = content == null ? "" : content;
+
+  log(logId, "INFO", "Generate file from text content", {
+    userId,
+    cId,
+    fileName: normalizedFileName,
+    contentLength: textContent.length,
+  });
+
+  const result = await uploadFile(
+    userId,
+    cId,
+    {
+      contents: textContent,
+      originalname: path.basename(normalizedFileName),
+      size: Buffer.byteLength(textContent, "utf8"),
+    },
+    normalizedFileName,
+    customTargetDir
+  );
+
+  return {
+    ...result,
+    message: "File generated successfully",
+    fileName: normalizedFileName,
+  };
+}
+
 export {
   getFileList,
   updateFiles,
   uploadFile,
   uploadFiles,
+  generateFile,
   downloadAllFiles,
   getLatestLogs,
   importProject,
