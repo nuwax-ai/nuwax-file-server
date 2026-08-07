@@ -17,8 +17,10 @@ import {
   ensureGitRepo,
   ensureGitignore,
   addAll,
+  commitAllChanges,
   stageFiles,
   getDefaultAuthor,
+  hasGitHead,
 } from "../utils/git/gitUtils.js";
 
 /**
@@ -354,47 +356,67 @@ async function commit(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    // 同一次 commit 内复用 isomorphic-git cache，避免重复读 index
-    const cache = {};
-    let hasChanges;
-
-    // 暂存文件（存在的 add，不存在的被跟踪文件 remove）
-    if (Array.isArray(files) && files.length > 0) {
-      // API 显式指定路径：force 对齐 git add -f，避免被 gitignore 静默跳过
-      await stageFiles(targetPath, files, { cache, force: true });
-      // 只扫指定路径，避免大仓库下全量 statusMatrix
-      const matrix = await git.statusMatrix({ fs, dir: targetPath, cache, filepaths: files });
-      hasChanges = matrix.some(([, , , S]) => S !== 1);
-    } else {
-      // addAll 内部已扫过一次 statusMatrix，直接复用其 hasChanges，避免二次全量扫描
-      ({ hasChanges } = await addAll(targetPath, { cache }));
-    }
-
-    if (!hasChanges) {
-      return { success: true, message: "Nothing to commit", logId, nothingToCommit: true };
-    }
-
     const author = {
       name: authorName || config.GIT_DEFAULT_AUTHOR_NAME,
       email: authorEmail || config.GIT_DEFAULT_AUTHOR_EMAIL,
     };
 
-    const commitHash = await git.commit({
-      fs,
-      dir: targetPath,
+    // 指定文件：仍走 isomorphic-git（路径级 stage + 局部 statusMatrix）
+    if (Array.isArray(files) && files.length > 0) {
+      const cache = {};
+      // API 显式指定路径：force 对齐 git add -f，避免被 gitignore 静默跳过
+      await stageFiles(targetPath, files, { cache, force: true });
+      // 只扫指定路径，避免大仓库下全量 statusMatrix
+      const matrix = await git.statusMatrix({ fs, dir: targetPath, cache, filepaths: files });
+      const hasChanges = matrix.some(([, , , S]) => S !== 1);
+
+      if (!hasChanges) {
+        return { success: true, message: "Nothing to commit", logId, nothingToCommit: true };
+      }
+
+      const commitHash = await git.commit({
+        fs,
+        dir: targetPath,
+        message,
+        author,
+        cache,
+      });
+
+      log(logId, "INFO", "Git commit successful", { logId, commitHash, message });
+      return {
+        success: true,
+        message: "Commit successful",
+        logId,
+        commit: commitHash,
+        summary: { changes: 1 },
+      };
+    }
+
+    // 全量 commit（项目初始化热路径）：优先原生 git；仅本机无 git 时回退 isomorphic-git
+    const result = await commitAllChanges(targetPath, {
       message,
-      author,
-      cache,
+      authorName: author.name,
+      authorEmail: author.email,
+      cache: {},
     });
 
-    log(logId, "INFO", "Git commit successful", { logId, commitHash, message });
+    if (result.nothingToCommit) {
+      return { success: true, message: "Nothing to commit", logId, nothingToCommit: true };
+    }
+
+    log(logId, "INFO", "Git commit successful", {
+      logId,
+      commitHash: result.commitHash,
+      message,
+      viaNative: result.viaNative === true,
+    });
 
     return {
       success: true,
       message: "Commit successful",
       logId,
-      commit: commitHash,
-      summary: { changes: hasChanges ? 1 : 0 },
+      commit: result.commitHash,
+      summary: { changes: 1 },
     };
   } catch (e) {
     log(logId, "ERROR", "Failed to commit", { logId, error: e.message });
@@ -530,15 +552,17 @@ async function discard(options = {}) {
       }
     }
 
-    // 1) 已跟踪文件：从 HEAD 读取内容，写回 workdir 和 index
-    const headOid = await getHeadOid(targetPath);
-    for (const f of trackedToRestore) {
-      const result = await readFileAtCommit(targetPath, headOid, f);
-      if (!result) continue;
-      const fullPath = path.join(targetPath, f);
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      fs.writeFileSync(fullPath, result.buf);
-      await git.add({ fs, dir: targetPath, filepath: f });
+    // 1) 已跟踪文件：从 HEAD 读取内容，写回 workdir 和 index（无提交时跳过）
+    if (trackedToRestore.length > 0) {
+      const headOid = await getHeadOid(targetPath);
+      for (const f of trackedToRestore) {
+        const result = await readFileAtCommit(targetPath, headOid, f);
+        if (!result) continue;
+        const fullPath = path.join(targetPath, f);
+        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+        fs.writeFileSync(fullPath, result.buf);
+        await git.add({ fs, dir: targetPath, filepath: f });
+      }
     }
 
     // 2) 新增文件（暂存区）：从 index 移除 + 从磁盘删除
@@ -626,6 +650,13 @@ async function logHistory(options = {}) {
 
     return { success: true, logId, commits, total: commits.length };
   } catch (e) {
+    // 尚无任何提交（ensureGitRepo 不再写占位 Initial commit）时返回空列表
+    if (
+      e?.code === "NotFoundError" ||
+      /NotFoundError|Could not find|unable to resolve/i.test(String(e?.message || ""))
+    ) {
+      return { success: true, logId, commits: [], total: 0 };
+    }
     log(logId, "ERROR", "Failed to get Git log", { logId, error: e.message });
     throw new SystemError("Failed to get Git log", { originalError: e.message });
   }
@@ -742,6 +773,17 @@ async function diff(options = {}) {
       }
     } else {
       // ── worktree / staged 模式：基于 statusMatrix + HEAD ──
+      // 尚无提交时没有相对 HEAD 的差异（untracked 在此模式下本就不输出）
+      if (!(await hasGitHead(targetPath))) {
+        return {
+          success: true,
+          logId,
+          source,
+          diff: "",
+          summary: { files: [], insertions: 0, deletions: 0 },
+        };
+      }
+
       const headOid = await getHeadOid(targetPath);
       const matrix = await git.statusMatrix({ fs, dir: targetPath });
 
@@ -859,6 +901,10 @@ async function reset(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
+    if (!(await hasGitHead(targetPath))) {
+      throw new BusinessError("Cannot reset: repository has no commits yet");
+    }
+
     // 记录当前 HEAD
     const currentLog = await git.log({ fs, dir: targetPath, depth: 1 });
     const previousHead = currentLog.length > 0 ? currentLog[0].oid : null;
@@ -982,6 +1028,9 @@ async function revert(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
+    if (!(await hasGitHead(targetPath))) {
+      throw new BusinessError("Cannot revert: repository has no commits yet");
+    }
     // 1. 验证 target 存在并解析为完整 OID
     let targetOid;
     try {

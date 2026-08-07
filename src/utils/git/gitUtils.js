@@ -2,6 +2,14 @@ import path from "path";
 import fs from "fs";
 import git from "isomorphic-git";
 import config from "../../appConfig/index.js";
+import { log } from "../log/logUtils.js";
+import {
+  shouldUseNativeGit,
+  nativeAddAll,
+  nativeAddAllAndCommit,
+  isNativeGitUnavailableError,
+  markNativeGitMissing,
+} from "./nativeGitUtils.js";
 
 /**
  * 检查目录下是否存在 .git（即是否已初始化 Git 仓库）
@@ -24,14 +32,113 @@ function getDefaultAuthor() {
 }
 
 /**
- * 暂存所有变更（等价于 git add --all）。
- * 一次 statusMatrix 扫工作区，批量 add + remove；可复用 isomorphic-git cache。
- * @param {string} dir 项目绝对路径
+ * 仓库是否已有可解析的 HEAD（即至少有一次提交）
+ * @param {string} dir
+ * @returns {Promise<boolean>}
+ */
+async function hasGitHead(dir) {
+  try {
+    await git.resolveRef({ fs, dir, ref: "HEAD" });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * 原生 git 不可用时的回退日志 + 负缓存
+ * @param {string} dir
+ * @param {unknown} err
+ * @param {string} op
+ */
+function warnNativeFallback(dir, err, op) {
+  markNativeGitMissing();
+  const message =
+    err && typeof err === "object" && "message" in err
+      ? String(/** @type {{ message?: string }} */ (err).message)
+      : String(err);
+  log(path.basename(dir) || "git", "WARN", `Native git unavailable during ${op}, fallback to isomorphic-git`, {
+    error: message,
+  });
+}
+
+/**
+ * 首提交场景：遍历工作区，尊重 gitignore，收集待 add 的文件路径。
+ * 对已 ignore 的目录返回 null 以剪枝，避免深入 node_modules 等大目录。
+ * @param {string} dir
+ * @param {{ cache?: object }} [options]
+ * @returns {Promise<string[]>}
+ */
+async function listWorkdirFilesSkippingIgnored(dir, options = {}) {
+  const { cache } = options;
+  const files = [];
+
+  await git.walk({
+    fs,
+    dir,
+    cache,
+    trees: [git.WORKDIR()],
+    map: async (filepath, [workdir]) => {
+      if (!workdir) return null;
+
+      // 根目录：继续向下走
+      if (filepath === ".") return;
+
+      const type = await workdir.type();
+      if (type === "tree") {
+        // 目录被 ignore 则剪枝（不进入子树）
+        if (await git.isIgnored({ fs, dir, filepath })) {
+          return null;
+        }
+        return;
+      }
+
+      if (type !== "blob") return null;
+
+      if (await git.isIgnored({ fs, dir, filepath })) {
+        return null;
+      }
+
+      files.push(filepath);
+    },
+  });
+
+  return files;
+}
+
+/**
+ * 首提交专用：跳过 statusMatrix，walk + ignore 后直接 batch add
+ * @param {string} dir
  * @param {{ cache?: object }} [options]
  * @returns {Promise<{ hasChanges: boolean, toAdd: string[], toRemove: string[] }>}
  */
-async function addAll(dir, options = {}) {
+async function addAllFirstCommitWithIsomorphic(dir, options = {}) {
   const { cache } = options;
+  const toAdd = await listWorkdirFilesSkippingIgnored(dir, { cache });
+
+  if (toAdd.length > 0) {
+    // 已按 ignore 过滤；force 仅保证与历史 addAll 行为一致
+    await git.add({ fs, dir, filepath: toAdd, parallel: true, cache, force: true });
+  }
+
+  return { hasChanges: toAdd.length > 0, toAdd, toRemove: [] };
+}
+
+/**
+ * isomorphic-git 实现的全量暂存。
+ * 无 HEAD（真正的首提交）时跳过 statusMatrix，改为 walk + ignore 后直接 add。
+ * @param {string} dir
+ * @param {{ cache?: object }} [options]
+ * @returns {Promise<{ hasChanges: boolean, toAdd: string[], toRemove: string[] }>}
+ */
+async function addAllWithIsomorphic(dir, options = {}) {
+  const { cache } = options;
+
+  // 首提交：没有 HEAD，不存在「相对 HEAD 的删除/修改」，无需全量 statusMatrix
+  if (!(await hasGitHead(dir))) {
+    return addAllFirstCommitWithIsomorphic(dir, { cache });
+  }
+
   const matrix = await git.statusMatrix({ fs, dir, cache });
   const toAdd = [];
   const toRemove = [];
@@ -62,6 +169,70 @@ async function addAll(dir, options = {}) {
     matrix.some(([, , , stage]) => stage !== 1);
 
   return { hasChanges, toAdd, toRemove };
+}
+
+/**
+ * 暂存所有变更（等价于 git add --all）。
+ * 优先原生 git；仅当本机无可用 git 时回退 isomorphic-git，其它错误直接抛出。
+ * @param {string} dir 项目绝对路径
+ * @param {{ cache?: object }} [options]
+ * @returns {Promise<{ hasChanges: boolean, toAdd: string[], toRemove: string[] }>}
+ */
+async function addAll(dir, options = {}) {
+  if (await shouldUseNativeGit()) {
+    try {
+      return await nativeAddAll(dir);
+    } catch (err) {
+      if (!isNativeGitUnavailableError(err)) throw err;
+      warnNativeFallback(dir, err, "addAll");
+    }
+  }
+  return addAllWithIsomorphic(dir, options);
+}
+
+/**
+ * 全量暂存并提交（项目初始化等热路径）。
+ * 优先原生 git；仅当本机无可用 git 时回退 isomorphic-git，其它错误直接抛出。
+ * @param {string} dir 项目绝对路径
+ * @param {{ message: string, authorName?: string, authorEmail?: string, cache?: object }} options
+ * @returns {Promise<{ nothingToCommit: boolean, commitHash?: string, viaNative?: boolean }>}
+ */
+async function commitAllChanges(dir, options = {}) {
+  const {
+    message,
+    authorName = config.GIT_DEFAULT_AUTHOR_NAME,
+    authorEmail = config.GIT_DEFAULT_AUTHOR_EMAIL,
+    cache,
+  } = options;
+
+  if (await shouldUseNativeGit()) {
+    try {
+      const result = await nativeAddAllAndCommit(dir, {
+        message,
+        authorName,
+        authorEmail,
+      });
+      return { ...result, viaNative: true };
+    } catch (err) {
+      if (!isNativeGitUnavailableError(err)) throw err;
+      warnNativeFallback(dir, err, "commitAllChanges");
+    }
+  }
+
+  const { hasChanges } = await addAllWithIsomorphic(dir, { cache });
+  if (!hasChanges) {
+    return { nothingToCommit: true, viaNative: false };
+  }
+
+  const commitHash = await git.commit({
+    fs,
+    dir,
+    message,
+    author: { name: authorName, email: authorEmail },
+    cache,
+  });
+
+  return { nothingToCommit: false, commitHash, viaNative: false };
 }
 
 /**
@@ -98,7 +269,8 @@ async function stageFiles(dir, files, options = {}) {
 
 /**
  * 确保项目已初始化 Git，未初始化则自动执行 git init 并生成 .gitignore。
- * isomorphic-git 不支持 --allow-empty 提交，因此初始提交需要至少一个文件。
+ * 不创建占位 Initial commit，以便后续全量首提交可走 walk / 原生 git 快路径。
+ * 若关闭 AUTO_GITIGNORE 且无 .gitignore，写入 .gitkeep（仍不 commit），避免空仓无文件可提交。
  * @param {string} projectPath
  */
 async function ensureGitRepo(projectPath) {
@@ -106,29 +278,13 @@ async function ensureGitRepo(projectPath) {
     await git.init({ fs, dir: projectPath, defaultBranch: "main" });
     await git.setConfig({ fs, dir: projectPath, path: "user.name", value: config.GIT_DEFAULT_AUTHOR_NAME });
     await git.setConfig({ fs, dir: projectPath, path: "user.email", value: config.GIT_DEFAULT_AUTHOR_EMAIL });
-
-    // 先创建 .gitignore，确保有文件可提交
     ensureGitignore(projectPath);
 
-    // 初始提交：添加 .gitignore（若存在）
     const gitignorePath = path.join(projectPath, ".gitignore");
-    if (fs.existsSync(gitignorePath)) {
-      await git.add({ fs, dir: projectPath, filepath: ".gitignore" });
+    const gitkeepPath = path.join(projectPath, ".gitkeep");
+    if (!fs.existsSync(gitignorePath) && !fs.existsSync(gitkeepPath)) {
+      fs.writeFileSync(gitkeepPath, "");
     }
-
-    // 若 .gitignore 不存在（GIT_AUTO_GITIGNORE=false），创建占位文件
-    const stagedFiles = await git.listFiles({ fs, dir: projectPath });
-    if (stagedFiles.length === 0) {
-      fs.writeFileSync(path.join(projectPath, ".gitkeep"), "");
-      await git.add({ fs, dir: projectPath, filepath: ".gitkeep" });
-    }
-
-    await git.commit({
-      fs,
-      dir: projectPath,
-      message: "Initial commit",
-      author: getDefaultAuthor(),
-    });
   } else {
     ensureGitignore(projectPath);
   }
@@ -172,11 +328,24 @@ function ensureGitignore(projectPath) {
   const newEntries = defaultEntries.filter((entry) => !existingSet.has(entry));
 
   if (newEntries.length > 0) {
-    const content = existingLines.length > 0 && existingLines[existingLines.length - 1] !== ""
-      ? "\n" + newEntries.join("\n") + "\n"
-      : newEntries.join("\n") + "\n";
+    const content =
+      existingLines.length > 0 && existingLines[existingLines.length - 1] !== ""
+        ? "\n" + newEntries.join("\n") + "\n"
+        : newEntries.join("\n") + "\n";
     fs.appendFileSync(gitignorePath, content, "utf8");
   }
 }
 
-export { isGitRepo, ensureGitRepo, ensureGitignore, autoGitAdd, addAll, stageFiles, getDefaultAuthor };
+export {
+  isGitRepo,
+  ensureGitRepo,
+  ensureGitignore,
+  autoGitAdd,
+  addAll,
+  addAllWithIsomorphic,
+  commitAllChanges,
+  stageFiles,
+  getDefaultAuthor,
+  hasGitHead,
+  listWorkdirFilesSkippingIgnored,
+};
