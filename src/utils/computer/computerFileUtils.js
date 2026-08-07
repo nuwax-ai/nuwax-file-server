@@ -14,6 +14,8 @@ const IMPORT_PROJECT_PRESERVED_ENTRIES = new Set([
   ".claude",
   ".codex",
   ".opencode",
+  ".grok",
+  ".pi",
   ".tmp",
   ".logs",
 ]);

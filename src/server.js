@@ -9,6 +9,7 @@ import { errorHandler, notFoundHandler } from "./utils/error/errorHandler.js";
 import router from "./routes/router.js";
 import { cleanupInitProjectOnStartup } from "./utils/project/initProjectCleanupUtils.js";
 import { startScheduler, stopScheduler } from "./scheduler/pnpmPruneScheduler.js";
+import { startReconciler, stopReconciler } from "./scheduler/skillSyncReconciler.js";
 import path from "path";
 
 const app = express();
@@ -211,6 +212,13 @@ const server = app.listen(config.PORT, async () => {
   } catch (error) {
     log("default", "ERROR", `pnpm prune scheduled task failed to start: ${error.message}`);
   }
+
+  // 启动 skill-sync reconciler (后台 run-once: 回填版本落后的老 workspace, 补 grok/pi 等新 agent 目录)
+  try {
+    startReconciler();
+  } catch (error) {
+    log("default", "ERROR", `skill sync reconciler failed to start: ${error.message}`);
+  }
 });
 
 // 设置服务器超时时间 10 分钟（默认是 120 秒）
@@ -225,6 +233,9 @@ const gracefulShutdown = (signal) => {
   
   // 停止定时任务
   stopScheduler();
+
+  // 停止 skill-sync reconciler (取消尚未触发的启动定时器)
+  stopReconciler();
   
   // 清理日志缓存管理器（清理定时器）
   try {
