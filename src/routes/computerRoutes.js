@@ -8,6 +8,8 @@ import config from "../appConfig/index.js";
 import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, installProjectDependencies, executeCommand, deleteWorkspace, zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
+  resolveExistingFile,
+  searchFiles,
   updateFiles,
   uploadFile,
   uploadFiles,
@@ -221,8 +223,46 @@ const routes = [
     path: "/get-file-list",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, proxyPath, customTargetDir } = req.query;
-      const result = await getFileList(userId, cId, proxyPath, customTargetDir);
+      const { userId, cId, proxyPath, customTargetDir, relativePath, recursive } = req.query;
+      const result = await getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/resolve-file",
+    method: "get",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, proxyPath, customTargetDir, filePath } = req.query;
+      const result = await resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/search-files",
+    method: "get",
+    handler: asyncHandler(async (req, res) => {
+      const {
+        userId,
+        cId,
+        proxyPath,
+        customTargetDir,
+        relativePath,
+        kw,
+        limit,
+        maxVisit,
+        timeoutMs,
+      } = req.query;
+      const result = await searchFiles(
+        userId,
+        cId,
+        proxyPath,
+        kw,
+        customTargetDir,
+        relativePath,
+        limit,
+        maxVisit,
+        timeoutMs
+      );
       res.status(200).json({ success: true, ...result });
     }),
   },

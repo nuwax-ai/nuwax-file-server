@@ -22,6 +22,66 @@ const DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const DOWNLOAD_MAX_FILE_SIZE_BYTES =
   config.DOWNLOAD_MAX_FILE_SIZE_BYTES || DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES;
 
+/**
+ * 列出目录下单层条目（不递归）
+ * @param {string} listDir 待列出的绝对目录
+ * @param {string} workspaceDir 工作区根目录（用于计算相对路径）
+ * @param {string} logId 日志ID
+ * @param {string} proxyPath 代理路径前缀
+ * @param {string} [customTargetDir] 自定义目标目录
+ * @returns {Promise<Array>}
+ */
+async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, customTargetDir) {
+  const files = [];
+  const entries = await fs.promises.readdir(listDir, { withFileTypes: true });
+
+  entries.sort((a, b) => {
+    if (a.isDirectory() && !b.isDirectory()) return -1;
+    if (!a.isDirectory() && b.isDirectory()) return 1;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+
+  for (const entry of entries) {
+    const fullPath = path.join(listDir, entry.name);
+
+    if (entry.name.startsWith(".") && entry.name !== ".gitignore") continue;
+
+    const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
+    if (excludeFiles.includes(entry.name)) continue;
+
+    if (entry.isDirectory() && config.TRAVERSE_EXCLUDE_DIRS.includes(entry.name)) {
+      continue;
+    }
+
+    // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
+    const relativePath = path.relative(workspaceDir, fullPath).replace(/\\/g, "/");
+
+    if (entry.isDirectory()) {
+      files.push({
+        name: relativePath,
+        isDir: true,
+      });
+      continue;
+    }
+
+    try {
+      files.push({
+        name: relativePath,
+        isDir: false,
+        fileProxyUrl: buildFileProxyUrl(proxyPath, relativePath, customTargetDir),
+        isLink: entry.isSymbolicLink(),
+      });
+    } catch (error) {
+      log(logId, "WARN", `处理文件失败: ${fullPath}`, { error: error.message });
+    }
+  }
+
+  return files;
+}
+
+/**
+ * 递归遍历目录（扁平文件列表；空目录以 isDir 返回）
+ */
 async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTargetDir) {
   const files = [];
   const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
@@ -47,9 +107,7 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTa
     if (entry.isDirectory()) {
       const sub = await traverseDirectory(fullPath, basePath, logId, proxyPath, customTargetDir);
       if (sub.length === 0) {
-        // 空目录，返回目录信息
         const referencePath = basePath || targetDir;
-        // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
         const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
         files.push({
           name: relativePath,
@@ -61,32 +119,13 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTa
     } else {
       try {
         const referencePath = basePath || targetDir;
-        // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
         const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
-
-        const isLink = entry.isSymbolicLink();
-
-        // 生成文件代理URL，对路径段进行编码以支持空格、中文等特殊字符
-        let fileProxyUrl = null;
-        if (proxyPath) {
-          const encodedPath = relativePath
-            .split("/")
-            .map((seg) => encodeURIComponent(seg))
-            .join("/");
-          fileProxyUrl = `${proxyPath}/${encodedPath}`;
-          if (customTargetDir) {
-            fileProxyUrl += `?customTargetDir=${encodeURIComponent(customTargetDir)}`;
-          }
-        }
-
-        const fileInfo = {
+        files.push({
           name: relativePath,
           isDir: false,
-          fileProxyUrl: fileProxyUrl,
-          isLink: isLink,
-        };
-
-        files.push(fileInfo);
+          fileProxyUrl: buildFileProxyUrl(proxyPath, relativePath, customTargetDir),
+          isLink: entry.isSymbolicLink(),
+        });
       } catch (error) {
         log(logId, "WARN", `处理文件失败: ${fullPath}`, { error: error.message });
       }
@@ -94,6 +133,157 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTa
   }
 
   return files;
+}
+
+/**
+ * 将 relativePath 解析到目标根目录内，防止 .. 穿越
+ * @param {string} rootDir 目标根目录（默认工作区或 customTargetDir）
+ * @param {string} [relativePath] 相对路径，空则返回根目录
+ * @returns {string} 绝对路径
+ */
+function resolvePathWithinWorkspace(rootDir, relativePath) {
+  const trimmed = (relativePath == null ? "" : String(relativePath)).trim();
+  if (!trimmed || trimmed === "." || trimmed === "/") {
+    return path.resolve(rootDir);
+  }
+
+  const normalized = path.normalize(trimmed).replace(/^[\/\\]+/, "");
+  if (!normalized || normalized === ".") {
+    return path.resolve(rootDir);
+  }
+
+  if (path.isAbsolute(trimmed) || normalized.split(path.sep).includes("..")) {
+    throw new ValidationError("relativePath 非法，不允许越出目标目录", {
+      field: "relativePath",
+      relativePath,
+    });
+  }
+
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedPath = path.resolve(rootDir, normalized);
+  if (
+    resolvedPath !== resolvedRoot &&
+    !resolvedPath.startsWith(resolvedRoot + path.sep)
+  ) {
+    throw new ValidationError("relativePath 非法，不允许越出目标目录", {
+      field: "relativePath",
+      relativePath,
+    });
+  }
+
+  return resolvedPath;
+}
+
+/**
+ * 解析文件路径到目标根目录内
+ * - rootDir 可为默认工作区，也可为 customTargetDir（允许在默认工作区之外）
+ * - 相对路径相对 rootDir；绝对路径须落在 rootDir 下
+ * @returns {{ absPath: string, name: string } | null}
+ */
+function resolveFilePathWithinWorkspace(rootDir, filePathInput) {
+  const trimmed = (filePathInput == null ? "" : String(filePathInput)).trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const resolvedRoot = path.resolve(rootDir);
+  let absPath;
+
+  if (path.isAbsolute(trimmed)) {
+    absPath = path.resolve(trimmed);
+  } else {
+    const normalized = path.normalize(trimmed).replace(/^[\/\\]+/, "");
+    if (!normalized || normalized === "." || normalized.split(path.sep).includes("..")) {
+      return null;
+    }
+    absPath = path.resolve(rootDir, normalized);
+  }
+
+  if (
+    absPath !== resolvedRoot &&
+    !absPath.startsWith(resolvedRoot + path.sep)
+  ) {
+    return null;
+  }
+
+  const name = path.relative(resolvedRoot, absPath).replace(/\\/g, "/");
+  if (!name || name.startsWith("..")) {
+    return null;
+  }
+  return { absPath, name };
+}
+
+function buildFileProxyUrl(proxyPath, relativePath, customTargetDir) {
+  if (!proxyPath || !relativePath) {
+    return null;
+  }
+  const encodedPath = relativePath
+    .split("/")
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
+  let fileProxyUrl = `${proxyPath}/${encodedPath}`;
+  if (customTargetDir) {
+    fileProxyUrl += `?customTargetDir=${encodeURIComponent(customTargetDir)}`;
+  }
+  return fileProxyUrl;
+}
+
+/**
+ * 校验目标根目录下文件是否存在，存在则返回相对路径与代理 URL（供 IM 直出）
+ * 目标根目录 = customTargetDir（可在默认工作区外）或 workspace/userId/cId
+ */
+async function resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir) {
+  if (!userId) {
+    throw new ValidationError("userId 不能为空", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId 不能为空", { field: "cId" });
+  }
+  if (!filePath || !String(filePath).trim()) {
+    throw new ValidationError("filePath 不能为空", { field: "filePath" });
+  }
+
+  const normalizedUserId = String(userId);
+  const normalizedCId = String(cId);
+  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+  // customTargetDir 非空时作为目标根（可跳出默认工作区）；否则用默认会话目录
+  const trimmedCustomTargetDir =
+    customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
+    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+
+  if (!fs.existsSync(targetDir)) {
+    return { exists: false };
+  }
+
+  let resolved = resolveFilePathWithinWorkspace(targetDir, filePath);
+  // 兼容以 / 开头、实为相对目标根的写法（如 /src/a.md）
+  if (!resolved) {
+    const asRelative = String(filePath).trim().replace(/^[\/\\]+/, "");
+    if (asRelative && asRelative !== String(filePath).trim()) {
+      resolved = resolveFilePathWithinWorkspace(targetDir, asRelative);
+    }
+  }
+  if (!resolved) {
+    return { exists: false };
+  }
+
+  try {
+    // 与静态文件 sendFile 一致：跟随符号链接，只要最终是文件即可
+    const stat = await fs.promises.stat(resolved.absPath);
+    if (!stat.isFile()) {
+      return { exists: false };
+    }
+  } catch {
+    return { exists: false };
+  }
+
+  return {
+    exists: true,
+    name: resolved.name,
+    fileProxyUrl: buildFileProxyUrl(proxyPath, resolved.name, trimmedCustomTargetDir),
+  };
 }
 
 /**
@@ -179,12 +369,16 @@ async function calculateDownloadableDirectorySize(
  * @param {string|number} cId 会话ID
  * @param {string} proxyPath 代理路径
  * @param {string} [customTargetDir] 自定义目标目录，非空时直接扫描该目录，为空则按默认规则拼接 workspaceRoot/userId/cId
+ * @param {string} [relativePath] 相对工作区根的目录路径（可多级），空则列出根目录
+ * @param {boolean|string} [recursive] 是否递归扁平列出；默认 true（原全量逻辑）；显式 false 时仅当前目录一层
  * @returns {Promise<{files: Array}>}
  */
-async function getFileList(userId, cId, proxyPath, customTargetDir) {
+async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+  // 默认 true=原全量递归；仅显式 false/"false" 时单层
+  const isRecursive = !(recursive === false || recursive === "false");
 
   if (!userId) {
     throw new ValidationError("userId 不能为空", { field: "userId" });
@@ -195,10 +389,11 @@ async function getFileList(userId, cId, proxyPath, customTargetDir) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = (customTargetDir && customTargetDir.trim())
-    ? customTargetDir
+  const trimmedCustomTargetDir =
+    customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
     : path.join(workspaceRoot, normalizedUserId, normalizedCId);
-  
 
   if (!fs.existsSync(targetDir)) {
     log(logId, "INFO", "Directory does not exist, returning empty list", {
@@ -209,18 +404,47 @@ async function getFileList(userId, cId, proxyPath, customTargetDir) {
     return { files: [] };
   }
 
+  const listDir = resolvePathWithinWorkspace(targetDir, relativePath);
+
+  if (!fs.existsSync(listDir)) {
+    log(logId, "INFO", "List path does not exist, returning empty list", {
+      targetDir,
+      listDir,
+      relativePath: relativePath || "",
+      userId: normalizedUserId,
+      cId: normalizedCId,
+    });
+    return { files: [] };
+  }
+
+  const listStat = await fs.promises.stat(listDir);
+  if (!listStat.isDirectory()) {
+    throw new ValidationError("relativePath 必须是目录", {
+      field: "relativePath",
+      relativePath,
+    });
+  }
+
   log(logId, "DEBUG", "Start getting user file list", {
     targetDir,
+    listDir,
+    relativePath: relativePath || "",
+    recursive: isRecursive,
     userId: normalizedUserId,
     cId: normalizedCId,
   });
 
   try {
-    const files = await traverseDirectory(targetDir, targetDir, logId, proxyPath, customTargetDir);
+    const files = isRecursive
+      ? await traverseDirectory(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir)
+      : await listDirectoryLevel(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir);
 
     log(logId, "INFO", "User file list obtained successfully", {
       fileCount: files.length,
       targetDir,
+      listDir,
+      relativePath: relativePath || "",
+      recursive: isRecursive,
       userId: normalizedUserId,
       cId: normalizedCId,
       elapsedMs: Date.now() - startTime,
@@ -228,8 +452,14 @@ async function getFileList(userId, cId, proxyPath, customTargetDir) {
 
     return { files };
   } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
     log(logId, "ERROR", "Failed to get user file list", {
       targetDir,
+      listDir,
+      relativePath: relativePath || "",
+      recursive: isRecursive,
       userId: normalizedUserId,
       cId: normalizedCId,
       error: error.message,
@@ -241,6 +471,289 @@ async function getFileList(userId, cId, proxyPath, customTargetDir) {
       originalError: error.message,
     });
   }
+}
+
+const SEARCH_MAX_QUEUE = 5000;
+
+/** 必填正整数（由 Java 网关传入，file-server 不设默认值） */
+function requirePositiveInt(value, field) {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ValidationError(`${field} 必须为正整数`, { field, value });
+  }
+  return n;
+}
+
+function entryMatchesKeyword(relativePath, entryName, kwLower) {
+  if (!kwLower) {
+    return false;
+  }
+  if (entryName.toLowerCase().includes(kwLower)) {
+    return true;
+  }
+  return relativePath.toLowerCase().includes(kwLower);
+}
+
+function isExcludedSearchEntry(entry, excludeFiles, excludeDirs) {
+  if (entry.name.startsWith(".") && entry.name !== ".gitignore") {
+    return true;
+  }
+  if (excludeFiles.includes(entry.name)) {
+    return true;
+  }
+  if (entry.isDirectory() && excludeDirs.includes(entry.name)) {
+    return true;
+  }
+  return false;
+}
+
+function hasRemainingSearchableEntries(entries, fromIndex, excludeFiles, excludeDirs) {
+  for (let i = fromIndex; i < entries.length; i++) {
+    if (!isExcludedSearchEntry(entries[i], excludeFiles, excludeDirs)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSearchTimedOut(startTime, timeoutMs) {
+  return Date.now() - startTime >= timeoutMs;
+}
+
+/**
+ * 无索引有界实时搜索：返回命中项（相对路径可还原目录结构）。
+ * limit / maxVisit / timeoutMs 为必填正整数，由调用方（Java 网关）传入，本层不设默认值。
+ * @returns {Promise<{files: Array, truncated: boolean, visited: number}>}
+ */
+async function searchFiles(
+  userId,
+  cId,
+  proxyPath,
+  kw,
+  customTargetDir,
+  relativePath,
+  limit,
+  maxVisit,
+  timeoutMs
+) {
+  const startTime = Date.now();
+  const logId = `computer:${userId}:${cId}`;
+  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+
+  if (!userId) {
+    throw new ValidationError("userId 不能为空", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId 不能为空", { field: "cId" });
+  }
+  const keyword = (kw == null ? "" : String(kw)).trim();
+  if (!keyword) {
+    throw new ValidationError("kw 不能为空", { field: "kw" });
+  }
+
+  const safeLimit = requirePositiveInt(limit, "limit");
+  const safeMaxVisit = requirePositiveInt(maxVisit, "maxVisit");
+  const safeTimeoutMs = requirePositiveInt(timeoutMs, "timeoutMs");
+  const kwLower = keyword.toLowerCase();
+
+  const normalizedUserId = String(userId);
+  const normalizedCId = String(cId);
+  const trimmedCustomTargetDir =
+    customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
+    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+
+  if (!fs.existsSync(targetDir)) {
+    return { files: [], truncated: false, visited: 0 };
+  }
+
+  const searchRootAbs = resolvePathWithinWorkspace(targetDir, relativePath);
+  if (!fs.existsSync(searchRootAbs)) {
+    return { files: [], truncated: false, visited: 0 };
+  }
+  const searchRootStat = await fs.promises.stat(searchRootAbs);
+  if (!searchRootStat.isDirectory()) {
+    throw new ValidationError("relativePath 必须是目录", { field: "relativePath", relativePath });
+  }
+
+  const searchRootRel = path.relative(targetDir, searchRootAbs).replace(/\\/g, "/");
+  const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
+  const excludeDirs = config.TRAVERSE_EXCLUDE_DIRS || [];
+
+  const matches = [];
+  /** @type {Set<string>} */
+  const visitedDirs = new Set();
+  let visited = 0;
+  let truncated = false;
+  /** 因 limit/超时等中途停下，目录或队列未耗尽 */
+  let abortedIncomplete = false;
+  const queue = [searchRootRel];
+
+  const shouldHardStop = () =>
+    visited >= safeMaxVisit || isSearchTimedOut(startTime, safeTimeoutMs);
+
+  while (queue.length > 0) {
+    if (shouldHardStop()) {
+      abortedIncomplete = true;
+      break;
+    }
+    if (matches.length >= safeLimit) {
+      if (queue.length > 0) {
+        abortedIncomplete = true;
+      }
+      break;
+    }
+
+    const dirRel = queue.shift();
+    if (visitedDirs.has(dirRel)) {
+      continue;
+    }
+    visitedDirs.add(dirRel);
+
+    const dirAbs = dirRel ? path.join(targetDir, dirRel) : targetDir;
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dirAbs, { withFileTypes: true });
+    } catch (error) {
+      log(logId, "WARN", "search readdir failed", { dirRel, error: error.message });
+      continue;
+    }
+
+    entries.sort((a, b) => {
+      if (a.isDirectory() && !b.isDirectory()) return -1;
+      if (!a.isDirectory() && b.isDirectory()) return 1;
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+
+    const childDirs = [];
+    let hitLimitDuringDir = false;
+    let hasRemainingInDir = false;
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (isExcludedSearchEntry(entry, excludeFiles, excludeDirs)) {
+        continue;
+      }
+
+      if (shouldHardStop()) {
+        abortedIncomplete = true;
+        hitLimitDuringDir = true;
+        hasRemainingInDir = true;
+        break;
+      }
+
+      visited += 1;
+      const fullPath = path.join(dirAbs, entry.name);
+      const rel = path.relative(targetDir, fullPath).replace(/\\/g, "/");
+
+      if (entry.isDirectory()) {
+        childDirs.push(rel);
+        if (
+          matches.length < safeLimit &&
+          entryMatchesKeyword(rel, entry.name, kwLower)
+        ) {
+          matches.push({ name: rel, isDir: true });
+          if (matches.length >= safeLimit) {
+            hitLimitDuringDir = true;
+            hasRemainingInDir = hasRemainingSearchableEntries(
+              entries,
+              i + 1,
+              excludeFiles,
+              excludeDirs
+            );
+            break;
+          }
+        }
+        continue;
+      }
+
+      try {
+        if (
+          matches.length < safeLimit &&
+          entryMatchesKeyword(rel, entry.name, kwLower)
+        ) {
+          matches.push({
+            name: rel,
+            isDir: false,
+            fileProxyUrl: buildFileProxyUrl(proxyPath, rel, trimmedCustomTargetDir),
+            isLink: entry.isSymbolicLink(),
+          });
+          if (matches.length >= safeLimit) {
+            hitLimitDuringDir = true;
+            hasRemainingInDir = hasRemainingSearchableEntries(
+              entries,
+              i + 1,
+              excludeFiles,
+              excludeDirs
+            );
+            break;
+          }
+        }
+      } catch (error) {
+        log(logId, "WARN", `search 处理文件失败: ${fullPath}`, { error: error.message });
+      }
+    }
+
+    // 满 limit：仅当仍有未扫条目 / 未入队子目录 / 队列残留时标 truncated
+    if (hitLimitDuringDir || shouldHardStop()) {
+      if (
+        shouldHardStop() ||
+        hasRemainingInDir ||
+        childDirs.length > 0 ||
+        queue.length > 0
+      ) {
+        abortedIncomplete = true;
+      }
+      continue;
+    }
+
+    for (const childRel of childDirs) {
+      if (shouldHardStop()) {
+        abortedIncomplete = true;
+        break;
+      }
+      if (queue.length >= SEARCH_MAX_QUEUE) {
+        abortedIncomplete = true;
+        break;
+      }
+      if (visited + queue.length >= safeMaxVisit) {
+        abortedIncomplete = true;
+        break;
+      }
+      if (!visitedDirs.has(childRel)) {
+        queue.push(childRel);
+      }
+    }
+  }
+
+  matches.sort((a, b) => {
+    if (a.isDir !== b.isDir) {
+      return a.isDir ? -1 : 1;
+    }
+    return String(a.name).localeCompare(String(b.name));
+  });
+
+  truncated =
+    abortedIncomplete ||
+    queue.length > 0 ||
+    visited >= safeMaxVisit ||
+    isSearchTimedOut(startTime, safeTimeoutMs);
+
+  log(logId, "INFO", "File search completed", {
+    kw: keyword,
+    matchCount: matches.length,
+    visited,
+    truncated,
+    relativePath: relativePath || "",
+    elapsedMs: Date.now() - startTime,
+  });
+
+  return {
+    files: matches,
+    truncated,
+    visited,
+  };
 }
 
 /**
@@ -267,8 +780,10 @@ async function updateFiles(userId, cId, files, customTargetDir) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = (customTargetDir && customTargetDir.trim())
-    ? customTargetDir
+  const trimmedCustomTargetDir =
+    customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
     : path.join(workspaceRoot, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
@@ -578,8 +1093,10 @@ async function uploadFile(userId, cId, file, filePath, customTargetDir) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = (customTargetDir && customTargetDir.trim())
-    ? customTargetDir
+  const trimmedCustomTargetDir =
+    customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
     : path.join(workspaceRoot, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
@@ -830,8 +1347,10 @@ async function downloadAllFiles(userId, cId, customTargetDir) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const targetDir = (customTargetDir && customTargetDir.trim())
-    ? customTargetDir
+  const trimmedCustomTargetDir =
+    customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
     : path.join(workspaceRoot, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
@@ -1472,6 +1991,8 @@ async function generateFile(userId, cId, fileName, content, customTargetDir) {
 
 export {
   getFileList,
+  resolveExistingFile,
+  searchFiles,
   updateFiles,
   uploadFile,
   uploadFiles,
