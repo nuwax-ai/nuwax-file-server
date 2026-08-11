@@ -371,7 +371,7 @@ async function calculateDownloadableDirectorySize(
  * @param {string} [customTargetDir] 自定义目标目录，非空时直接扫描该目录，为空则按默认规则拼接 workspaceRoot/userId/cId
  * @param {string} [relativePath] 相对工作区根的目录路径（可多级），空则列出根目录
  * @param {boolean|string} [recursive] 是否递归扁平列出；默认 true（原全量逻辑）；显式 false 时仅当前目录一层
- * @returns {Promise<{files: Array}>}
+ * @returns {Promise<{files: Array, recursive: boolean}>}
  */
 async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive) {
   const startTime = Date.now();
@@ -401,7 +401,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       userId: normalizedUserId,
       cId: normalizedCId,
     });
-    return { files: [] };
+    return { files: [], recursive: isRecursive };
   }
 
   const listDir = resolvePathWithinWorkspace(targetDir, relativePath);
@@ -414,7 +414,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       userId: normalizedUserId,
       cId: normalizedCId,
     });
-    return { files: [] };
+    return { files: [], recursive: isRecursive };
   }
 
   const listStat = await fs.promises.stat(listDir);
@@ -450,7 +450,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       elapsedMs: Date.now() - startTime,
     });
 
-    return { files };
+    return { files, recursive: isRecursive };
   } catch (error) {
     if (error instanceof ValidationError) {
       throw error;
