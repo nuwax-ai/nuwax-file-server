@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { log } from "../log/logUtils.js";
 
 const AGENT_ROOT_MAP = {
   agents: ".agents",
@@ -50,8 +51,17 @@ async function ensurePrimaryAgentDirs(workspaceRoot) {
 
 /**
  * 将主 agent 目录内容同步到其他 agent 目录
+ * @param {string} workspaceRoot
+ * @param {string} [logId] 可选，与调用方日志关联
  */
-async function syncAgents(workspaceRoot) {
+async function syncAgents(workspaceRoot, logId) {
+  const startedAt = Date.now();
+  const id = logId || path.basename(workspaceRoot) || "syncAgents";
+  log(id, "INFO", "Start syncAgents", {
+    workspaceRoot,
+    targetAgentTypes: ALL_AGENT_TYPES.filter((t) => t !== PRIMARY_AGENT_TYPE),
+  });
+
   const primary = await ensurePrimaryAgentDirs(workspaceRoot);
 
   for (const agentType of ALL_AGENT_TYPES) {
@@ -88,7 +98,14 @@ async function syncAgents(workspaceRoot) {
     }
   }
 
-  return { agentTypes: ALL_AGENT_TYPES };
+  const elapsedMs = Date.now() - startedAt;
+  log(id, "INFO", "syncAgents completed", {
+    workspaceRoot,
+    agentTypes: ALL_AGENT_TYPES,
+    elapsedMs,
+  });
+
+  return { agentTypes: ALL_AGENT_TYPES, elapsedMs };
 }
 
 export {

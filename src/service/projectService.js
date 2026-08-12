@@ -865,15 +865,28 @@ async function pushSkillsToWorkspace(
         ? `Pushed ${updatedSkills.length} skills: ${updatedSkills.join(", ")}`
         : "No valid skill directories found in file or skillUrls";
 
+    const prepareElapsedMs = Date.now() - startTime;
+    log(logId, "INFO", "Push skills to project workspace resources prepared", {
+      projectId,
+      updatedSkills,
+      skillUrlsCount: normalizedSkillUrls.length,
+      hasFile: !!file,
+      agentTypes: normalizedAgentTypes,
+      prepareElapsedMs,
+    });
+
+    const syncResult = await syncAgents(projectPath, logId);
+
     log(logId, "INFO", "Push skills to project workspace completed", {
       projectId,
       updatedSkills,
       skillUrlsCount: normalizedSkillUrls.length,
       hasFile: !!file,
       agentTypes: normalizedAgentTypes,
+      prepareElapsedMs,
+      syncAgentsElapsedMs: syncResult?.elapsedMs,
       elapsedMs: Date.now() - startTime,
     });
-    await syncAgents(projectPath);
 
     return {
       message,
@@ -900,6 +913,7 @@ async function pushSkillsToWorkspace(
       projectId,
     });
   } finally {
+    const cleanupStartedAt = Date.now();
     for (const extractRoot of extractRoots) {
       try {
         if (fs.existsSync(extractRoot)) {
@@ -936,6 +950,11 @@ async function pushSkillsToWorkspace(
         error: e.message,
       });
     }
+    log(logId, "INFO", "Push skills to project workspace temp cleanup completed", {
+      projectId,
+      elapsedMs: Date.now() - cleanupStartedAt,
+      totalElapsedMs: Date.now() - startTime,
+    });
   }
 }
 

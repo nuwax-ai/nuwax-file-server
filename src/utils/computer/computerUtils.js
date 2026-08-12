@@ -317,7 +317,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
 
   // 如果没有上传文件也没有 URL：不写入 skills 和 agents
   if (!file && normalizedSkillUrls.length === 0) {
-    await syncAgents(userWorkspaceRoot);
+    const syncResult = await syncAgents(userWorkspaceRoot, logId);
     log(logId, "INFO", "Created workspace (no uploaded file, no skills and agents)", {
       userId,
       cId,
@@ -325,6 +325,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
       skillsDir: null,
       agentsDir: null,
       agentTypes: normalizedAgentTypes,
+      syncAgentsElapsedMs: syncResult?.elapsedMs,
       elapsedMs: Date.now() - startTime,
     });
 
@@ -535,15 +536,28 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
         ? `Workspace created successfully, ${updatedDirs.join(" and ")} updated`
         : "Workspace created successfully (skills and agents directories not found)";
 
+    const prepareElapsedMs = Date.now() - startTime;
+    log(logId, "INFO", "Workspace resources prepared", {
+      userId,
+      cId,
+      updatedDirs,
+      updatedSkills,
+      agentTypes: normalizedAgentTypes,
+      prepareElapsedMs,
+    });
+
+    const syncResult = await syncAgents(userWorkspaceRoot, logId);
+
     log(logId, "INFO", message, {
       userId,
       cId,
       updatedDirs,
       updatedSkills,
       agentTypes: normalizedAgentTypes,
+      prepareElapsedMs,
+      syncAgentsElapsedMs: syncResult?.elapsedMs,
       elapsedMs: Date.now() - startTime,
     });
-    await syncAgents(userWorkspaceRoot);
 
     return {
       message,
@@ -571,6 +585,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
       cId,
     });
   } finally {
+    const cleanupStartedAt = Date.now();
     // 清理临时目录和临时 zip 文件
     try {
       for (const extractRoot of extractRoots) {
@@ -607,6 +622,12 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
         error: e.message,
       });
     }
+    log(logId, "INFO", "Workspace temp cleanup completed", {
+      userId,
+      cId,
+      elapsedMs: Date.now() - cleanupStartedAt,
+      totalElapsedMs: Date.now() - startTime,
+    });
   }
 }
 
@@ -814,14 +835,26 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
         ? `Pushed ${updatedSkills.length} skills: ${updatedSkills.join(", ")}`
         : "No valid skill directories found in file or skillUrls";
 
+    const prepareElapsedMs = Date.now() - startTime;
+    log(logId, "INFO", "Push skills resources prepared", {
+      userId,
+      cId,
+      updatedSkills,
+      agentTypes: normalizedAgentTypes,
+      prepareElapsedMs,
+    });
+
+    const syncResult = await syncAgents(userWorkspaceRoot, logId);
+
     log(logId, "INFO", message, {
       userId,
       cId,
       updatedSkills,
       agentTypes: normalizedAgentTypes,
+      prepareElapsedMs,
+      syncAgentsElapsedMs: syncResult?.elapsedMs,
       elapsedMs: Date.now() - startTime,
     });
-    await syncAgents(userWorkspaceRoot);
 
     return {
       message,
@@ -849,6 +882,7 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
       cId,
     });
   } finally {
+    const cleanupStartedAt = Date.now();
     try {
       for (const extractRoot of extractRoots) {
         if (fs.existsSync(extractRoot)) {
@@ -882,6 +916,12 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls) {
         error: e.message,
       });
     }
+    log(logId, "INFO", "Push skills temp cleanup completed", {
+      userId,
+      cId,
+      elapsedMs: Date.now() - cleanupStartedAt,
+      totalElapsedMs: Date.now() - startTime,
+    });
   }
 }
 
