@@ -624,6 +624,11 @@ async function logHistory(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
+    // 仅 git init、尚无任何 commit 时（HEAD 无法解析）直接返回空列表
+    if (!(await hasGitHead(targetPath))) {
+      return { success: true, logId, commits: [], total: 0 };
+    }
+
     const maxCount = Math.min(Math.max(1, rawMax), 500);
     const skip = Math.max(0, rawSkip);
 
@@ -650,10 +655,12 @@ async function logHistory(options = {}) {
 
     return { success: true, logId, commits, total: commits.length };
   } catch (e) {
-    // 尚无任何提交（ensureGitRepo 不再写占位 Initial commit）时返回空列表
+    // 空分支 / 无法解析 ref 时返回空列表（含 isomorphic-git: does not have any commits）
     if (
       e?.code === "NotFoundError" ||
-      /NotFoundError|Could not find|unable to resolve/i.test(String(e?.message || ""))
+      /NotFoundError|Could not find|unable to resolve|does not have any commits/i.test(
+        String(e?.message || "")
+      )
     ) {
       return { success: true, logId, commits: [], total: 0 };
     }
