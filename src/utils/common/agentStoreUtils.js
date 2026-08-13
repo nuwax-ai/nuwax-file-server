@@ -10,41 +10,32 @@ const SYNC_LOCK_NAME = ".sync.lock";
 const SYNC_LOCK_STALE_MS = 5 * 60 * 1000;
 
 /**
- * 智能体级实体存储根目录：固定为 {COMPUTER_WORKSPACE_DIR}/.agent-store
- * 与会话工作区同属 COMPUTER_WORKSPACE_DIR，相对软链可跨节点挂载点解析。
+ * 智能体级实体存储目录：
+ * {COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}
+ * 与会话工作区 {COMPUTER_WORKSPACE_DIR}/{userId}/{cId} 同属一棵树，相对软链可跨节点解析。
  */
-function getAgentStoreRoot() {
+function getAgentStorePath(userId, agentId) {
   const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
   if (!workspaceRoot) {
     throw new ValidationError("COMPUTER_WORKSPACE_DIR configuration does not exist", {
       field: "COMPUTER_WORKSPACE_DIR",
     });
   }
-  return path.join(workspaceRoot, ".agent-store");
-}
-
-/**
- * @param {string|number} userId
- * @param {string|number} agentId
- */
-function getAgentStorePath(userId, agentId) {
-  return path.join(getAgentStoreRoot(), String(userId), String(agentId));
+  return path.join(workspaceRoot, String(userId), ".agent-store", String(agentId));
 }
 
 async function ensureAgentStoreDirs(userId, agentId, logId) {
-  const storeRoot = getAgentStoreRoot();
   const agentStorePath = getAgentStorePath(userId, agentId);
   const skillsDir = path.join(agentStorePath, "skills");
   const agentsDir = path.join(agentStorePath, "agents");
   await fs.promises.mkdir(skillsDir, { recursive: true });
   await fs.promises.mkdir(agentsDir, { recursive: true });
   log(logId || "agent-store", "DEBUG", "Agent store dirs ready", {
-    storeRoot,
     agentStorePath,
     skillsDir,
     agentsDir,
   });
-  return { storeRoot, agentStorePath, skillsDir, agentsDir };
+  return { agentStorePath, skillsDir, agentsDir };
 }
 
 /**
@@ -215,7 +206,6 @@ function agentSkillExists(skillsDir, skillName) {
 
 export {
   DYNAMIC_ADD_LOCK,
-  getAgentStoreRoot,
   getAgentStorePath,
   ensureAgentStoreDirs,
   tryAcquireAgentStoreLock,
