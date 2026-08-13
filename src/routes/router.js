@@ -49,6 +49,17 @@ router.get("/health", (req, res) => {
   res.json(healthData);
 });
 
+/**
+ * 返回 package.json 中的 version，Java 据此决定走哪套 API。
+ * 旧版 file-server 无此接口 → 404 → Java 按不支持处理。
+ */
+router.get("/api/version", (req, res) => {
+  res.status(200).json({
+    success: true,
+    version,
+  });
+});
+
 router.use("/api/build", buildRouter);
 router.use("/api/project", projectRouter);
 router.use("/api/project", codeRouter);

@@ -107,18 +107,58 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, skillUrls, mcpServersConfig, hooksConfig, permissionsConfig, hookScripts } = req.body || {};
+      const {
+        userId,
+        cId,
+        agentId,
+        skillUrls,
+        skillUrlMap,
+        skillNames,
+        updateSkillNames,
+        mcpServersConfig,
+        hooksConfig,
+        permissionsConfig,
+        hookScripts,
+      } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
 
-      // multipart/form-data 中数组可能被序列化成 JSON 字符串
+      // multipart/form-data 中数组/对象可能被序列化成 JSON 字符串
       let normalizedSkillUrls = skillUrls;
       if (typeof skillUrls === "string") {
         try {
-          const parsed = JSON.parse(skillUrls);
-          normalizedSkillUrls = Array.isArray(parsed) ? parsed : [skillUrls];
+          normalizedSkillUrls = JSON.parse(skillUrls);
         } catch {
           normalizedSkillUrls = [skillUrls];
+        }
+      }
+
+      let normalizedSkillUrlMap = skillUrlMap;
+      if (typeof skillUrlMap === "string") {
+        try {
+          normalizedSkillUrlMap = JSON.parse(skillUrlMap);
+        } catch {
+          normalizedSkillUrlMap = null;
+        }
+      }
+
+      let normalizedSkillNames = skillNames;
+      if (typeof skillNames === "string") {
+        try {
+          const parsed = JSON.parse(skillNames);
+          normalizedSkillNames = Array.isArray(parsed) ? parsed : [skillNames];
+        } catch {
+          normalizedSkillNames = skillNames.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+      }
+
+      let normalizedUpdateSkillNames = updateSkillNames;
+      if (typeof updateSkillNames === "string") {
+        try {
+          const parsed = JSON.parse(updateSkillNames);
+          normalizedUpdateSkillNames = Array.isArray(parsed) ? parsed : [updateSkillNames];
+        } catch {
+          normalizedUpdateSkillNames = updateSkillNames.split(",").map((s) => s.trim()).filter(Boolean);
         }
       }
 
@@ -132,20 +172,45 @@ const routes = [
         }
       }
 
+      const skillUrlsCount = Array.isArray(normalizedSkillUrls)
+        ? normalizedSkillUrls.length
+        : 0;
+      const skillUrlMapCount =
+        normalizedSkillUrlMap && typeof normalizedSkillUrlMap === "object" && !Array.isArray(normalizedSkillUrlMap)
+          ? Object.keys(normalizedSkillUrlMap).length
+          : 0;
+
       log(logId, "INFO", "Create workspace v2 request", {
         userId,
         cId,
+        agentId,
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
-        skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
+        skillUrlsCount,
+        skillUrlMapCount,
+        skillNamesCount: Array.isArray(normalizedSkillNames) ? normalizedSkillNames.length : 0,
+        updateSkillNamesCount: Array.isArray(normalizedUpdateSkillNames) ? normalizedUpdateSkillNames.length : 0,
         hasMcpServersConfig: !!mcpServersConfig,
         hasHooksConfig: !!hooksConfig,
         hasPermissionsConfig: !!permissionsConfig,
         hookScriptsCount: Array.isArray(normalizedHookScripts) ? normalizedHookScripts.length : 0,
       });
 
-      const result = await createWorkspace(userId, cId, file, normalizedSkillUrls, mcpServersConfig, permissionsConfig, hooksConfig, normalizedHookScripts);
+      const result = await createWorkspace(
+        userId,
+        cId,
+        file,
+        normalizedSkillUrls,
+        mcpServersConfig,
+        permissionsConfig,
+        hooksConfig,
+        normalizedHookScripts,
+        agentId,
+        normalizedSkillNames,
+        normalizedUpdateSkillNames,
+        normalizedSkillUrlMap
+      );
 
       res.status(200).json({
         success: true,
@@ -186,7 +251,7 @@ const routes = [
     method: "post",
     middleware: upload.single("file"),
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, skillUrls } = req.body || {};
+      const { userId, cId, agentId, skillUrls } = req.body || {};
       const file = req.file || null;
       const logId = `computer:${userId}:${cId}`;
 
@@ -204,13 +269,14 @@ const routes = [
       log(logId, "INFO", "推送技能到工作空间请求(v2)", {
         userId,
         cId,
+        agentId,
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
         skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
       });
 
-      const result = await pushSkillsToWorkspace(userId, cId, file, normalizedSkillUrls);
+      const result = await pushSkillsToWorkspace(userId, cId, file, normalizedSkillUrls, agentId);
 
       res.status(200).json({
         success: true,
