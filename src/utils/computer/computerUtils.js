@@ -336,7 +336,7 @@ async function collectSkillDirsFromExtractRoot(extractRoot) {
 }
 
 /** 技能下载/解压/安装并发上限 */
-const SKILL_INSTALL_CONCURRENCY = 16;
+const SKILL_INSTALL_CONCURRENCY = 8;
 
 /**
  * 有限并发执行（异步 I/O 并发）

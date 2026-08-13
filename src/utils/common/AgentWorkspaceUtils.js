@@ -13,7 +13,7 @@ const ALL_AGENT_TYPES = Object.keys(AGENT_ROOT_MAP);
 const PRIMARY_AGENT_TYPE = "agents";
 
 /** syncAgents 全局拷贝并发上限（跨目录层级共享，避免嵌套放大） */
-const SYNC_COPY_CONCURRENCY = 16;
+const SYNC_COPY_CONCURRENCY = 8;
 
 /**
  * 简单异步信号量（唤醒等待者时移交槽位，不额外增减 active）
