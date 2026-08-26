@@ -1,7 +1,7 @@
 {
   "name": "nuwax-file-server",
   "displayName": "nuwax-file-server",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Cross-platform file service deployment tool with start/stop/restart CLI commands",
   "type": "module",
   "main": "index.js",

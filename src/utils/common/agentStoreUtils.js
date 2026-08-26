@@ -3,6 +3,7 @@ import path from "path";
 import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { ValidationError } from "../error/errorHandler.js";
+import { resolveWorkspaceRoot } from "../computer/workspaceContext.js";
 
 const DYNAMIC_ADD_LOCK = ".dynamic_add.lock";
 const SYNC_LOCK_NAME = ".sync.lock";
@@ -11,21 +12,33 @@ const SYNC_LOCK_STALE_MS = 5 * 60 * 1000;
 
 /**
  * 智能体级实体存储目录：
- * {COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}
- * 与会话工作区 {COMPUTER_WORKSPACE_DIR}/{userId}/{cId} 同属一棵树，相对软链可跨节点解析。
+ * - general/pageapp：{COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}
+ * - userapp：{USERAPP_WORKSPACE_DIR}/.agent-store/{agentId}
+ *   （docker模式，宿主机按用户级 {userId}/.agent-store 独立挂载到容器 /home/user/.agent-store，容器内无 userId 段）
+ * 两者均与会话工作区同属容器内一棵树，相对软链可解析。
  */
-function getAgentStorePath(userId, agentId) {
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+function getAgentStorePath(userId, agentId, service = null) {
+  const workspaceRoot = resolveWorkspaceRoot(service);
   if (!workspaceRoot) {
     throw new ValidationError("COMPUTER_WORKSPACE_DIR configuration does not exist", {
       field: "COMPUTER_WORKSPACE_DIR",
     });
   }
+  if (service?.isUserApp) {
+    return path.join(workspaceRoot, ".agent-store", String(agentId));
+  }
   return path.join(workspaceRoot, String(userId), ".agent-store", String(agentId));
 }
 
-async function ensureAgentStoreDirs(userId, agentId, logId) {
-  const agentStorePath = getAgentStorePath(userId, agentId);
+async function ensureAgentStoreDirs(userId, agentId, logId, service = null) {
+  const agentStorePath = getAgentStorePath(userId, agentId, service);
+  if (service?.isUserApp && !fs.existsSync(path.dirname(agentStorePath))) {
+    // userapp 的 .agent-store 由部署侧挂载，缺失时抛错，避免 mkdir 落到容器本地临时目录
+    throw new ValidationError(
+      `userapp agent-store mount does not exist: ${path.dirname(agentStorePath)}`,
+      { field: "USERAPP_WORKSPACE_DIR" }
+    );
+  }
   const skillsDir = path.join(agentStorePath, "skills");
   const agentsDir = path.join(agentStorePath, "agents");
   await fs.promises.mkdir(skillsDir, { recursive: true });

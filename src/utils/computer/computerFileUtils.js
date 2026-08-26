@@ -6,6 +6,7 @@ import { log } from "../log/logUtils.js";
 import { ValidationError, SystemError, FileError } from "../error/errorHandler.js";
 import { extractZip } from "../common/zipUtils.js";
 import { moveDirectory, movePath } from "../common/fileSystemUtils.js";
+import { resolveLogDir, resolveWorkspaceDir, resolveWorkspaceRoot } from "./workspaceContext.js";
 
 /** 导入项目时保留的目录/文件 */
 const IMPORT_PROJECT_PRESERVED_ENTRIES = new Set([
@@ -232,7 +233,7 @@ function buildFileProxyUrl(proxyPath, relativePath, customTargetDir) {
  * 校验目标根目录下文件是否存在，存在则返回相对路径与代理 URL（供 IM 直出）
  * 目标根目录 = customTargetDir（可在默认工作区外）或 workspace/userId/cId
  */
-async function resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir) {
+async function resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir, service = null) {
   if (!userId) {
     throw new ValidationError("userId 不能为空", { field: "userId" });
   }
@@ -245,13 +246,12 @@ async function resolveExistingFile(userId, cId, filePath, proxyPath, customTarge
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
-  // customTargetDir 非空时作为目标根（可跳出默认工作区）；否则用默认会话目录
+  // customTargetDir 非空时作为目标根（可跳出默认工作区）；否则按项目类型定位默认会话目录
   const trimmedCustomTargetDir =
     customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
   const targetDir = trimmedCustomTargetDir
     ? trimmedCustomTargetDir
-    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     return { exists: false };
@@ -373,10 +373,9 @@ async function calculateDownloadableDirectorySize(
  * @param {boolean|string} [recursive] 是否递归扁平列出；默认 true（原全量逻辑）；显式 false 时仅当前目录一层
  * @returns {Promise<{files: Array, recursive: boolean}>}
  */
-async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive) {
+async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
   // 默认 true=原全量递归；仅显式 false/"false" 时单层
   const isRecursive = !(recursive === false || recursive === "false");
 
@@ -393,7 +392,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
     customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
   const targetDir = trimmedCustomTargetDir
     ? trimmedCustomTargetDir
-    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     log(logId, "INFO", "Directory does not exist, returning empty list", {
@@ -534,11 +533,11 @@ async function searchFiles(
   relativePath,
   limit,
   maxVisit,
-  timeoutMs
+  timeoutMs,
+  service = null
 ) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!userId) {
     throw new ValidationError("userId 不能为空", { field: "userId" });
@@ -562,7 +561,7 @@ async function searchFiles(
     customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
   const targetDir = trimmedCustomTargetDir
     ? trimmedCustomTargetDir
-    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     return { files: [], truncated: false, visited: 0 };
@@ -763,10 +762,9 @@ async function searchFiles(
  * @param {Array} files 文件操作列表
  * @returns {Promise<Object>} 更新结果
  */
-async function updateFiles(userId, cId, files, customTargetDir) {
+async function updateFiles(userId, cId, files, customTargetDir, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!userId) {
     throw new ValidationError("userId cannot be empty", { field: "userId" });
@@ -784,7 +782,7 @@ async function updateFiles(userId, cId, files, customTargetDir) {
     customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
   const targetDir = trimmedCustomTargetDir
     ? trimmedCustomTargetDir
-    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
@@ -1073,10 +1071,9 @@ async function updateFiles(userId, cId, files, customTargetDir) {
  * @param {string} filePath 文件在用户目录中的相对路径
  * @returns {Promise<Object>} 上传结果
  */
-async function uploadFile(userId, cId, file, filePath, customTargetDir) {
+async function uploadFile(userId, cId, file, filePath, customTargetDir, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
 
   if (!userId) {
     throw new ValidationError("userId cannot be empty", { field: "userId" });
@@ -1097,7 +1094,7 @@ async function uploadFile(userId, cId, file, filePath, customTargetDir) {
     customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
   const targetDir = trimmedCustomTargetDir
     ? trimmedCustomTargetDir
-    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
@@ -1192,7 +1189,7 @@ async function uploadFile(userId, cId, file, filePath, customTargetDir) {
  * @param {Array<string>} filePaths 文件路径数组，与files数组一一对应
  * @returns {Promise<Object>} 批量上传结果
  */
-async function uploadFiles(userId, cId, files, filePaths, customTargetDir) {
+async function uploadFiles(userId, cId, files, filePaths, customTargetDir, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
@@ -1257,7 +1254,7 @@ async function uploadFiles(userId, cId, files, filePaths, customTargetDir) {
       }
 
       try {
-        const result = await uploadFile(userId, cId, file, filePath, customTargetDir);
+        const result = await uploadFile(userId, cId, file, filePath, customTargetDir, service);
         results.push({
           success: true,
           filePath,
@@ -1330,10 +1327,10 @@ async function uploadFiles(userId, cId, files, filePaths, customTargetDir) {
  * @param {string|number} cId 会话ID
  * @returns {Promise<{ archive: import("archiver").Archiver, zipFileName: string }>}
  */
-async function downloadAllFiles(userId, cId, customTargetDir) {
+async function downloadAllFiles(userId, cId, customTargetDir, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+  const workspaceRoot = resolveWorkspaceRoot(service);
 
   if (!userId) {
     throw new ValidationError("userId cannot be empty", { field: "userId" });
@@ -1351,7 +1348,7 @@ async function downloadAllFiles(userId, cId, customTargetDir) {
     customTargetDir && customTargetDir.trim() ? customTargetDir.trim() : null;
   const targetDir = trimmedCustomTargetDir
     ? trimmedCustomTargetDir
-    : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
 
   if (!fs.existsSync(targetDir)) {
     // 目录不存在时，返回一个仅包含顶层目录的空压缩包
@@ -1532,7 +1529,7 @@ async function downloadAllFiles(userId, cId, customTargetDir) {
  * @param {number} tailLines 读取最后 N 行，默认 200
  * @returns {Promise<{ success: boolean, message: string, logs: Array<{line: number, content: string}>, totalLines: number, startIndex: number, logFileName: string|null }>}
  */
-async function getLatestLogs(userId, cId, tailLines = 200) {
+async function getLatestLogs(userId, cId, tailLines = 200, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
@@ -1545,9 +1542,9 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+  const logDir = resolveLogDir(service, normalizedUserId, normalizedCId);
 
-  if (!workspaceRoot) {
+  if (!logDir) {
     log(logId, "WARN", "COMPUTER_WORKSPACE_DIR is not configured");
     return {
       success: true,
@@ -1558,8 +1555,6 @@ async function getLatestLogs(userId, cId, tailLines = 200) {
       logFileName: null,
     };
   }
-
-  const logDir = path.join(workspaceRoot, normalizedUserId, normalizedCId, ".logs");
 
   if (!fs.existsSync(logDir)) {
     log(logId, "DEBUG", "Log directory does not exist", { logDir });
@@ -1796,10 +1791,10 @@ async function mergeExtractedIntoWorkspace(extractRoot, targetDir, logId) {
  * @param {Object} file multer 文件对象（zip）
  * @param {string} [customTargetDir]
  */
-async function importProject(userId, cId, file, customTargetDir) {
+async function importProject(userId, cId, file, customTargetDir, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
+  const workspaceRoot = resolveWorkspaceRoot(service);
 
   if (!userId) {
     throw new ValidationError("userId cannot be empty", { field: "userId" });
@@ -1827,7 +1822,7 @@ async function importProject(userId, cId, file, customTargetDir) {
   const targetDir =
     customTargetDir && customTargetDir.trim()
       ? customTargetDir.trim()
-      : path.join(workspaceRoot, normalizedUserId, normalizedCId);
+      : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
   const tmpRoot = path.join(targetDir, ".tmp");
   const extractRoot = path.join(
     tmpRoot,
@@ -1950,7 +1945,7 @@ async function importProject(userId, cId, file, customTargetDir) {
  * @param {string} [customTargetDir] 自定义目标目录
  * @returns {Promise<Object>} 生成结果
  */
-async function generateFile(userId, cId, fileName, content, customTargetDir) {
+async function generateFile(userId, cId, fileName, content, customTargetDir, service = null) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!fileName || typeof fileName !== "string" || !fileName.trim()) {
@@ -1979,7 +1974,8 @@ async function generateFile(userId, cId, fileName, content, customTargetDir) {
       size: Buffer.byteLength(textContent, "utf8"),
     },
     normalizedFileName,
-    customTargetDir
+    customTargetDir,
+    service
   );
 
   return {

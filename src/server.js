@@ -8,6 +8,7 @@ import logCacheManager from "./utils/log/logCacheManager.js";
 import { errorHandler, notFoundHandler } from "./utils/error/errorHandler.js";
 import router from "./routes/router.js";
 import { cleanupInitProjectOnStartup } from "./utils/project/initProjectCleanupUtils.js";
+import { resolveServiceContext, resolveWorkspaceDir } from "./utils/computer/workspaceContext.js";
 import { startScheduler, stopScheduler } from "./scheduler/pnpmPruneScheduler.js";
 import path from "path";
 
@@ -144,11 +145,12 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
   // 安全多次解码，解决 "%25E4%25BD%25A0" 这种双重编码的中文
   const decodedPath = safeDecodePath(filePath);
 
-  // customTargetDir 非空时直接从该目录解析文件，否则按默认规则拼接
+  // customTargetDir 非空时直接从该目录解析文件，否则按项目类型定位（userapp: USERAPP_WORKSPACE_DIR/{appId}，其余: COMPUTER_WORKSPACE_DIR/{userId}/{cId}）
   const { customTargetDir } = req.query;
+  const service = resolveServiceContext(req);
   const fullPath = (customTargetDir && customTargetDir.trim())
     ? path.join(customTargetDir, decodedPath)
-    : path.join(config.COMPUTER_WORKSPACE_DIR, userId, cId, decodedPath);
+    : path.join(resolveWorkspaceDir(service, userId, cId), decodedPath);
 
   // 使用 headers 选项确保 CORS 头被保留
   const corsHeaders = {

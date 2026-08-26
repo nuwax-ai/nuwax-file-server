@@ -30,6 +30,7 @@ import {
 import {
   writeAgentHookConfigs,
 } from "./hookConfigUtils.js";
+import { ensureWorkspaceDir, resolveWorkspaceDir, resolveWorkspaceRoot } from "./workspaceContext.js";
 
 /**
  * 规范化 skillUrls 参数，兼容数组/JSON 字符串/单字符串
@@ -203,26 +204,6 @@ async function downloadUrlToFile(url, destinationPath, logId) {
 }
 
 /**
- * 确保工作空间根目录存在：$COMPUTER_WORKSPACE_DIR
- */
-async function ensureWorkspaceRoot(logId = "computer") {
-  const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
-
-  if (!workspaceRoot) {
-    throw new ValidationError("COMPUTER_WORKSPACE_DIR configuration does not exist", {
-      field: "COMPUTER_WORKSPACE_DIR",
-    });
-  }
-
-  if (!fs.existsSync(workspaceRoot)) {
-    await fs.promises.mkdir(workspaceRoot, { recursive: true });
-    log(logId, "INFO", "Created user workspace root directory", { workspaceRoot });
-  }
-
-  return workspaceRoot;
-}
-
-/**
  * 递归查找指定目录（如果不是直接在根目录）
  * @param {string} rootDir - 根目录
  * @param {string} dirName - 要查找的目录名（如 "skills" 或 "agents"）
@@ -381,6 +362,7 @@ async function createWorkspaceWithAgentStore(options) {
     permissionsConfig,
     hooksConfig,
     hookScripts,
+    service,
   } = options;
 
   const startTime = Date.now();
@@ -408,14 +390,14 @@ async function createWorkspaceWithAgentStore(options) {
     throw new ValidationError("agentId cannot be empty", { field: "agentId" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const userWorkspaceRoot = path.join(workspaceRoot, String(userId), String(cId));
+  const workspaceRoot = resolveWorkspaceRoot(service);
+  const userWorkspaceRoot = await ensureWorkspaceDir(service, userId, cId, logId);
   const tmpRoot = path.join(userWorkspaceRoot, ".tmp");
   await fs.promises.mkdir(userWorkspaceRoot, { recursive: true });
   await fs.promises.mkdir(tmpRoot, { recursive: true });
 
   const { agentStorePath, skillsDir: agentSkillsDir, agentsDir: agentAgentsDir } =
-    await ensureAgentStoreDirs(userId, agentId, logId);
+    await ensureAgentStoreDirs(userId, agentId, logId, service);
 
   const shouldInstallSkill = (skillName) => {
     if (!skillName) return true;
@@ -715,7 +697,7 @@ async function createWorkspaceWithAgentStore(options) {
  * @param {string[]|string|undefined} updateSkillNames 强制更新的技能名（agentStore 按需安装）
  * @param {Record<string,string>|string|undefined} skillUrlMap 技能名→url（下载前跳过）
  */
-async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, permissionsConfig, hooksConfig, hookScripts, agentId, skillNames, updateSkillNames, skillUrlMap) {
+async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, permissionsConfig, hooksConfig, hookScripts, agentId, skillNames, updateSkillNames, skillUrlMap, service = null) {
   if (agentId != null && String(agentId).trim() !== "") {
     return createWorkspaceWithAgentStore({
       userId,
@@ -730,6 +712,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
       permissionsConfig,
       hooksConfig,
       hookScripts,
+      service,
     });
   }
 
@@ -747,20 +730,9 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
     throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const tmpRoot = path.join(
-    workspaceRoot,
-    String(userId),
-    String(cId),
-    ".tmp"
-  );
-
-  // 目标：$COMPUTER_WORKSPACE_DIR/userId/cId/
-  const userWorkspaceRoot = path.join(
-    workspaceRoot,
-    String(userId),
-    String(cId)
-  );
+  const workspaceRoot = resolveWorkspaceRoot(service);
+  const userWorkspaceRoot = await ensureWorkspaceDir(service, userId, cId, logId);
+  const tmpRoot = path.join(userWorkspaceRoot, ".tmp");
   const {
     skillsDir: targetSkillsDir,
     agentsDir: targetAgentsDir,
@@ -1159,7 +1131,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
 /**
  * 动态技能写入智能体实体目录（打 .dynamic_add.lock），并确保会话工作区软链
  */
-async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls) {
+async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   const normalizedSkillUrls = normalizeSkillUrls(skillUrls);
@@ -1183,14 +1155,14 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls) {
     });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const userWorkspaceRoot = path.join(workspaceRoot, String(userId), String(cId));
+  const workspaceRoot = resolveWorkspaceRoot(service);
+  const userWorkspaceRoot = await ensureWorkspaceDir(service, userId, cId, logId);
   const tmpRoot = path.join(userWorkspaceRoot, ".tmp");
   await fs.promises.mkdir(userWorkspaceRoot, { recursive: true });
   await fs.promises.mkdir(tmpRoot, { recursive: true });
 
   const { agentStorePath, skillsDir: agentSkillsDir, agentsDir: agentAgentsDir } =
-    await ensureAgentStoreDirs(userId, agentId, logId);
+    await ensureAgentStoreDirs(userId, agentId, logId, service);
 
   try {
     let lock = await tryAcquireAgentStoreLock(agentStorePath, logId);
@@ -1355,15 +1327,22 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls) {
  * @param {string[]|string|undefined} skillUrls 技能 zip 下载地址数组
  * @param {string|number|undefined} agentId 有则可能走实体存储；须同时满足会话已是软链
  */
-async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId) {
+async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId, service = null) {
   const hasAgentId = agentId != null && String(agentId).trim() !== "";
   if (hasAgentId) {
-    const workspaceRoot = config.COMPUTER_WORKSPACE_DIR;
-    const userWorkspaceRoot = workspaceRoot
-      ? path.join(workspaceRoot, String(userId), String(cId))
-      : null;
+    // 仅做软链探测，不创建目录；general 且根目录未配置时保持原行为返回 null
+    let userWorkspaceRoot = null;
+    if (service?.isUserApp) {
+      userWorkspaceRoot = resolveWorkspaceDir(service, userId, cId);
+    } else if (config.COMPUTER_WORKSPACE_DIR) {
+      userWorkspaceRoot = path.join(
+        config.COMPUTER_WORKSPACE_DIR,
+        String(userId),
+        String(cId)
+      );
+    }
     if (isWorkspaceSkillsSymlinked(userWorkspaceRoot)) {
-      return pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls);
+      return pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, service);
     }
     log(`computer:${userId}:${cId}`, "INFO", "Push skills: agentId present but workspace not symlinked, use legacy path", {
       userId,
@@ -1404,18 +1383,9 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId) {
     }
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const tmpRoot = path.join(
-    workspaceRoot,
-    String(userId),
-    String(cId),
-    ".tmp"
-  );
-  const userWorkspaceRoot = path.join(
-    workspaceRoot,
-    String(userId),
-    String(cId)
-  );
+  const workspaceRoot = resolveWorkspaceRoot(service);
+  const userWorkspaceRoot = await ensureWorkspaceDir(service, userId, cId, logId);
+  const tmpRoot = path.join(userWorkspaceRoot, ".tmp");
   const { skillsDir: targetSkillsDir, agentTypes: normalizedAgentTypes } =
     await ensurePrimaryAgentDirs(userWorkspaceRoot);
 
@@ -1664,7 +1634,7 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId) {
  * @param {Object|null} file multer 文件对象（zip）
  * @param {string|boolean|undefined} enableGit 是否开启 git 版本管理
  */
-async function initProjectTemplate(userId, cId, file, enableGit) {
+async function initProjectTemplate(userId, cId, file, enableGit, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
 
@@ -1686,8 +1656,7 @@ async function initProjectTemplate(userId, cId, file, enableGit) {
     });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+  const targetDir = await ensureWorkspaceDir(service, userId, cId, logId);
   const tmpRoot = path.join(targetDir, ".tmp");
   const extractRoot = path.join(
     tmpRoot,
@@ -1804,7 +1773,7 @@ async function initProjectTemplate(userId, cId, file, enableGit) {
  * @param {string} command 要执行的命令
  * @returns {Promise<{stdout: string, stderr: string, exitCode: number}>}
  */
-async function executeCommand(userId, cId, command) {
+async function executeCommand(userId, cId, command, service = null) {
   if (!userId) {
     throw new ValidationError("userId cannot be empty", { field: "userId" });
   }
@@ -1815,8 +1784,7 @@ async function executeCommand(userId, cId, command) {
     throw new ValidationError("command cannot be empty", { field: "command" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot("computer");
-  const workDir = path.join(workspaceRoot, String(userId), String(cId));
+  const workDir = await ensureWorkspaceDir(service, userId, cId, "computer");
 
   if (!fs.existsSync(workDir)) {
     throw new ValidationError("workspace directory does not exist", {
@@ -1871,7 +1839,7 @@ async function executeCommand(userId, cId, command) {
  * @param {string[]|null} excludeDirs 排除目录列表，为 null 时使用默认列表
  * @returns {Promise<{ archive: import("archiver").Archiver, zipFileName: string }>}
  */
-async function zipWorkspace(userId, cId, excludeDirs) {
+async function zipWorkspace(userId, cId, excludeDirs, service = null) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -1881,8 +1849,7 @@ async function zipWorkspace(userId, cId, excludeDirs) {
     throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+  const targetDir = await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (!fs.existsSync(targetDir)) {
     throw new ValidationError("workspace directory does not exist", {
@@ -2069,7 +2036,7 @@ function extractPlatformFromFileName(fileName) {
  * @param {string} version
  * @returns {Promise<{ artifacts: Array<{path: string, fileName: string, platform: string}> }>}
  */
-async function buildAgentPackage(userId, cId, agentId, version) {
+async function buildAgentPackage(userId, cId, agentId, version, service = null) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -2085,8 +2052,7 @@ async function buildAgentPackage(userId, cId, agentId, version) {
     throw new ValidationError("version cannot be empty", { field: "version" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const workspaceDir = path.join(workspaceRoot, String(userId), String(cId));
+  const workspaceDir = await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (!fs.existsSync(workspaceDir)) {
     throw new ValidationError("workspace directory does not exist", {
@@ -2180,7 +2146,7 @@ async function buildAgentPackage(userId, cId, agentId, version) {
  * @param {string|number} cId
  * @returns {Promise<{ cleaned: boolean }>}
  */
-async function cleanupBuildArtifacts(userId, cId) {
+async function cleanupBuildArtifacts(userId, cId, service = null) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -2190,8 +2156,7 @@ async function cleanupBuildArtifacts(userId, cId) {
     throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const workspaceDir = path.join(workspaceRoot, String(userId), String(cId));
+  const workspaceDir = await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (!fs.existsSync(workspaceDir)) {
     log(logId, "WARN", "Workspace not found, skip cleanup", { userId, cId });
@@ -2219,7 +2184,7 @@ async function cleanupBuildArtifacts(userId, cId) {
  * 删除工作空间目录
  * 删除 $COMPUTER_WORKSPACE_DIR/userId/cId/ 整个目录
  */
-async function deleteWorkspace(userId, cId) {
+async function deleteWorkspace(userId, cId, service = null) {
   const logId = `computer:${userId}:${cId}`;
 
   if (!userId) {
@@ -2229,8 +2194,7 @@ async function deleteWorkspace(userId, cId) {
     throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const targetDir = path.join(workspaceRoot, String(userId), String(cId));
+  const targetDir = await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (fs.existsSync(targetDir)) {
     await fs.promises.rm(targetDir, { recursive: true, force: true });
@@ -2545,7 +2509,7 @@ function findPythonProjectDir(rootDir) {
  * @param {string} programmingLanguage typescript | python
  * @returns {Promise<{ message: string, projectDir: string, programmingLanguage: string }>}
  */
-async function installProjectDependencies(userId, cId, programmingLanguage) {
+async function installProjectDependencies(userId, cId, programmingLanguage, service = null) {
   const logId = `computer:${userId}:${cId}`;
   const normalizedLang = String(programmingLanguage || "").trim().toLowerCase();
 
@@ -2561,8 +2525,7 @@ async function installProjectDependencies(userId, cId, programmingLanguage) {
     });
   }
 
-  const workspaceRoot = await ensureWorkspaceRoot(logId);
-  const workspaceDir = path.join(workspaceRoot, String(userId), String(cId));
+  const workspaceDir = await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (!fs.existsSync(workspaceDir)) {
     throw new ValidationError("workspace directory does not exist", {

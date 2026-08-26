@@ -149,6 +149,9 @@ const config = {
     : undefined,
   COMPUTER_WORKSPACE_DIR: process.env.COMPUTER_WORKSPACE_DIR,
   COMPUTER_LOG_DIR: process.env.COMPUTER_LOG_DIR,
+  // userapp 项目专用目录：工作空间 {USERAPP_WORKSPACE_DIR}/{appId}，日志直接使用 {USERAPP_LOG_DIR}（已按 appId 挂载）
+  USERAPP_WORKSPACE_DIR: process.env.USERAPP_WORKSPACE_DIR,
+  USERAPP_LOG_DIR: process.env.USERAPP_LOG_DIR,
   CLI_SERVICE_NAME: "nuwax-file-server",
   CLI_PID_DIR: process.env.CLI_PID_DIR || (
     process.platform === "win32"

@@ -18,6 +18,7 @@ import {
   getLatestLogs,
   importProject,
 } from "../utils/computer/computerFileUtils.js";
+import { resolveServiceContext } from "../utils/computer/workspaceContext.js";
 
 const computerRouter = express.Router();
 
@@ -26,22 +27,43 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       try {
-        // 将临时上传目录放到 COMPUTER_WORKSPACE_DIR/<userId>/<cId>/.tmp 下
-        const baseDir = config.COMPUTER_WORKSPACE_DIR;
-        if (!baseDir) {
-          return cb(
-            new Error("COMPUTER_WORKSPACE_DIR is not configured, cannot determine upload temporary directory")
+        // 将临时上传目录放到工作空间下 .tmp（userapp 按 appId，其余按 COMPUTER_WORKSPACE_DIR/<userId>/<cId>）。
+        // header 在 multipart body 解析前即可用，userapp 判断一律取 header。
+        const serviceType =
+          typeof req.headers["x-service-type"] === "string"
+            ? req.headers["x-service-type"].trim().toLowerCase()
+            : "";
+        const appId =
+          typeof req.headers["x-app-id"] === "string"
+            ? req.headers["x-app-id"].trim()
+            : "";
+
+        let tmpUploadDir;
+        if (serviceType === "userapp" && appId) {
+          const baseDir = config.USERAPP_WORKSPACE_DIR;
+          if (!baseDir) {
+            return cb(
+              new Error("USERAPP_WORKSPACE_DIR is not configured, cannot determine upload temporary directory")
+            );
+          }
+          tmpUploadDir = path.join(baseDir, String(appId), ".tmp");
+        } else {
+          const baseDir = config.COMPUTER_WORKSPACE_DIR;
+          if (!baseDir) {
+            return cb(
+              new Error("COMPUTER_WORKSPACE_DIR is not configured, cannot determine upload temporary directory")
+            );
+          }
+          const userId = req.body?.userId || "unknown";
+          const cId = req.body?.cId || "unknown";
+          tmpUploadDir = path.join(
+            baseDir,
+            String(userId),
+            String(cId),
+            ".tmp"
           );
         }
 
-        const userId = req.body?.userId || "unknown";
-        const cId = req.body?.cId || "unknown";
-        const tmpUploadDir = path.join(
-          baseDir,
-          String(userId),
-          String(cId),
-          ".tmp"
-        );
         if (!fs.existsSync(tmpUploadDir)) {
           fs.mkdirSync(tmpUploadDir, { recursive: true });
         }
@@ -82,18 +104,35 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { userId, cId } = req.body || {};
       const file = req.file || null;
+      const service = resolveServiceContext(req);
       const logId = `computer:${userId}:${cId}`;
 
       log(logId, "INFO", "Create workspace request", {
         userId,
         cId,
+        serviceType: service.serviceType,
+        appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
       });
 
       // 兼容老逻辑：仅处理上传 file，不处理 skillUrls
-      const result = await createWorkspace(userId, cId, file);
+      const result = await createWorkspace(
+        userId,
+        cId,
+        file,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        service
+      );
 
       res.status(200).json({
         success: true,
@@ -121,6 +160,7 @@ const routes = [
         hookScripts,
       } = req.body || {};
       const file = req.file || null;
+      const service = resolveServiceContext(req);
       const logId = `computer:${userId}:${cId}`;
 
       // multipart/form-data 中数组/对象可能被序列化成 JSON 字符串
@@ -184,6 +224,8 @@ const routes = [
         userId,
         cId,
         agentId,
+        serviceType: service.serviceType,
+        appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
@@ -209,7 +251,8 @@ const routes = [
         agentId,
         normalizedSkillNames,
         normalizedUpdateSkillNames,
-        normalizedSkillUrlMap
+        normalizedSkillUrlMap,
+        service
       );
 
       res.status(200).json({
@@ -226,18 +269,21 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { userId, cId } = req.body || {};
       const file = req.file || null;
+      const service = resolveServiceContext(req);
       const logId = `computer:${userId}:${cId}`;
 
       log(logId, "INFO", "推送技能到工作空间请求", {
         userId,
         cId,
+        serviceType: service.serviceType,
+        appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
       });
 
       // 兼容老逻辑：仅处理上传 file，不处理 skillUrls
-      const result = await pushSkillsToWorkspace(userId, cId, file);
+      const result = await pushSkillsToWorkspace(userId, cId, file, undefined, undefined, service);
 
       res.status(200).json({
         success: true,
@@ -253,6 +299,7 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { userId, cId, agentId, skillUrls } = req.body || {};
       const file = req.file || null;
+      const service = resolveServiceContext(req);
       const logId = `computer:${userId}:${cId}`;
 
       // multipart/form-data 中数组可能被序列化成 JSON 字符串
@@ -270,13 +317,15 @@ const routes = [
         userId,
         cId,
         agentId,
+        serviceType: service.serviceType,
+        appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
         fileSize: file?.size,
         skillUrlsCount: Array.isArray(normalizedSkillUrls) ? normalizedSkillUrls.length : 0,
       });
 
-      const result = await pushSkillsToWorkspace(userId, cId, file, normalizedSkillUrls, agentId);
+      const result = await pushSkillsToWorkspace(userId, cId, file, normalizedSkillUrls, agentId, service);
 
       res.status(200).json({
         success: true,
@@ -290,7 +339,7 @@ const routes = [
     method: "get",
     handler: asyncHandler(async (req, res) => {
       const { userId, cId, proxyPath, customTargetDir, relativePath, recursive } = req.query;
-      const result = await getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive);
+      const result = await getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -299,7 +348,7 @@ const routes = [
     method: "get",
     handler: asyncHandler(async (req, res) => {
       const { userId, cId, proxyPath, customTargetDir, filePath } = req.query;
-      const result = await resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir);
+      const result = await resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -327,7 +376,8 @@ const routes = [
         relativePath,
         limit,
         maxVisit,
-        timeoutMs
+        timeoutMs,
+        resolveServiceContext(req)
       );
       res.status(200).json({ success: true, ...result });
     }),
@@ -364,7 +414,7 @@ const routes = [
         });
       }
 
-      const result = await updateFiles(userId, cId, files, customTargetDir);
+      const result = await updateFiles(userId, cId, files, customTargetDir, resolveServiceContext(req));
       res.status(200).json(result);
     }),
   },
@@ -395,7 +445,7 @@ const routes = [
       };
 
       try {
-        const result = await uploadFile(userId, cId, fileObj, filePath, customTargetDir);
+        const result = await uploadFile(userId, cId, fileObj, filePath, customTargetDir, resolveServiceContext(req));
         res.status(200).json(result);
       } finally {
         // 清理临时文件
@@ -419,7 +469,7 @@ const routes = [
         contentLength: typeof content === "string" ? content.length : 0,
       });
 
-      const result = await generateFile(userId, cId, fileName, content, customTargetDir);
+      const result = await generateFile(userId, cId, fileName, content, customTargetDir, resolveServiceContext(req));
       res.status(200).json(result);
     }),
   },
@@ -443,7 +493,7 @@ const routes = [
         throw new ValidationError("file is required", { field: "file" });
       }
 
-      const result = await importProject(userId, cId, file, customTargetDir);
+      const result = await importProject(userId, cId, file, customTargetDir, resolveServiceContext(req));
       res.status(200).json(result);
     }),
   },
@@ -487,7 +537,7 @@ const routes = [
         }
 
         // 调用批量上传工具函数
-        const result = await uploadFiles(userId, cId, fileObjects, normalizedFilePaths, customTargetDir);
+        const result = await uploadFiles(userId, cId, fileObjects, normalizedFilePaths, customTargetDir, resolveServiceContext(req));
         res.status(200).json(result);
       } finally {
         // 清理所有临时文件
@@ -519,7 +569,7 @@ const routes = [
         programmingLanguage,
       });
 
-      const result = await installProjectDependencies(userId, cId, programmingLanguage);
+      const result = await installProjectDependencies(userId, cId, programmingLanguage, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -541,7 +591,7 @@ const routes = [
         enableGit,
       });
 
-      const result = await initProjectTemplate(userId, cId, file, enableGit);
+      const result = await initProjectTemplate(userId, cId, file, enableGit, resolveServiceContext(req));
 
       res.status(200).json({
         success: true,
@@ -564,7 +614,8 @@ const routes = [
       const { archive, zipFileName } = await downloadAllFiles(
         userId,
         cId,
-        customTargetDir
+        customTargetDir,
+        resolveServiceContext(req)
       );
 
       res.setHeader("Content-Type", "application/zip");
@@ -597,7 +648,7 @@ const routes = [
         command,
       });
 
-      const result = await executeCommand(userId, cId, command);
+      const result = await executeCommand(userId, cId, command, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -613,7 +664,7 @@ const routes = [
         cId,
       });
 
-      const result = await deleteWorkspace(userId, cId);
+      const result = await deleteWorkspace(userId, cId, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -625,7 +676,7 @@ const routes = [
       const parsed = tailLines ? parseInt(tailLines, 10) : 200;
       const safeTailLines = Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
 
-      const result = await getLatestLogs(userId, cId, safeTailLines);
+      const result = await getLatestLogs(userId, cId, safeTailLines, resolveServiceContext(req));
       res.status(200).json(result);
     }),
   },
@@ -640,7 +691,7 @@ const routes = [
         userId, cId, hasExcludeDirs: !!excludeDirs,
       });
 
-      const { archive, zipFileName } = await zipWorkspace(userId, cId, excludeDirs || null);
+      const { archive, zipFileName } = await zipWorkspace(userId, cId, excludeDirs || null, resolveServiceContext(req));
 
       res.setHeader("Content-Type", "application/zip");
       const encodedName = encodeURIComponent(zipFileName);
@@ -668,7 +719,7 @@ const routes = [
         userId, cId, agentId, version,
       });
 
-      const result = await buildAgentPackage(userId, cId, agentId, version);
+      const result = await buildAgentPackage(userId, cId, agentId, version, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
@@ -683,7 +734,7 @@ const routes = [
         userId, cId,
       });
 
-      const result = await cleanupBuildArtifacts(userId, cId);
+      const result = await cleanupBuildArtifacts(userId, cId, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
