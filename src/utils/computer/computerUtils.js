@@ -2194,7 +2194,11 @@ async function deleteWorkspace(userId, cId, service = null) {
     throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
 
-  const targetDir = await ensureWorkspaceDir(service, userId, cId, logId);
+  // 是否删除由调用方按沙箱归属决定（云端删/个人不删），此处一律执行；
+  // 绑定目录定位无需落盘创建，避免"不存在时先建后删"
+  const targetDir = service?.workspaceDir
+    ? service.workspaceDir
+    : await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (fs.existsSync(targetDir)) {
     await fs.promises.rm(targetDir, { recursive: true, force: true });

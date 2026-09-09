@@ -19,6 +19,7 @@ import {
   importProject,
 } from "../utils/computer/computerFileUtils.js";
 import { resolveServiceContext } from "../utils/computer/workspaceContext.js";
+import { listFsRoots, listFsChildren } from "../utils/computer/fsBrowserUtils.js";
 
 const computerRouter = express.Router();
 
@@ -334,6 +335,24 @@ const routes = [
     }),
   },
 
+  {
+    // 文件系统目录浏览（目录选择弹窗）：按绝对路径，不锚定工作空间、不带会话上下文
+    path: "/fs/roots",
+    method: "get",
+    handler: asyncHandler(async (req, res) => {
+      const result = await listFsRoots();
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    path: "/fs/children",
+    method: "get",
+    handler: asyncHandler(async (req, res) => {
+      const { path: dirPath } = req.query;
+      const result = await listFsChildren(dirPath);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
   {
     path: "/get-file-list",
     method: "get",
