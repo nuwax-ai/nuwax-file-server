@@ -1,3 +1,4 @@
+import { resolveWorkspaceDir } from "../utils/computer/workspaceContext.js";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -42,8 +43,24 @@ function resolveAndCheck(options) {
     workspaceType,
     projectId, isolationContext,
     userId, cId,
+    serviceContext,
   } = options || {};
 
+  // 会话项目上下文（Java 端携带 serviceType/appId/workspacePath）：目录与文件操作一致，
+  // 优先级最高；解析失败或缺参由调用方置 null，回落 workspaceType 老规则
+  if (serviceContext && (serviceContext.workspacePath || serviceContext.appId)) {
+    if (!userId || !cId) {
+      throw new ValidationError("serviceContext mode requires userId and cId", { field: "userId/cId" });
+    }
+    const targetPath = resolveWorkspaceDir(serviceContext, userId, cId);
+    if (!fs.existsSync(targetPath)) {
+      throw new ResourceError("Workspace does not exist", { userId, cId, targetPath });
+    }
+    return { targetPath, logId: `computer:${userId}:${cId}` };
+  }
+
+  // 词表统一：workspaceType 与 /computer/* 的 serviceType 同一套值
+  // （pageApp 同值、taskAgent 通用智能体——与 serviceType 正名一致
   if (!workspaceType || !["pageApp", "taskAgent"].includes(workspaceType)) {
     throw new ValidationError("workspaceType is required and must be pageApp or taskAgent", { field: "workspaceType" });
   }

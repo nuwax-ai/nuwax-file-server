@@ -10,12 +10,12 @@ import { ValidationError } from "../error/errorHandler.js";
  * - 用户维度工作目录（workspacePath，优先认传入；空则按类型默认规则）：
  *   - userapp（子容器）：{USERAPP_WORKSPACE_DIR}/{appId}，日志 {USERAPP_LOG_DIR}
  *   - normalProject（常规项目，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/NormalProject/{projectId}
- *   - generalAgent（通用智能体，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
+ *   - taskAgent（通用智能体，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
  *   - pageapp：沿用 {COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
  * - workspacePath 仅做格式校验（绝对路径、无 . / .. 穿越片段、无非法字符），不限制根目录范围。
  *
- * 项目类型来源：header x-service-type 优先，body/query 的 serviceType 兜底，缺省 generalAgent
- * （兼容旧调用方：general 按 generalAgent 处理）。projectId 复用 appId 参数（userapp/normalProject 必带）。
+ * 项目类型来源：header x-service-type 优先，body/query 的 serviceType 兜底，缺省 taskAgent。
+ * projectId 复用 appId 参数（userapp/normalProject 必带）。
  * workspacePath 来源：body/query 的 workspacePath，或 header x-workspace-path。
  */
 
@@ -23,7 +23,7 @@ export const SERVICE_TYPE = {
   USERAPP: "userapp",
   PAGEAPP: "pageApp",
   NORMAL_PROJECT: "normalProject",
-  GENERAL_AGENT: "generalAgent",
+  TASK_AGENT: "taskAgent",
 };
 
 /**
@@ -38,15 +38,12 @@ export function resolveServiceContext(req) {
   const bodyType = (req.body?.serviceType ?? req.query?.serviceType ?? "")
     .toString()
     .trim();
-  // 大小写不敏感归一到规范值；兼容旧调用方：general 按 generalAgent 处理
+  // 大小写不敏感归一到规范值；未匹配（含未传）回落缺省 taskAgent
   const normalizedType = (t) => {
     const key = t.toLowerCase();
-    if (key === "general") {
-      return SERVICE_TYPE.GENERAL_AGENT;
-    }
     return Object.values(SERVICE_TYPE).find((v) => v.toLowerCase() === key) || "";
   };
-  const serviceType = normalizedType(headerType) || normalizedType(bodyType) || SERVICE_TYPE.GENERAL_AGENT;
+  const serviceType = normalizedType(headerType) || normalizedType(bodyType) || SERVICE_TYPE.TASK_AGENT;
 
   const rawAppId =
     (typeof req.headers?.["x-app-id"] === "string" && req.headers["x-app-id"].trim()) ||
@@ -224,7 +221,7 @@ export async function ensureWorkspaceDir(service, userId, cId, logId = "computer
 /**
  * 计算日志目录：userapp 直接使用 {USERAPP_LOG_DIR}（env 已是按 appId 挂载的具体路径），
  * 其余为工作空间下 .logs/（含项目绑定目录：日志跟随工作空间）。
- * general 且 COMPUTER_WORKSPACE_DIR 未配置时返回 null（由调用方按未配置处理）。
+ * taskAgent 且 COMPUTER_WORKSPACE_DIR 未配置时返回 null（由调用方按未配置处理）。
  */
 export function resolveLogDir(service, userId, cId) {
   if (service?.isUserApp) {

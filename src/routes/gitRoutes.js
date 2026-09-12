@@ -3,6 +3,7 @@ import { asyncHandler, ValidationError } from "../utils/error/errorHandler.js";
 import gitService from "../service/gitService.js";
 import { log } from "../utils/log/logUtils.js";
 import { extractIsolationContext } from "../utils/common/projectPathUtils.js";
+import { resolveServiceContext } from "../utils/computer/workspaceContext.js";
 
 const gitRouter = express.Router();
 
@@ -11,6 +12,8 @@ const gitRouter = express.Router();
  * - workspaceType: 必传，"pageApp" 或 "taskAgent"
  * - pageApp 模式：projectId + isolationContext
  * - taskAgent 模式：userId + cId
+ * - serviceContext（可选）：Java 端会话项目上下文（x-service-type/appId/workspacePath），
+ *   存在时 git 目录与文件操作一致（workspacePath 优先 + 按类型默认规则），优先级高于 workspaceType
  */
 function extractGitParams(source) {
   const { workspaceType, projectId, userId, cId } = source || {};
@@ -25,13 +28,27 @@ function extractGitParams(source) {
   };
 }
 
+/** GET/POST 兼容：从 req 提取会话项目上下文（与 /computer/* 接口同一解析规则） */
+function extractServiceContext(req) {
+  try {
+    const merged = {
+      headers: req.headers || {},
+      body: req.body && typeof req.body === "object" ? req.body : {},
+      query: req.query || {},
+    };
+    return resolveServiceContext(merged);
+  } catch {
+    return null;
+  }
+}
+
 // 路由配置
 const routes = [
   {
     path: "/init",
     method: "post",
     handler: asyncHandler(async (req, res) => {
-      const params = extractGitParams(req.body);
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req) };
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git init", params);
 
       const result = await gitService.init(params);
@@ -42,7 +59,7 @@ const routes = [
     path: "/status",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const params = extractGitParams(req.query);
+      const params = { ...extractGitParams(req.query), serviceContext: extractServiceContext(req) };
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git status", params);
 
       const result = await gitService.status(params);
@@ -54,7 +71,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { message, files, authorName, authorEmail } = req.body || {};
-      const params = { ...extractGitParams(req.body), message, files, authorName, authorEmail };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), message, files, authorName, authorEmail };
 
       if (!message) {
         throw new ValidationError("Commit message cannot be empty", { field: "message" });
@@ -74,7 +91,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { files } = req.body || {};
-      const params = { ...extractGitParams(req.body), files };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), files };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git add", {
         ...params,
@@ -90,7 +107,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { files } = req.body || {};
-      const params = { ...extractGitParams(req.body), files };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), files };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git unstage", {
         ...params,
@@ -106,7 +123,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { files } = req.body || {};
-      const params = { ...extractGitParams(req.body), files };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), files };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git discard", {
         ...params,
@@ -141,7 +158,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { from, to, paths, source } = req.body || {};
-      const params = { ...extractGitParams(req.body), from, to, paths, source };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), from, to, paths, source };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git diff", { from, to });
 
@@ -154,7 +171,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { ref, filePath } = req.body || {};
-      const params = { ...extractGitParams(req.body), ref, filePath };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), ref, filePath };
 
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git file content", { ref, filePath });
 
@@ -167,7 +184,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { target, mode } = req.body || {};
-      const params = { ...extractGitParams(req.body), target, mode: mode || "mixed" };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), target, mode: mode || "mixed" };
 
       if (!target) {
         throw new ValidationError("Reset target cannot be empty", { field: "target" });
@@ -184,7 +201,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { target, message, authorName, authorEmail } = req.body || {};
-      const params = { ...extractGitParams(req.body), target, message, authorName, authorEmail };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), target, message, authorName, authorEmail };
 
       if (!target) {
         throw new ValidationError("Revert target cannot be empty", { field: "target" });
@@ -201,7 +218,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { target } = req.body || {};
-      const params = { ...extractGitParams(req.body), target };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), target };
 
       if (!target) {
         throw new ValidationError("Checkout target cannot be empty", { field: "target" });
@@ -217,7 +234,7 @@ const routes = [
     path: "/tags",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const params = extractGitParams(req.query);
+      const params = { ...extractGitParams(req.query), serviceContext: extractServiceContext(req) };
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git list tags", params);
 
       const result = await gitService.listTags(params);
@@ -229,7 +246,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { tagName, message: tagMessage } = req.body || {};
-      const params = { ...extractGitParams(req.body), tagName, message: tagMessage };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), tagName, message: tagMessage };
 
       if (!tagName) {
         throw new ValidationError("Tag name cannot be empty", { field: "tagName" });
@@ -246,7 +263,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { tagName } = req.body || {};
-      const params = { ...extractGitParams(req.body), tagName };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), tagName };
 
       if (!tagName) {
         throw new ValidationError("Tag name cannot be empty", { field: "tagName" });
@@ -262,7 +279,7 @@ const routes = [
     path: "/branches",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const params = extractGitParams(req.query);
+      const params = { ...extractGitParams(req.query), serviceContext: extractServiceContext(req) };
       log(params.projectId || `computer:${params.userId}:${params.cId}`, "INFO", "Git list branches", params);
 
       const result = await gitService.listBranches(params);
@@ -274,7 +291,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { branchName, startPoint } = req.body || {};
-      const params = { ...extractGitParams(req.body), branchName, startPoint };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), branchName, startPoint };
 
       if (!branchName) {
         throw new ValidationError("Branch name cannot be empty", { field: "branchName" });
@@ -291,7 +308,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { branchName } = req.body || {};
-      const params = { ...extractGitParams(req.body), branchName };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), branchName };
 
       if (!branchName) {
         throw new ValidationError("Branch name cannot be empty", { field: "branchName" });
@@ -308,7 +325,7 @@ const routes = [
     method: "post",
     handler: asyncHandler(async (req, res) => {
       const { branchName, force } = req.body || {};
-      const params = { ...extractGitParams(req.body), branchName, force: force === true };
+      const params = { ...extractGitParams(req.body), serviceContext: extractServiceContext(req), branchName, force: force === true };
 
       if (!branchName) {
         throw new ValidationError("Branch name cannot be empty", { field: "branchName" });
