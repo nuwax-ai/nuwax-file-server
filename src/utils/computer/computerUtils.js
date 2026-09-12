@@ -16,9 +16,16 @@ import {
   ensurePrimaryAgentDirs,
   syncAgents,
   linkWorkspaceToAgentStore,
+  forceDirSymlink,
+  copyDirContents,
   isWorkspaceSkillsSymlinked,
 } from "../common/AgentWorkspaceUtils.js";
 import {
+  getProjectStoreRoot,
+  getAgentStorePath,
+  readManifest,
+  writeManifest,
+  reverseRefs,
   ensureAgentStoreDirs,
   tryAcquireAgentStoreLock,
   releaseAgentStoreLock,
@@ -68,6 +75,263 @@ function normalizeSkillUrls(skillUrls) {
     return [trimmed];
   }
   return [];
+}
+
+
+/**
+ * 目录视图链（含降级）：优先软链——Windows 走 junction（无需管理员权限），POSIX 走相对链
+ * （见 forceDirSymlink）；均不可用（如 FAT 盘、符号链接被策略禁用）时返回 false，
+ * 由调用方复制实体兜底。
+ */
+async function tryDirViewLink(linkPath, targetDir, logId) {
+  try {
+    await forceDirSymlink(linkPath, targetDir, logId);
+    return true;
+  } catch (e) {
+    log(logId, "WARN", "Skill view dir link unavailable, fallback to copy", {
+      linkPath,
+      targetDir,
+      platform: process.platform,
+      error: e.message,
+    });
+    return false;
+  }
+}
+
+/**
+ * 文件视图链（subagent 定义文件）：软链不可用时返回 false，由调用方复制文件兜底
+ * （subagent 定义为小体积文本，快照语义可接受）。
+ */
+async function tryFileViewLink(linkPath, targetFile, logId) {
+  const target = process.platform === "win32"
+    ? path.resolve(targetFile)
+    : path.relative(path.dirname(linkPath), targetFile).split(path.sep).join("/");
+  try {
+    await fs.promises.symlink(target, linkPath, "file");
+    return true;
+  } catch (e) {
+    log(logId, "WARN", "Skill view file link unavailable, fallback to copy", {
+      linkPath,
+      targetFile,
+      platform: process.platform,
+      error: e.message,
+    });
+    return false;
+  }
+}
+
+/**
+ * 共享工作区（userapp / normalProject）的技能视图同步：manifest 驱动、链级增量、无整体重建。
+ *
+ * 工作区四个 agent 目录（.agents/.claude/.opencode/.codex）下 skills/ 与 agents/ 为实体目录，
+ * 内部每个技能 / subagent 一条相对软链指向提供方的 store 子树——不同智能体的技能各占各的链，
+ * 互不抢占；运行中的智能体任意时刻读到的都是完整并集（单个技能在增删属正常上下线）。
+ *
+ * 流程（调用方持有 store 子树锁；本函数再加项目级视图锁串行化跨 agent 的 check-then-act）：
+ * 1. 更新 manifest：本 agent 的 skills/subagents = 本次清单（实时解除对已删配置技能的引用）
+ * 2. 引用归零的技能/subagent → 删工作区链 + 删 store 子树实体；仍被引用 → 链指到可用来源
+ *    （当前 agent 优先，实体缺失的来源跳过）
+ * 3. 本次实体存在但链缺失/指向过期 → 补链/重指（崩溃自愈）
+ * 4. 动态技能（带 .dynamic_add.lock、不在 manifest 引用内）并入并集：缺失的链补上
+ * 链接按平台降级：POSIX 相对软链 / Windows junction（免管理员权限）/ 复制兜底（FAT 盘等）；
+ * 复制模式为快照语义，每次 sync 全量刷新。
+ * taskAgent 等独立工作区类型返回 false（沿用目录级软链）。
+ */
+async function syncSharedSkillView(userId, userWorkspaceRoot, agentId, service, logId, options = {}) {
+  const projectStoreRoot = getProjectStoreRoot(userId, service);
+  if (!projectStoreRoot || !agentId) {
+    return false;
+  }
+  const { skillNames = null, subagentNames = null } = options;
+  const VIEW_LOCK = path.join(projectStoreRoot, ".view.lock");
+  await fs.promises.mkdir(projectStoreRoot, { recursive: true });
+
+  // 项目级视图锁：轻量自旋；5 分钟过期（stale 自动清除）
+  const deadline = Date.now() + 30_000;
+  let locked = false;
+  while (Date.now() < deadline && !locked) {
+    try {
+      await fs.promises.writeFile(VIEW_LOCK, String(Date.now()), { flag: "wx" });
+      locked = true;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      try {
+        const stat = await fs.promises.stat(VIEW_LOCK);
+        if (Date.now() - stat.mtimeMs > 5 * 60 * 1000) {
+          await fs.promises.rm(VIEW_LOCK, { force: true });
+          continue;
+        }
+      } catch { /* lock removed concurrently */ }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  if (!locked) {
+    throw new SystemError("Agent skill view is busy, please retry");
+  }
+
+  try {
+    const manifest = await readManifest(projectStoreRoot);
+    const entry = manifest.agents[String(agentId)] || { skills: [], subagents: [] };
+    if (skillNames) entry.skills = [...new Set(skillNames.map((n) => String(n || "").trim()).filter(Boolean))];
+    if (subagentNames) entry.subagents = [...new Set(subagentNames.map((n) => String(n || "").trim()).filter(Boolean))];
+    manifest.agents[String(agentId)] = entry;
+    await writeManifest(projectStoreRoot, manifest);
+
+    // 挂载点：.agents 为实体主目录，其余三个以工作区内链指向 .agents（一份实体四目录复用）。
+    // 旧结构的目录级软链（指向已迁移的旧 store 位置）不留存，避免断链；.agents 的 skills/agents
+    // 若为旧软链也替换为实体目录（一次性迁移，幂等）。已是正确链则跳过重建，避免运行中的
+    // 智能体读到瞬时空目录；链接不可用时（Windows 无符号链接权限走 junction，junction 也不可用
+    // 如 FAT 盘）复制主目录内容兜底，四目录各自保持完整可用
+    const AGENT_DIRS = [".agents", ".claude", ".opencode", ".codex"];
+    const copyFallbackSubs = []; // 内链不可用的目录：待主目录（并集）填充完成后再复制内容
+    for (const dir of AGENT_DIRS) {
+      for (const sub of ["skills", "agents"]) {
+        const subPath = path.join(userWorkspaceRoot, dir, sub);
+        // 父目录可能不存在（全新工作区）：symlink 对父目录缺失会 ENOENT，先确保存在
+        await fs.promises.mkdir(path.dirname(subPath), { recursive: true });
+        if (dir === ".agents") {
+          try {
+            const st = await fs.promises.lstat(subPath);
+            if (st.isSymbolicLink()) {
+              await fs.promises.rm(subPath, { recursive: true, force: true });
+            }
+          } catch { /* not exists */ }
+        } else {
+          const primarySub = path.join(userWorkspaceRoot, ".agents", sub);
+          const expected = process.platform === "win32"
+            ? path.resolve(primarySub)
+            : "../.agents/" + sub;
+          let linkedOk = false;
+          try {
+            linkedOk = (await fs.promises.lstat(subPath)).isSymbolicLink()
+              && fs.readlinkSync(subPath) === expected;
+          } catch { /* not exists */ }
+          if (!linkedOk) {
+            await fs.promises.rm(subPath, { recursive: true, force: true });
+            if (!(await tryDirViewLink(subPath, primarySub, logId))) {
+              copyFallbackSubs.push([primarySub, subPath]);
+            }
+          }
+          continue;
+        }
+        await fs.promises.mkdir(subPath, { recursive: true });
+      }
+    }
+
+    // 视图条目安装（目录/文件按实体形态分支，含降级）：refs 循环与动态补链共用
+    const installViewEntry = async (storePath, linkPath, kind) => {
+      const storeIsDir = kind === "skills"
+        || (await fs.promises.lstat(storePath)).isDirectory();
+      if (storeIsDir) {
+        // 内链已判定目录链接不可用时条目直接复制（避免主目录实体/软链混合，
+        // 复制内链时 copyFile 对目录软链会 EISDIR）；否则正常建链，失败才复制兜底
+        if (copyFallbackSubs.length > 0 || !(await tryDirViewLink(linkPath, storePath, logId))) {
+          await copyDirContents(storePath, linkPath);
+        }
+      } else if (!(await tryFileViewLink(linkPath, storePath, logId))) {
+        await fs.promises.copyFile(storePath, linkPath);
+      }
+    };
+
+    // 校准式同步：视图 = manifest 引用集（每名字一条链，指向最新来源）∪ 动态锁技能。
+    // 工作区中不在引用集的非动态条目一律删除——含刚归零的技能（其 store 子树实体已由本 agent
+    // 的 prune 清理，这里只管链）；缺失/指向过期的补链重指（崩溃自愈）。
+    const primaryRoot = path.join(userWorkspaceRoot, ".agents");
+    for (const kind of ["skills", "agents"]) {
+      const manifestKind = kind === "skills" ? "skills" : "subagents";
+      const refs = reverseRefs(manifest, manifestKind);
+      const mountDir = path.join(primaryRoot, kind);
+      // 现有条目全量读出（skills 为目录，agents 混合文件与目录，统一处理）；动态锁技能在下方循环判跳过
+      const existingNames = fs.existsSync(mountDir)
+        ? await fs.promises.readdir(mountDir)
+        : [];
+      const keep = new Set(Object.keys(refs));
+      for (const name of existingNames) {
+        const linkPath = path.join(mountDir, name);
+        if (hasDynamicAddLock(linkPath)) continue;
+        if (keep.has(name)) continue;
+        await fs.promises.rm(linkPath, { recursive: true, force: true });
+        log(logId, "INFO", "Skill view entry removed (no agent references it)", { kind, name });
+      }
+      for (const [name, sources] of Object.entries(refs)) {
+        const linkPath = path.join(mountDir, name);
+        if (hasDynamicAddLock(linkPath)) continue;
+        // 实体子树按 agentId 全局定位（常规项目复用通用智能体的单层子树，
+        // 不在项目协调目录 np-{pid} 下——该目录仅存 manifest 与视图锁）。
+        // 来源优先级：当前 agent 优先（本次刚安装/校准），其余按 manifest 引用序；
+        // 取第一个实体仍存在的来源——全部缺失才清孤儿链，避免单侧瞬时缺失误删可用视图链
+        const candidates = [...new Set([String(agentId), ...sources.map(String)])];
+        let storePath = null;
+        for (const candidate of candidates) {
+          const candidatePath = path.join(
+            getAgentStorePath(userId, candidate, service), kind, name
+          );
+          if (fs.existsSync(candidatePath)) {
+            storePath = candidatePath;
+            break;
+          }
+        }
+        if (!storePath) {
+          // 引用存在但实体缺失（各子树已被各自 prune 清掉）：清孤儿链，等待下次安装补齐
+          await fs.promises.rm(linkPath, { recursive: true, force: true });
+          continue;
+        }
+        // 链目标期望值按平台：win 下 junction 存绝对路径，posix 存相对链（相对链所在目录
+        // mountDir 计算而非 primaryRoot——链在 {primaryRoot}/{kind}/ 下，少算一级会解析到错误层级）
+        const target = process.platform === "win32"
+          ? path.resolve(storePath)
+          : path.relative(mountDir, storePath).split(path.sep).join("/");
+        let needRelink = false;
+        try {
+          const st = await fs.promises.lstat(linkPath);
+          needRelink = !st.isSymbolicLink() || fs.readlinkSync(linkPath) !== target;
+        } catch {
+          needRelink = true;
+        }
+        if (needRelink) {
+          await fs.promises.rm(linkPath, { recursive: true, force: true });
+          await installViewEntry(storePath, linkPath, kind);
+        }
+      }
+      if (kind === "skills") {
+        // 动态技能补链：动态安装的技能（带 .dynamic_add.lock）不在 manifest 引用内，但必须
+        // 并入视图并集——为当前 agent 及 manifest 中各 agent 实体子树里的动态技能补缺失的链
+        // （已存在的条目跳过，含复制模式的实体条目；锁在配置技能覆盖安装时去除，之后归校准管）
+        const owners = [...new Set([String(agentId), ...Object.keys(manifest.agents || {})])];
+        for (const owner of owners) {
+          const ownerSkillsDir = path.join(getAgentStorePath(userId, owner, service), "skills");
+          let dynEntries = [];
+          try {
+            dynEntries = await fs.promises.readdir(ownerSkillsDir, { withFileTypes: true });
+          } catch { continue; }
+          for (const ent of dynEntries) {
+            if (!ent.isDirectory()) continue;
+            const entityPath = path.join(ownerSkillsDir, ent.name);
+            if (!hasDynamicAddLock(entityPath)) continue;
+            const linkPath = path.join(mountDir, ent.name);
+            if (fs.existsSync(linkPath)) continue;
+            await installViewEntry(entityPath, linkPath, kind);
+            log(logId, "INFO", "Dynamic skill linked into view", { owner, name: ent.name });
+          }
+        }
+      }
+    }
+    // 复制兜底的内链：主目录（并集）填充完成后再复制内容；dereference 解引用，
+    // 兼容主目录内仍为软链的条目（快照语义，每次 sync 全量刷新）
+    for (const [primarySub, subPath] of copyFallbackSubs) {
+      await fs.promises.rm(subPath, { recursive: true, force: true });
+      await fs.promises.cp(primarySub, subPath, { recursive: true, dereference: true, force: true });
+    }
+
+    log(logId, "INFO", "Shared skill view synced", {
+      userWorkspaceRoot, projectStoreRoot, agentId,
+      skills: entry.skills, subagents: entry.subagents,
+      copyFallbackDirs: copyFallbackSubs.length,
+    });
+    return true;
+  } finally {
+    await fs.promises.rm(VIEW_LOCK, { force: true });
+  }
 }
 
 /**
@@ -589,12 +853,32 @@ async function createWorkspaceWithAgentStore(options) {
       });
     }
 
-    const linkResult = await linkWorkspaceToAgentStore(
-      userWorkspaceRoot,
-      agentSkillsDir,
-      agentAgentsDir,
-      logId
-    );
+    // 共享工作区（userapp/normalProject）：manifest 驱动的技能链视图（多智能体并存、增量增删）；
+    // 其余类型工作区与会话一一对应，保留目录级软链
+    let linkResult = null;
+    let sharedView = false;
+    if (service && (service.isUserApp || service.isNormalProject) && service.appId) {
+      let subagentNames = null;
+      try {
+        // agents 实体可能为文件（.md）或目录（多文件 subagent 包），一并纳入 manifest
+        subagentNames = (await fs.promises.readdir(agentAgentsDir, { withFileTypes: true }))
+          .map((e) => e.name);
+      } catch { /* agents dir not exists */ }
+      // skillNames 原始参数未传（旧客户端全量模式）时不更新清单，仅做视图校准；
+      // 否则空数组会把 manifest 引用清空导致技能被误删
+      sharedView = await syncSharedSkillView(userId, userWorkspaceRoot, agentId, service, logId, {
+        skillNames: skillNames ? keepSkillNames : null,
+        subagentNames,
+      });
+    }
+    if (!sharedView) {
+      linkResult = await linkWorkspaceToAgentStore(
+        userWorkspaceRoot,
+        agentSkillsDir,
+        agentAgentsDir,
+        logId
+      );
+    }
 
     log(logId, "INFO", "Workspace created successfully (agent store)", {
       userId,
@@ -1232,12 +1516,20 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, ser
       }
     });
 
-    const linkResult = await linkWorkspaceToAgentStore(
-      userWorkspaceRoot,
-      agentSkillsDir,
-      agentAgentsDir,
-      logId
-    );
+    let linkResult = null;
+    let sharedView = false;
+    if (service && (service.isUserApp || service.isNormalProject) && service.appId) {
+      // 动态加技能不改变配置清单（skillNames 不传）——仅触发一次自愈式同步（补新装技能的链）
+      sharedView = await syncSharedSkillView(userId, userWorkspaceRoot, agentId, service, logId, {});
+    }
+    if (!sharedView) {
+      linkResult = await linkWorkspaceToAgentStore(
+        userWorkspaceRoot,
+        agentSkillsDir,
+        agentAgentsDir,
+        logId
+      );
+    }
 
     const updatedSkills = Array.from(updatedSkillSet);
     const message =
@@ -1330,6 +1622,10 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, ser
 async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId, service = null) {
   const hasAgentId = agentId != null && String(agentId).trim() !== "";
   if (hasAgentId) {
+    // 共享工作区（userapp/normalProject）：工作区为技能链并集（非目录级软链），直接走 store 模式
+    if (service && (service.isUserApp || service.isNormalProject) && service.appId) {
+      return pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, service);
+    }
     // 仅做软链探测，不创建目录；general 且根目录未配置时保持原行为返回 null
     let userWorkspaceRoot = null;
     if (service?.isUserApp) {
@@ -2196,8 +2492,8 @@ async function deleteWorkspace(userId, cId, service = null) {
 
   // 是否删除由调用方按沙箱归属决定（云端删/个人不删），此处一律执行；
   // 绑定目录定位无需落盘创建，避免"不存在时先建后删"
-  const targetDir = service?.workspaceDir
-    ? service.workspaceDir
+  const targetDir = service?.workspacePath
+    ? service.workspacePath
     : await ensureWorkspaceDir(service, userId, cId, logId);
 
   if (fs.existsSync(targetDir)) {

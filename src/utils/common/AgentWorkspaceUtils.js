@@ -350,5 +350,6 @@ export {
   syncAgents,
   linkWorkspaceToAgentStore,
   forceDirSymlink,
+  copyDirContents,
   isWorkspaceSkillsSymlinked,
 };

@@ -11,33 +11,118 @@ const SYNC_LOCK_NAME = ".sync.lock";
 const SYNC_LOCK_STALE_MS = 5 * 60 * 1000;
 
 /**
- * 智能体级实体存储目录：
- * - general/pageapp：{COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}
- * - userapp：{USERAPP_WORKSPACE_DIR}/.agent-store/{agentId}
- *   （docker模式，宿主机按用户级 {userId}/.agent-store 独立挂载到容器 /home/user/.agent-store，容器内无 userId 段）
- * 两者均与会话工作区同属容器内一棵树，相对软链可解析。
+ * 智能体级实体存储目录（按项目类型）：
+ * - taskAgent / normalProject：{COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}
+ *   （每会话独立工作区，单 agent 无共享冲突，无 manifest；normalProject 共享工作区由
+ *   np-{projectId}/ 协调目录下的 manifest 管理视图）
+ * - userapp：随工作区就近放置 {工作区}/.agent-store/{agentId}
+ *   （工作区 = 默认 {USERAPP_WORKSPACE_DIR}/{appId} = 容器 /home/user/{appId}，或用户绑定的
+ *   自定义路径挂载到同一容器路径；store 在工作区内部，宿主/容器两视角同构，自定义目录不破坏布局）
+ * 共享工作区（normalProject/userapp）配套 manifest.json 引用表，由 syncSharedSkillView 维护。
+ */
+const MANIFEST_FILE = "manifest.json";
+
+/**
+ * 项目级协调目录（共享工作区专用）：仅存放 manifest.json 引用表与 .view.lock 视图锁，
+ * 不存放技能实体——同一 agent 的技能实体全局一份（见 getAgentStorePath），跨项目复用。
+ * - normalProject：{COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/np-{projectId}/
+ * - userapp：{USERAPP_WORKSPACE_DIR}/.agent-store/{appId}/（挂载点内，两视角相对链可解析）
+ * - taskAgent 每会话独立工作区，无共享冲突，返回 null
+ */
+function getProjectStoreRoot(userId, service = null) {
+  // userapp：store 随工作区就近放置——工作区（默认 {UWS}/{appId} = 容器内 /home/user/{appId}；
+  // 自定义工作目录时为用户绑定路径（部署侧挂载为容器 /home/user/{appId}）。store 落在工作区
+  // 内部 .agent-store/，宿主/容器两视角同构，相对链必然可解析，自定义目录不再破坏布局。
+  // workspacePath 缺失（异常/老调用方）回落全局挂载布局 {UWS}/.agent-store/{appId}。
+  if (service?.isUserApp && service?.appId) {
+    if (service.workspacePath) {
+      return path.join(service.workspacePath, ".agent-store");
+    }
+    return path.join(resolveWorkspaceRoot(service), ".agent-store", String(service.appId));
+  }
+  // normalProject：工作区与实体 store 均按 {CWS}/{userId} 分用户，协调目录同层，
+  // 避免不同用户的同名项目 manifest 互相干扰
+  if (service?.isNormalProject && service?.appId) {
+    const root = resolveWorkspaceRoot(service);
+    return path.join(root, String(userId), ".agent-store", `np-${service.appId}`);
+  }
+  return null;
+}
+
+/**
+ * 技能实体子树（按 agentId 定位）：
+ * - userapp：随工作区就近放置 {工作区}/.agent-store/{agentId}/（工作区 = 默认 {UWS}/{appId} =
+ *   容器 /home/user/{appId}，或用户绑定的自定义路径；store 在工作区内部，两视角同构）。
+ *   每个 app 一份实体——userapp 独立容器，app 间隔离；workspacePath 缺失时回落全局布局
+ * - taskAgent 与 normalProject：{COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}/——
+ *   常规项目复用通用智能体的同一子树（同一智能体实体一份，不同项目/会话的 prune keep 清单
+ *   均为该智能体的固定配置技能集，幂等无冲突）；工作区深度不同（{userId}/{cId} vs
+ *   {userId}/NormalProject/{pid}），技能链相对路径由 path.relative 按实际深度计算
  */
 function getAgentStorePath(userId, agentId, service = null) {
+  const projectRoot = getProjectStoreRoot(userId, service);
+  if (service?.isUserApp && projectRoot) {
+    return path.join(projectRoot, String(agentId));
+  }
   const workspaceRoot = resolveWorkspaceRoot(service);
   if (!workspaceRoot) {
     throw new ValidationError("COMPUTER_WORKSPACE_DIR configuration does not exist", {
       field: "COMPUTER_WORKSPACE_DIR",
     });
   }
-  if (service?.isUserApp) {
-    return path.join(workspaceRoot, ".agent-store", String(agentId));
-  }
   return path.join(workspaceRoot, String(userId), ".agent-store", String(agentId));
+}
+
+/**
+ * 读项目层 manifest（agents→{skills,subagents} 引用表）；无文件返回空表。
+ * manifest 是工作区技能视图的唯一事实来源：引用归零的技能/subagent 才可删除。
+ */
+async function readManifest(projectStoreRoot) {
+  try {
+    const raw = await fs.promises.readFile(path.join(projectStoreRoot, MANIFEST_FILE), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && typeof parsed.agents === "object"
+      ? parsed
+      : { agents: {} };
+  } catch {
+    return { agents: {} };
+  }
+}
+
+/** 原子写 manifest（tmp + rename），锁内调用 */
+async function writeManifest(projectStoreRoot, manifest) {
+  await fs.promises.mkdir(projectStoreRoot, { recursive: true });
+  const tmp = path.join(projectStoreRoot, `${MANIFEST_FILE}.${process.pid}.${Date.now()}.tmp`);
+  await fs.promises.writeFile(tmp, JSON.stringify(manifest, null, 2), "utf8");
+  await fs.promises.rename(tmp, path.join(projectStoreRoot, MANIFEST_FILE));
+}
+
+/**
+ * 从 manifest 计算反向引用：name → 引用它的 agentId 列表（按 manifest 键序）。
+ * 来源选择（当前 agent 优先、实体存在者优先）由视图同步侧决定。
+ */
+function reverseRefs(manifest, kind) {
+  const refs = {};
+  for (const [agentId, entry] of Object.entries(manifest.agents || {})) {
+    for (const name of entry?.[kind] || []) {
+      (refs[name] = refs[name] || []).push(agentId);
+    }
+  }
+  return refs;
 }
 
 async function ensureAgentStoreDirs(userId, agentId, logId, service = null) {
   const agentStorePath = getAgentStorePath(userId, agentId, service);
-  if (service?.isUserApp && !fs.existsSync(path.dirname(agentStorePath))) {
-    // userapp 的 .agent-store 由部署侧挂载，缺失时抛错，避免 mkdir 落到容器本地临时目录
-    throw new ValidationError(
-      `userapp agent-store mount does not exist: ${path.dirname(agentStorePath)}`,
-      { field: "USERAPP_WORKSPACE_DIR" }
-    );
+  if (service?.isUserApp) {
+    // userapp 的 {UWS}/.agent-store 由部署侧挂载（挂载根），缺失时抛错，避免 mkdir 落到容器
+    // 本地临时目录；共享工作区模式 store 为 {挂载根}/{appId}/{agentId}，存在性检查指向挂载根
+    const mountRoot = path.dirname(path.dirname(agentStorePath));
+    if (!fs.existsSync(mountRoot)) {
+      throw new ValidationError(
+        `userapp agent-store mount does not exist: ${mountRoot}`,
+        { field: "USERAPP_WORKSPACE_DIR" }
+      );
+    }
   }
   const skillsDir = path.join(agentStorePath, "skills");
   const agentsDir = path.join(agentStorePath, "agents");
@@ -220,6 +305,10 @@ function agentSkillExists(skillsDir, skillName) {
 export {
   DYNAMIC_ADD_LOCK,
   getAgentStorePath,
+  getProjectStoreRoot,
+  readManifest,
+  writeManifest,
+  reverseRefs,
   ensureAgentStoreDirs,
   tryAcquireAgentStoreLock,
   releaseAgentStoreLock,

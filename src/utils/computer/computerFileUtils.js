@@ -1338,8 +1338,8 @@ async function downloadAllFiles(userId, cId, customTargetDir, service = null) {
   if (!cId) {
     throw new ValidationError("cId cannot be empty", { field: "cId" });
   }
-  // 绑定目录（workspaceDir）时不依赖 COMPUTER_WORKSPACE_DIR 配置
-  if (!workspaceRoot && !service?.workspaceDir) {
+  // 绑定目录（workspacePath）时不依赖 COMPUTER_WORKSPACE_DIR 配置
+  if (!workspaceRoot && !service?.workspacePath) {
     throw new SystemError("COMPUTER_WORKSPACE_DIR is not configured, cannot create zip");
   }
 
@@ -1806,8 +1806,8 @@ async function importProject(userId, cId, file, customTargetDir, service = null)
   if (!file || !file.path) {
     throw new ValidationError("file is required", { field: "file" });
   }
-  // 绑定目录（workspaceDir）时不依赖 COMPUTER_WORKSPACE_DIR 配置
-  if (!workspaceRoot && !service?.workspaceDir) {
+  // 绑定目录（workspacePath）时不依赖 COMPUTER_WORKSPACE_DIR 配置
+  if (!workspaceRoot && !service?.workspacePath) {
     throw new SystemError("COMPUTER_WORKSPACE_DIR is not configured");
   }
 
