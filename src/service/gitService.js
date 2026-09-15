@@ -46,7 +46,7 @@ function resolveAndCheck(options) {
     serviceContext,
   } = options || {};
 
-  // 会话项目上下文（Java 端携带 serviceType/appId/workspacePath）：目录与文件操作一致，
+  // 会话项目上下文（Java 端携带 workspaceType/serviceType/appId/workspacePath）：目录与文件操作一致，
   // 优先级最高；解析失败或缺参由调用方置 null，回落 workspaceType 老规则
   if (serviceContext && (serviceContext.workspacePath || serviceContext.appId)) {
     if (!userId || !cId) {
@@ -59,8 +59,8 @@ function resolveAndCheck(options) {
     return { targetPath, logId: `computer:${userId}:${cId}` };
   }
 
-  // 词表统一：workspaceType 与 /computer/* 的 serviceType 同一套值
-  // （pageApp 同值、taskAgent 通用智能体——与 serviceType 正名一致
+  // 词表统一：本参数（git 路由用）与 /computer/* 的 workspaceType（工作空间定位用）同一套值
+  // （pageApp 同值、taskAgent 通用智能体）；serviceType 为容器运行时类型，不再用于工作空间定位
   if (!workspaceType || !["pageApp", "taskAgent"].includes(workspaceType)) {
     throw new ValidationError("workspaceType is required and must be pageApp or taskAgent", { field: "workspaceType" });
   }

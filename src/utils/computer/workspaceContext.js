@@ -8,19 +8,21 @@ import { ValidationError } from "../error/errorHandler.js";
  * 工作空间项目上下文：按项目类型 + appId 定位工作空间。
  *
  * - 用户维度工作目录（workspacePath，优先认传入；空则按类型默认规则）：
- *   - userapp（子容器）：{USERAPP_WORKSPACE_DIR}/{appId}，日志 {USERAPP_LOG_DIR}
+ *   - userApp（子容器）：{USERAPP_WORKSPACE_DIR}/{appId}，日志 {USERAPP_LOG_DIR}
  *   - normalProject（常规项目，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/NormalProject/{projectId}
  *   - taskAgent（通用智能体，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
  *   - pageapp：沿用 {COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
  * - workspacePath 仅做格式校验（绝对路径、无 . / .. 穿越片段、无非法字符），不限制根目录范围。
  *
- * 项目类型来源：header x-service-type 优先，body/query 的 serviceType 兜底，缺省 taskAgent。
- * projectId 复用 appId 参数（userapp/normalProject 必带）。
+ * 项目类型来源（工作空间定位用 workspaceType）：header x-workspace-type 优先，
+ * body/query 的 workspaceType 次之，缺省 taskAgent。
+ * serviceType 为容器运行时类型（路由用），不参与工作空间定位。
+ * projectId 复用 appId 参数（userApp/normalProject 必带）。
  * workspacePath 来源：body/query 的 workspacePath，或 header x-workspace-path。
  */
 
-export const SERVICE_TYPE = {
-  USERAPP: "userapp",
+export const WORKSPACE_TYPE = {
+  USERAPP: "userApp",
   PAGEAPP: "pageApp",
   NORMAL_PROJECT: "normalProject",
   TASK_AGENT: "taskAgent",
@@ -29,29 +31,29 @@ export const SERVICE_TYPE = {
 /**
  * 从请求中解析项目上下文。
  * @param {import("express").Request} req
- * @returns {{ serviceType: string, appId: string|null, workspacePath: string|null, isUserApp: boolean, isNormalProject: boolean }}
+ * @returns {{ workspaceType: string, appId: string|null, workspacePath: string|null, isUserApp: boolean, isNormalProject: boolean }}
  */
 export function resolveServiceContext(req) {
-  const headerType = req.headers && typeof req.headers["x-service-type"] === "string"
-    ? req.headers["x-service-type"].trim()
+  const headerType = req.headers && typeof req.headers["x-workspace-type"] === "string"
+    ? req.headers["x-workspace-type"].trim()
     : "";
-  const bodyType = (req.body?.serviceType ?? req.query?.serviceType ?? "")
+  const bodyType = (req.body?.workspaceType ?? req.query?.workspaceType ?? "")
     .toString()
     .trim();
   // 大小写不敏感归一到规范值；未匹配（含未传）回落缺省 taskAgent
   const normalizedType = (t) => {
     const key = t.toLowerCase();
-    return Object.values(SERVICE_TYPE).find((v) => v.toLowerCase() === key) || "";
+    return Object.values(WORKSPACE_TYPE).find((v) => v.toLowerCase() === key) || "";
   };
-  const serviceType = normalizedType(headerType) || normalizedType(bodyType) || SERVICE_TYPE.TASK_AGENT;
+  const workspaceType = normalizedType(headerType) || normalizedType(bodyType) || WORKSPACE_TYPE.TASK_AGENT;
 
   const rawAppId =
     (typeof req.headers?.["x-app-id"] === "string" && req.headers["x-app-id"].trim()) ||
     (req.body?.appId ?? req.query?.appId ?? "").toString().trim() ||
     null;
   const appId = rawAppId || null;
-  const isUserApp = serviceType === SERVICE_TYPE.USERAPP;
-  const isNormalProject = serviceType === SERVICE_TYPE.NORMAL_PROJECT;
+  const isUserApp = workspaceType === WORKSPACE_TYPE.USERAPP;
+  const isNormalProject = workspaceType === WORKSPACE_TYPE.NORMAL_PROJECT;
 
   if (isUserApp && !appId) {
     throw new ValidationError("appId is required for userapp workspace", {
@@ -75,7 +77,7 @@ export function resolveServiceContext(req) {
     null;
   const workspacePath = rawWorkspacePath ? normalizeWorkspacePath(rawWorkspacePath) : null;
 
-  return { serviceType, appId, workspacePath, isUserApp, isNormalProject };
+  return { workspaceType, appId, workspacePath, isUserApp, isNormalProject };
 }
 
 /** appId 直接参与路径拼接（{根目录}/{appId}），禁止路径分隔符与 . / .. 等穿越片段 */

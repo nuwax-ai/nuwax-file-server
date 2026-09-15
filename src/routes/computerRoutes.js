@@ -28,11 +28,11 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       try {
-        // 将临时上传目录放到工作空间下 .tmp（userapp 按 appId，其余按 COMPUTER_WORKSPACE_DIR/<userId>/<cId>）。
-        // header 在 multipart body 解析前即可用，userapp 判断一律取 header。
-        const serviceType =
-          typeof req.headers["x-service-type"] === "string"
-            ? req.headers["x-service-type"].trim().toLowerCase()
+        // 将临时上传目录放到工作空间下 .tmp（userApp 按 appId，其余按 COMPUTER_WORKSPACE_DIR/<userId>/<cId>）。
+        // header 在 multipart body 解析前即可用，userApp 判断一律取 header x-workspace-type（大小写不敏感）。
+        const workspaceType =
+          typeof req.headers["x-workspace-type"] === "string"
+            ? req.headers["x-workspace-type"].trim().toLowerCase()
             : "";
         const appId =
           typeof req.headers["x-app-id"] === "string"
@@ -40,7 +40,7 @@ const upload = multer({
             : "";
 
         let tmpUploadDir;
-        if (serviceType === "userapp" && appId) {
+        if (workspaceType === "userapp" && appId) {
           const baseDir = config.USERAPP_WORKSPACE_DIR;
           if (!baseDir) {
             return cb(
@@ -111,7 +111,7 @@ const routes = [
       log(logId, "INFO", "Create workspace request", {
         userId,
         cId,
-        serviceType: service.serviceType,
+        workspaceType: service.workspaceType,
         appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
@@ -225,7 +225,7 @@ const routes = [
         userId,
         cId,
         agentId,
-        serviceType: service.serviceType,
+        workspaceType: service.workspaceType,
         appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
@@ -276,7 +276,7 @@ const routes = [
       log(logId, "INFO", "推送技能到工作空间请求", {
         userId,
         cId,
-        serviceType: service.serviceType,
+        workspaceType: service.workspaceType,
         appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
@@ -318,7 +318,7 @@ const routes = [
         userId,
         cId,
         agentId,
-        serviceType: service.serviceType,
+        workspaceType: service.workspaceType,
         appId: service.appId,
         hasFile: !!file,
         fileName: file?.originalname,
