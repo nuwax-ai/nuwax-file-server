@@ -40,12 +40,22 @@ export function resolveServiceContext(req) {
   const bodyType = (req.body?.workspaceType ?? req.query?.workspaceType ?? "")
     .toString()
     .trim();
-  // 大小写不敏感归一到规范值；未匹配（含未传）回落缺省 taskAgent
+  // 大小写不敏感归一到规范值。完全未传回落缺省 taskAgent（存量直连调用兼容）；
+  // 传了但无法归一直接报错——文件/git 均含破坏性操作，错误类型静默回落会把操作落到
+  // {userId}/{cId} 默认工作区（旧白名单 400、垃圾值静默错定位都源于这个回落）
   const normalizedType = (t) => {
     const key = t.toLowerCase();
     return Object.values(WORKSPACE_TYPE).find((v) => v.toLowerCase() === key) || "";
   };
-  const workspaceType = normalizedType(headerType) || normalizedType(bodyType) || WORKSPACE_TYPE.TASK_AGENT;
+  const headerNorm = normalizedType(headerType);
+  const bodyNorm = normalizedType(bodyType);
+  if (!headerNorm && !bodyNorm && (headerType || bodyType)) {
+    throw new ValidationError(
+      "workspaceType must be one of userApp, pageApp, normalProject, taskAgent",
+      { field: "workspaceType" }
+    );
+  }
+  const workspaceType = headerNorm || bodyNorm || WORKSPACE_TYPE.TASK_AGENT;
 
   const rawAppId =
     (typeof req.headers?.["x-app-id"] === "string" && req.headers["x-app-id"].trim()) ||

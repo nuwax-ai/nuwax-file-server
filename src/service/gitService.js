@@ -1,4 +1,4 @@
-import { resolveWorkspaceDir } from "../utils/computer/workspaceContext.js";
+import { resolveWorkspaceDir, WORKSPACE_TYPE } from "../utils/computer/workspaceContext.js";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -26,65 +26,78 @@ import {
 
 /**
  * 解析目标路径并检查是否存在。
- * 通过 workspaceType 显式区分两种工作区：
- *   - "pageApp"：网页应用项目，用 projectId + isolationContext
- *   - "taskAgent"：通用智能体，用 userId + cId
+ * workspaceType 词表统一四值（与 /computer/* 同一套）：
+ *   - "pageApp"：网页应用项目，项目隔离模型，用 projectId + isolationContext 定位
+ *   - "userApp" / "normalProject" / "taskAgent"：会话工作区，workspacePath（显式绑定目录）优先，
+ *     缺省按类型默认规则定位（userApp → {USERAPP_WORKSPACE_DIR}/{appId}，
+ *     normalProject → {COMPUTER_WORKSPACE_DIR}/{userId}/NormalProject/{projectId}，
+ *     taskAgent → {COMPUTER_WORKSPACE_DIR}/{userId}/{cId}）
  *
  * @param {Object} options
- * @param {"pageApp"|"taskAgent"} [options.workspaceType]
+ * @param {"userApp"|"pageApp"|"normalProject"|"taskAgent"} [options.workspaceType]
  * @param {string} [options.projectId]       pageApp 模式必传
  * @param {Object} [options.isolationContext]
- * @param {string} [options.userId]          taskAgent 模式必传
- * @param {string} [options.cId]             taskAgent 模式必传
+ * @param {string} [options.userId]          会话工作区模式必传
+ * @param {string} [options.cId]             会话工作区模式必传
  * @returns {{ targetPath: string, logId: string }}
  */
 function resolveAndCheck(options) {
   const {
-    workspaceType,
+    workspaceType: rawWorkspaceType,
     projectId, isolationContext,
     userId, cId,
     serviceContext,
   } = options || {};
 
-  // 会话项目上下文（Java 端携带 workspaceType/serviceType/appId/workspacePath）：目录与文件操作一致，
-  // 优先级最高；解析失败或缺参由调用方置 null，回落 workspaceType 老规则
-  if (serviceContext && (serviceContext.workspacePath || serviceContext.appId)) {
-    if (!userId || !cId) {
-      throw new ValidationError("serviceContext mode requires userId and cId", { field: "userId/cId" });
+  // 类型来源：serviceContext 归一结果（x-workspace-type header / body / query，见 workspaceContext）优先，
+  // 显式 workspaceType 参数兜底；大小写不敏感归一，无法归一直接报错（git 含破坏性操作，不做缺省猜测）
+  const normalizeType = (t) => {
+    const key = String(t || "").trim().toLowerCase();
+    return Object.values(WORKSPACE_TYPE).find((v) => v.toLowerCase() === key) || "";
+  };
+  const workspaceType = (serviceContext && serviceContext.workspaceType) || normalizeType(rawWorkspaceType);
+  if (!workspaceType) {
+    throw new ValidationError(
+      "workspaceType is required and must be one of userApp, pageApp, normalProject, taskAgent",
+      { field: "workspaceType" }
+    );
+  }
+
+  // pageApp：项目隔离模型，不走会话工作区规则
+  if (workspaceType === WORKSPACE_TYPE.PAGEAPP) {
+    if (!projectId) {
+      throw new ValidationError("pageApp mode requires projectId", { field: "projectId" });
     }
-    const targetPath = resolveWorkspaceDir(serviceContext, userId, cId);
+    const targetPath = resolveProjectPath(projectId, isolationContext || {});
     if (!fs.existsSync(targetPath)) {
-      throw new ResourceError("Workspace does not exist", { userId, cId, targetPath });
+      throw new ResourceError("Project does not exist", { projectId });
     }
-    return { targetPath, logId: `computer:${userId}:${cId}` };
+    return { targetPath, logId: projectId };
   }
 
-  // 词表统一：本参数（git 路由用）与 /computer/* 的 workspaceType（工作空间定位用）同一套值
-  // （pageApp 同值、taskAgent 通用智能体）；serviceType 为容器运行时类型，不再用于工作空间定位
-  if (!workspaceType || !["pageApp", "taskAgent"].includes(workspaceType)) {
-    throw new ValidationError("workspaceType is required and must be pageApp or taskAgent", { field: "workspaceType" });
+  // userApp / normalProject / taskAgent：会话工作区
+  if (!userId || !cId) {
+    throw new ValidationError("conversation workspace mode requires userId and cId", { field: "userId/cId" });
   }
-
-  if (workspaceType === "taskAgent") {
-    if (!userId || !cId) {
-      throw new ValidationError("taskAgent mode requires userId and cId", { field: "userId/cId" });
-    }
-    const targetPath = path.join(config.COMPUTER_WORKSPACE_DIR, String(userId), String(cId));
-    if (!fs.existsSync(targetPath)) {
-      throw new ResourceError("Computer workspace does not exist", { userId, cId });
-    }
-    return { targetPath, logId: `computer:${userId}:${cId}` };
+  // serviceContext 解析失败（缺参/非法目录等）时按显式类型兜底组装定位上下文
+  const service = serviceContext || {
+    workspaceType,
+    isUserApp: workspaceType === WORKSPACE_TYPE.USERAPP,
+    isNormalProject: workspaceType === WORKSPACE_TYPE.NORMAL_PROJECT,
+  };
+  // 项目类型无显式目录时，必须有 appId(projectId) 才能按类型默认规则定位
+  if ((service.isUserApp || service.isNormalProject) && !service.workspacePath && !service.appId) {
+    throw new ValidationError(
+      `appId(projectId) is required for ${workspaceType} workspace when workspacePath is absent`,
+      { field: "appId" }
+    );
   }
-
-  // workspaceType === "pageApp"
-  if (!projectId) {
-    throw new ValidationError("pageApp mode requires projectId", { field: "projectId" });
-  }
-  const targetPath = resolveProjectPath(projectId, isolationContext || {});
+  // workspacePath 优先（resolveWorkspaceDir 内），缺省按类型默认规则
+  const targetPath = resolveWorkspaceDir(service, userId, cId);
   if (!fs.existsSync(targetPath)) {
-    throw new ResourceError("Project does not exist", { projectId });
+    throw new ResourceError("Workspace does not exist", { userId, cId, targetPath, workspaceType });
   }
-  return { targetPath, logId: projectId };
+  return { targetPath, logId: `computer:${userId}:${cId}` };
 }
 
 // ──────────────────────────── helpers ────────────────────────────

@@ -141,6 +141,7 @@ const routes = [
       const { maxCount, branch, skip, filePath } = req.query || {};
       const params = {
         ...extractGitParams(req.query),
+        serviceContext: extractServiceContext(req),
         maxCount: maxCount ? parseInt(maxCount, 10) : 50,
         skip: skip ? parseInt(skip, 10) : 0,
         branch,
