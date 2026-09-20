@@ -9,7 +9,7 @@ import { ValidationError } from "../error/errorHandler.js";
  *
  * - 用户维度工作目录（workspacePath，优先认传入；空则按类型默认规则）：
  *   - userApp（子容器）：{USERAPP_WORKSPACE_DIR}/{appId}，日志 {USERAPP_LOG_DIR}
- *   - normalProject（常规项目，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/NormalProject/{projectId}
+ *   - normalProject（常规项目，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/normalProject/{projectId}
  *   - taskAgent（通用智能体，主容器）：{COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
  *   - pageapp：沿用 {COMPUTER_WORKSPACE_DIR}/{userId}/{cId}
  * - workspacePath 仅做格式校验（绝对路径、无 . / .. 穿越片段、无非法字符），不限制根目录范围。
@@ -177,9 +177,9 @@ export function resolveWorkspaceDir(service, userId, cId) {
   if (service?.isUserApp) {
     return path.join(resolveWorkspaceRoot(service), String(service.appId));
   }
-  // 常规项目（主容器）：{root}/{userId}/NormalProject/{projectId}（projectId 复用 appId 参数）
+  // 常规项目（主容器）：{root}/{userId}/normalProject/{projectId}（projectId 复用 appId 参数）。
   if (service?.isNormalProject) {
-    return path.join(config.COMPUTER_WORKSPACE_DIR, String(userId), "NormalProject", String(service.appId));
+    return path.join(config.COMPUTER_WORKSPACE_DIR, String(userId), "normalProject", String(service.appId));
   }
   // 通用智能体 / pageapp（主容器）
   return path.join(config.COMPUTER_WORKSPACE_DIR, String(userId), String(cId));

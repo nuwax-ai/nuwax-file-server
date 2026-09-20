@@ -30,7 +30,8 @@ import {
  *   - "pageApp"：网页应用项目，项目隔离模型，用 projectId + isolationContext 定位
  *   - "userApp" / "normalProject" / "taskAgent"：会话工作区，workspacePath（显式绑定目录）优先，
  *     缺省按类型默认规则定位（userApp → {USERAPP_WORKSPACE_DIR}/{appId}，
- *     normalProject → {COMPUTER_WORKSPACE_DIR}/{userId}/NormalProject/{projectId}，
+ *     normalProject → {COMPUTER_WORKSPACE_DIR}/{userId}/normalProject/{projectId}（小写，与
+ *     workspaceContext.resolveWorkspaceDir 及沙箱侧布局一致），
  *     taskAgent → {COMPUTER_WORKSPACE_DIR}/{userId}/{cId}）
  *
  * @param {Object} options

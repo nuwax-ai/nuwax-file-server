@@ -57,7 +57,7 @@ function getProjectStoreRoot(userId, service = null) {
  * - taskAgent 与 normalProject：{COMPUTER_WORKSPACE_DIR}/{userId}/.agent-store/{agentId}/——
  *   常规项目复用通用智能体的同一子树（同一智能体实体一份，不同项目/会话的 prune keep 清单
  *   均为该智能体的固定配置技能集，幂等无冲突）；工作区深度不同（{userId}/{cId} vs
- *   {userId}/NormalProject/{pid}），技能链相对路径由 path.relative 按实际深度计算
+ *   {userId}/normalProject/{pid}），技能链相对路径由 path.relative 按实际深度计算
  */
 function getAgentStorePath(userId, agentId, service = null) {
   const projectRoot = getProjectStoreRoot(userId, service);
