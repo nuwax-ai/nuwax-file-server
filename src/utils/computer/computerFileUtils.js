@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import archiver from "archiver";
+import { lookup as lookupMimeType } from "mime-types";
 import config from "../../appConfig/index.js";
 import { log } from "../log/logUtils.js";
 import { ValidationError, SystemError, FileError } from "../error/errorHandler.js";
@@ -24,9 +25,34 @@ const DOWNLOAD_MAX_FILE_SIZE_BYTES =
   config.DOWNLOAD_MAX_FILE_SIZE_BYTES || DEFAULT_DOWNLOAD_MAX_FILE_SIZE_BYTES;
 
 /**
+ * 分隔符归一为 /：仅 Windows 需要（'\' 是分隔符且不可能出现在文件名中）；
+ * POSIX 下 '\' 是文件名合法字符，原样保留，避免把 notes\draft.txt 改写成嵌套路径
+ */
+function toPosixPath(p) {
+  return path.sep === "\\" ? p.replace(/\\/g, "/") : p;
+}
+
+/**
+ * 一次性换算正斜杠相对路径（仅请求级调用，如 listDir 相对 targetDir 的初始前缀）。
+ * 条目级相对路径不走这里——由遍历增量拼接（见 listDirectoryLevel），既省去每条目
+ * ~1.3µs 的 path.relative+replace，也避免 POSIX 合法文件名中的 '\' 被误改为分隔符
+ */
+function toPosixRelativePath(fromDir, toPath) {
+  return toPosixPath(path.relative(fromDir, toPath));
+}
+
+/**
+ * 拼接条目相对路径。entry.name 来自 readdir，不含路径分隔符（Windows 下 / 与 \
+ * 皆为分隔符不可能出现在名中；POSIX 下含 '\' 也原样保留），跨平台安全
+ */
+function joinRelativeEntry(relativeDir, entryName) {
+  return relativeDir ? `${relativeDir}/${entryName}` : entryName;
+}
+
+/**
  * 列出目录下单层条目（不递归）
  * @param {string} listDir 待列出的绝对目录
- * @param {string} workspaceDir 工作区根目录（用于计算相对路径）
+ * @param {string} workspaceDir 工作区根目录（用于计算初始相对前缀）
  * @param {string} logId 日志ID
  * @param {string} proxyPath 代理路径前缀
  * @param {string} [customTargetDir] 自定义目标目录
@@ -42,9 +68,10 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
     return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
   });
 
-  for (const entry of entries) {
-    const fullPath = path.join(listDir, entry.name);
+  // 初始前缀一次换算；相对路径统一正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
+  const baseRelativeDir = toPosixRelativePath(workspaceDir, listDir);
 
+  for (const entry of entries) {
     if (entry.name.startsWith(".") && entry.name !== ".gitignore") continue;
 
     const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
@@ -54,8 +81,7 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
       continue;
     }
 
-    // 统一使用正斜杠，保证 Windows/Linux 跨平台一致性及 URL 正确性
-    const relativePath = path.relative(workspaceDir, fullPath).replace(/\\/g, "/");
+    const relativePath = joinRelativeEntry(baseRelativeDir, entry.name);
 
     if (entry.isDirectory()) {
       files.push({
@@ -73,7 +99,7 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
         isLink: entry.isSymbolicLink(),
       });
     } catch (error) {
-      log(logId, "WARN", `处理文件失败: ${fullPath}`, { error: error.message });
+      log(logId, "WARN", `处理文件失败: ${listDir}/${entry.name}`, { error: error.message });
     }
   }
 
@@ -82,8 +108,9 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
 
 /**
  * 递归遍历目录（扁平文件列表；空目录以 isDir 返回）
+ * @param {string} relativeDir 当前层相对遍历起点的正斜杠路径（顶层由调用方换算一次）
  */
-async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTargetDir) {
+async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, relativeDir = "") {
   const files = [];
   const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
 
@@ -105,11 +132,11 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTa
       continue;
     }
 
+    const relativePath = joinRelativeEntry(relativeDir, entry.name);
+
     if (entry.isDirectory()) {
-      const sub = await traverseDirectory(fullPath, basePath, logId, proxyPath, customTargetDir);
+      const sub = await traverseDirectory(fullPath, logId, proxyPath, customTargetDir, relativePath);
       if (sub.length === 0) {
-        const referencePath = basePath || targetDir;
-        const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
         files.push({
           name: relativePath,
           isDir: true,
@@ -119,8 +146,6 @@ async function traverseDirectory(targetDir, basePath, logId, proxyPath, customTa
       }
     } else {
       try {
-        const referencePath = basePath || targetDir;
-        const relativePath = path.relative(referencePath, fullPath).replace(/\\/g, "/");
         files.push({
           name: relativePath,
           isDir: false,
@@ -207,7 +232,7 @@ function resolveFilePathWithinWorkspace(rootDir, filePathInput) {
     return null;
   }
 
-  const name = path.relative(resolvedRoot, absPath).replace(/\\/g, "/");
+  const name = toPosixPath(path.relative(resolvedRoot, absPath));
   if (!name || name.startsWith("..")) {
     return null;
   }
@@ -284,6 +309,231 @@ async function resolveExistingFile(userId, cId, filePath, proxyPath, customTarge
     name: resolved.name,
     fileProxyUrl: buildFileProxyUrl(proxyPath, resolved.name, trimmedCustomTargetDir),
   };
+}
+
+/** getFileMeta 单次批量缺省上限（调用方未显式下发 fileMetaMaxBatch 时生效） */
+const FILE_META_DEFAULT_MAX_BATCH = 100;
+/** getFileMeta 单次批量硬顶：调用方下发的上限也压在该值内，防畸形配置放大 lstat/响应开销 */
+const FILE_META_HARD_MAX_BATCH = 1000;
+/** getFileMeta 单条内 lstat/readlink/readdir 的并发上限：libuv 线程池默认仅 4 线程，
+ *  无限并发会挤占全局 FS 配额，拖慢列表/上传/下载等其他请求 */
+const FILE_META_CONCURRENCY = 8;
+/** 目录子项计数截断上限：防超大目录（数据集/npm 缓存等）拖垮单请求；达到即停，值语义为 ≥LIMIT */
+const FILE_META_CHILD_COUNT_LIMIT = 1000;
+
+/** 提取小写扩展名（不含点；无扩展名返回空串） */
+function extensionOf(name) {
+  const ext = path.extname(name).replace(/^\./, "").toLowerCase();
+  return ext || "";
+}
+
+/** 限量并发映射，结果按下标写入保持与输入同序（语义同 computerUtils.mapPool，就近实现避免跨模块耦合） */
+async function mapPoolOrdered(items, concurrency, fn) {
+  const results = new Array(items.length);
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: limit }, async () => {
+      while (true) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i], i);
+      }
+    })
+  );
+  return results;
+}
+
+/** 与文件列表同口径的子项可见性：隐藏项保留 .gitignore；排除名单整体生效
+ *  （计数侧不 stat 区分类型，与排除目录同名的文件被误排属可接受的极端情况） */
+function isCountedDirEntry(name) {
+  if (name.startsWith(".") && name !== ".gitignore") return false;
+  if ((config.CONTENT_TRAVERSE_EXCLUDE_FILES || []).includes(name)) return false;
+  if (config.TRAVERSE_EXCLUDE_DIRS.includes(name)) return false;
+  return true;
+}
+
+/** opendir 流式计数（O(1) 内存，不物化整个目录），达到截断上限提前终止。
+ *  注意：for-await 提前 return 时异步迭代器会自动关闭句柄，不能再手动 close（二次关闭抛错） */
+async function countDirEntries(dirPath) {
+  const dir = await fs.promises.opendir(dirPath);
+  let count = 0;
+  for await (const entry of dir) {
+    if (isCountedDirEntry(entry.name)) {
+      count += 1;
+      if (count >= FILE_META_CHILD_COUNT_LIMIT) {
+        return FILE_META_CHILD_COUNT_LIMIT;
+      }
+    }
+  }
+  return count;
+}
+
+/** 失败/占位元数据：字段形状与成功条目一致（值全 null），前端可无分支消费 */
+function emptyFileMeta(filePath, error) {
+  return {
+    path: filePath,
+    isDir: null,
+    isLink: null,
+    size: null,
+    mtimeMs: null,
+    extension: null,
+    mimeType: null,
+    linkTarget: null,
+    childCount: null,
+    ...(error ? { error } : {}),
+  };
+}
+
+/**
+ * 单条元数据查询：非法路径/不存在仅该条带 error；path 统一回显请求输入（trimmed），
+ * 保证响应与请求条目可按键/按序关联（规范路径以 file-list 的 name 为准）
+ */
+async function queryFileMetaEntry(targetDir, filePath, logId) {
+  const input = (filePath == null ? "" : String(filePath)).trim();
+  let resolved = input ? resolveFilePathWithinWorkspace(targetDir, input) : null;
+  // 兼容以 / 开头、实为相对目标根的写法（与 /resolve-file 同款重试）
+  if (!resolved && input.startsWith("/")) {
+    const asRelative = input.replace(/^[\/\\]+/, "");
+    if (asRelative && asRelative !== input) {
+      resolved = resolveFilePathWithinWorkspace(targetDir, asRelative);
+    }
+  }
+  if (!resolved) {
+    return emptyFileMeta(input, "illegal path");
+  }
+  try {
+    const stat = await fs.promises.lstat(resolved.absPath);
+    const isDir = stat.isDirectory();
+    const isLink = stat.isSymbolicLink();
+    const meta = {
+      path: input,
+      isDir,
+      isLink,
+      size: isDir ? null : stat.size,
+      mtimeMs: stat.mtimeMs,
+      extension: isDir ? null : extensionOf(input),
+      mimeType: isDir ? null : lookupMimeType(input) || "application/octet-stream",
+      linkTarget: null,
+      childCount: null,
+    };
+    // 软链：读目标路径（仅链接条目触发一次 readlink）
+    if (isLink) {
+      try {
+        meta.linkTarget = await fs.promises.readlink(resolved.absPath);
+      } catch (error) {
+        log(logId, "WARN", "Readlink failed, linkTarget set to null", {
+          filePath: input,
+          error: error.message,
+        });
+      }
+    }
+    // 目录：子项计数（仅目录条目触发；口径与文件列表一致，超限截断）
+    if (isDir) {
+      try {
+        meta.childCount = await countDirEntries(resolved.absPath);
+      } catch (error) {
+        log(logId, "WARN", "Count directory entries failed, childCount set to null", {
+          filePath: input,
+          error: error.message,
+        });
+      }
+    }
+    return meta;
+  } catch (error) {
+    return emptyFileMeta(input, error.code || error.message);
+  }
+}
+
+/**
+ * 批量查询文件元数据（大小/修改时间等）：与 /get-file-list 解耦，前端按需查询。
+ * readdir 的 Dirent 不含大小（POSIX 目录项本就无 size，需逐文件读 inode），
+ * 因此列表不带 size，由本接口用 lstat 补查，只为用户实际查看的文件付费。
+ * - 每条路径经 resolveFilePathWithinWorkspace 校验（拒绝 .. 穿越与越出目标根）；
+ *   兼容以 / 开头、实为相对目标根的写法（与 /resolve-file 同款重试）
+ * - lstat 不跟随符号链接：isLink 如实返回，size 为链接条目自身
+ * - 单条失败（不存在/权限/非法路径）仅该条带 error，不影响整批
+ * - 目录 size 恒为 null：递归总大小需整棵子树遍历，开销大；前端可基于扁平列表自行聚合
+ * - extension/mimeType 按文件名查表（mime-types，零 syscall），未知类型回落
+ *   application/octet-stream；目录此二字段为 null（不适用）
+ * - linkTarget 仅软链条目非 null（readlink 原样返回，可为相对/绝对路径）
+ * - childCount 仅目录条目非 null：与文件列表同口径（隐藏项保留 .gitignore、排除名单生效），
+ *   opendir 流式计数并在 FILE_META_CHILD_COUNT_LIMIT(1000) 截断（值语义为 ≥1000）
+ * - path 字段统一回显请求输入（trimmed），保证响应可与请求条目按键/按序关联；
+ *   规范路径以 /get-file-list 返回的 name 为准
+ * - 目标根目录不存在时直接返回空 metas（与 getFileList 的空列表语义对齐）
+ * @param {string|number} userId 用户ID
+ * @param {string|number} cId 会话ID
+ * @param {string[]} filePaths 相对目标根的路径数组（通常为 /get-file-list 返回的 name）
+ * @param {string} [customTargetDir] 自定义目标目录，非空时直接以该目录为根，空则按默认规则定位工作区
+ * @param {object} [service] 工作空间项目上下文（resolveServiceContext 产物）
+ * @param {string|number} [maxBatch] 调用方（Java 网关）下发的单次批量上限；非法或缺省取
+ *   FILE_META_DEFAULT_MAX_BATCH(100)，绝对上界 FILE_META_HARD_MAX_BATCH(1000)
+ * @returns {Promise<{metas: Array<{path: string, isDir: boolean|null, isLink: boolean|null, size: number|null, mtimeMs: number|null, extension: string|null, mimeType: string|null, linkTarget: string|null, childCount: number|null, error?: string}>}>}
+ */
+async function getFileMeta(userId, cId, filePaths, customTargetDir, service = null, maxBatch = null) {
+  const startTime = Date.now();
+  const logId = `computer:${userId}:${cId}`;
+
+  if (!userId) {
+    throw new ValidationError("userId 不能为空", { field: "userId" });
+  }
+  if (!cId) {
+    throw new ValidationError("cId 不能为空", { field: "cId" });
+  }
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    throw new ValidationError("filePaths 必须为非空数组", { field: "filePaths" });
+  }
+  // 上限由调用方按部署配置下发（fileMetaMaxBatch）；缺省 100，服务端硬顶防畸形值放大开销
+  const parsedMaxBatch = Number.parseInt(maxBatch, 10);
+  const effectiveMaxBatch =
+    Number.isFinite(parsedMaxBatch) && parsedMaxBatch > 0
+      ? Math.min(parsedMaxBatch, FILE_META_HARD_MAX_BATCH)
+      : FILE_META_DEFAULT_MAX_BATCH;
+  if (filePaths.length > effectiveMaxBatch) {
+    throw new ValidationError(
+      `filePaths 单次最多 ${effectiveMaxBatch} 条`,
+      { field: "filePaths", count: filePaths.length }
+    );
+  }
+
+  const normalizedUserId = String(userId);
+  const normalizedCId = String(cId);
+  // body 传入的 customTargetDir 可能是任意 JSON 类型（GET query 恒为字符串，POST 不是），
+  // 统一 String 强转，避免非字符串值在 .trim 上抛 TypeError 变 500
+  const rawCustomTargetDir =
+    customTargetDir == null ? "" : String(customTargetDir).trim();
+  const trimmedCustomTargetDir = rawCustomTargetDir || null;
+  const targetDir = trimmedCustomTargetDir
+    ? trimmedCustomTargetDir
+    : resolveWorkspaceDir(service, normalizedUserId, normalizedCId);
+
+  // 与 getFileList/resolveExistingFile 对齐：根目录缺失返回空结果而不是整批 ENOENT
+  if (!fs.existsSync(targetDir)) {
+    log(logId, "INFO", "Target directory does not exist, returning empty metas", {
+      targetDir,
+      userId: normalizedUserId,
+      cId: normalizedCId,
+    });
+    return { metas: [] };
+  }
+
+  // 限量并发执行（libuv 线程池保护），结果按下标写入保持与请求同序
+  const metas = await mapPoolOrdered(filePaths, FILE_META_CONCURRENCY, (filePath) =>
+    queryFileMetaEntry(targetDir, filePath, logId)
+  );
+
+  log(logId, "INFO", "File metadata queried", {
+    targetDir,
+    count: metas.length,
+    failed: metas.filter((m) => m.error).length,
+    customTargetDir: trimmedCustomTargetDir,
+    userId: normalizedUserId,
+    cId: normalizedCId,
+    elapsedMs: Date.now() - startTime,
+  });
+
+  return { metas };
 }
 
 /**
@@ -434,8 +684,9 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
   });
 
   try {
+    // 递归模式：初始相对前缀一次换算（listDir 相对 targetDir），条目路径由遍历增量拼接
     const files = isRecursive
-      ? await traverseDirectory(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir)
+      ? await traverseDirectory(listDir, logId, proxyPath, trimmedCustomTargetDir, toPosixRelativePath(targetDir, listDir))
       : await listDirectoryLevel(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir);
 
     log(logId, "INFO", "User file list obtained successfully", {
@@ -576,7 +827,7 @@ async function searchFiles(
     throw new ValidationError("relativePath 必须是目录", { field: "relativePath", relativePath });
   }
 
-  const searchRootRel = path.relative(targetDir, searchRootAbs).replace(/\\/g, "/");
+  const searchRootRel = toPosixPath(path.relative(targetDir, searchRootAbs));
   const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
   const excludeDirs = config.TRAVERSE_EXCLUDE_DIRS || [];
 
@@ -644,7 +895,7 @@ async function searchFiles(
 
       visited += 1;
       const fullPath = path.join(dirAbs, entry.name);
-      const rel = path.relative(targetDir, fullPath).replace(/\\/g, "/");
+      const rel = toPosixPath(path.relative(targetDir, fullPath));
 
       if (entry.isDirectory()) {
         childDirs.push(rel);
@@ -1989,6 +2240,7 @@ async function generateFile(userId, cId, fileName, content, customTargetDir, ser
 
 export {
   getFileList,
+  getFileMeta,
   resolveExistingFile,
   searchFiles,
   updateFiles,

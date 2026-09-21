@@ -8,6 +8,7 @@ import config from "../appConfig/index.js";
 import { createWorkspace, pushSkillsToWorkspace, initProjectTemplate, installProjectDependencies, executeCommand, deleteWorkspace, zipWorkspace, buildAgentPackage, cleanupBuildArtifacts, } from "../utils/computer/computerUtils.js";
 import {
   getFileList,
+  getFileMeta,
   resolveExistingFile,
   searchFiles,
   updateFiles,
@@ -368,6 +369,17 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { userId, cId, proxyPath, customTargetDir, filePath } = req.query;
       const result = await resolveExistingFile(userId, cId, filePath, proxyPath, customTargetDir, resolveServiceContext(req));
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    // 批量查询文件元数据（大小/mtime/MIME/扩展名/软链目标/目录子项数）：与 /get-file-list 解耦，前端按需查询
+    //（批量上限由调用方 fileMetaMaxBatch 下发，缺省 100、服务端硬顶 1000）
+    path: "/get-file-meta",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { userId, cId, customTargetDir, filePaths, fileMetaMaxBatch } = req.body || {};
+      const result = await getFileMeta(userId, cId, filePaths, customTargetDir, resolveServiceContext(req), fileMetaMaxBatch);
       res.status(200).json({ success: true, ...result });
     }),
   },
