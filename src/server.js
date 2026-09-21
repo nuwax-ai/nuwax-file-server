@@ -220,6 +220,9 @@ const server = app.listen(config.PORT, async () => {
 server.timeout = 600000; // 10 分钟
 server.keepAliveTimeout = 610000; // 略大于 timeout
 server.headersTimeout = 620000; // 略大于 keepAliveTimeout
+// Node 18+ requestTimeout 默认 300s：该计时器同样约束 keep-alive 空闲连接等待下一个请求的时长，
+// 不显式调大的话空闲连接实际 300s 就被关，上面的 keepAliveTimeout=610s 不会生效到底
+server.requestTimeout = 630000; // 略大于 headersTimeout
 
 // 优雅退出处理
 const gracefulShutdown = (signal) => {
