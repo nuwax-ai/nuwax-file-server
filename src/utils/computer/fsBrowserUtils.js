@@ -58,25 +58,29 @@ function validateAbsolutePath(dirPath, field = "path") {
 }
 
 /**
- * 校验目录/文件名（mkdir 的 dirName、rename 的 newName 共用）。
+ * 校验目录/文件名（mkdir 的 dirName、rename 的 newName 共用），名称原样保留不 trim
+ * （macOS/Linux 允许前后空格；纯空白名拒绝）。
  * / 与 \ 均拒绝：\ 在 win32 是分隔符，且 toDisplayPath 会把 \ 归一为 /，
  * POSIX 下合法的反斜杠名会导致回显路径与实际路径错乱。
+ * 长度上限 255 为近似护栏（UTF-16 码元计数）：文件系统真实上限按字节计（ext4/APFS 均 255 字节，
+ * 与 UTF-16 计数不严格相等），超限名由 OS 报 ENAMETOOLONG 兜底进
+ * "cannot create/rename directory" 分支，不做更精确的字节数校验。
  */
 function validateEntryName(name, field) {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed || trimmed.includes("\0")) {
+  const value = String(name ?? "");
+  if (!value.trim() || value.includes("\0")) {
     throw new ValidationError(`${field} is required`, { field });
   }
-  if (trimmed.includes("/") || trimmed.includes("\\")) {
+  if (value.includes("/") || value.includes("\\")) {
     throw new ValidationError(`${field} must not contain path separators`, { field });
   }
-  if (trimmed === "." || trimmed === "..") {
+  if (value === "." || value === "..") {
     throw new ValidationError(`${field} must not be a relative segment`, { field });
   }
-  if (trimmed.length > 255) {
+  if (value.length > 255) {
     throw new ValidationError(`${field} exceeds 255 characters`, { field });
   }
-  return trimmed;
+  return value;
 }
 
 /**
