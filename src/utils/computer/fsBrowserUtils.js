@@ -46,6 +46,39 @@ export async function listFsRoots() {
   return { roots, home };
 }
 
+/** 绝对路径入参校验（浏览/新建/重命名共用）：非空字符串、无 NUL、宿主语义绝对路径 */
+function validateAbsolutePath(dirPath, field = "path") {
+  if (!dirPath || typeof dirPath !== "string" || dirPath.includes("\0")) {
+    throw new ValidationError(`${field} is required`, { field });
+  }
+  // file-server 与目标机器同机运行，用宿主 path 模块做本机语义校验
+  if (!path.isAbsolute(dirPath)) {
+    throw new ValidationError(`${field} must be absolute`, { field });
+  }
+}
+
+/**
+ * 校验目录/文件名（mkdir 的 dirName、rename 的 newName 共用）。
+ * / 与 \ 均拒绝：\ 在 win32 是分隔符，且 toDisplayPath 会把 \ 归一为 /，
+ * POSIX 下合法的反斜杠名会导致回显路径与实际路径错乱。
+ */
+function validateEntryName(name, field) {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed || trimmed.includes("\0")) {
+    throw new ValidationError(`${field} is required`, { field });
+  }
+  if (trimmed.includes("/") || trimmed.includes("\\")) {
+    throw new ValidationError(`${field} must not contain path separators`, { field });
+  }
+  if (trimmed === "." || trimmed === "..") {
+    throw new ValidationError(`${field} must not be a relative segment`, { field });
+  }
+  if (trimmed.length > 255) {
+    throw new ValidationError(`${field} exceeds 255 characters`, { field });
+  }
+  return trimmed;
+}
+
 /**
  * 列出目录下一层子项（目录 + 文件），目录在前、按名称自然排序（大小写不敏感）。
  * 隐藏文件（. 开头）默认返回，由前端决定展示样式。
@@ -54,13 +87,7 @@ export async function listFsRoots() {
  * @param {string} dirPath 绝对路径
  */
 export async function listFsChildren(dirPath) {
-  if (!dirPath || typeof dirPath !== "string" || dirPath.includes("\0")) {
-    throw new ValidationError("path is required", { field: "path" });
-  }
-  // file-server 与目标机器同机运行，用宿主 path 模块做本机语义校验
-  if (!path.isAbsolute(dirPath)) {
-    throw new ValidationError("path must be absolute", { field: "path" });
-  }
+  validateAbsolutePath(dirPath);
   let entries;
   try {
     entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
@@ -93,4 +120,86 @@ export async function listFsChildren(dirPath) {
       a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
   );
   return { path: toDisplayPath(dirPath), entries: result };
+}
+
+/**
+ * 在 parentPath 下新建一层目录（目录选择弹窗"新建文件夹"）。
+ * 非递归：父目录须已存在（来自浏览选择）；名称支持中文等任意合法文件名。
+ * 重名 / 父目录不存在等以 ValidationError 透出给前端提示。
+ * @param {string} parentPath 父目录绝对路径
+ * @param {string} dirName 新目录名
+ */
+export async function createFsDirectory(parentPath, dirName) {
+  validateAbsolutePath(parentPath, "parentPath");
+  const name = validateEntryName(dirName, "dirName");
+  const target = path.join(parentPath, name);
+  try {
+    await fs.promises.mkdir(target); // 不递归：父目录必须存在
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      throw new ValidationError(`directory already exists: ${name}`, { field: "dirName" });
+    }
+    if (error.code === "ENOENT") {
+      throw new ValidationError("parent directory does not exist", { field: "parentPath" });
+    }
+    throw new ValidationError(`cannot create directory (${error.code || error.message})`, {
+      field: "dirName",
+    });
+  }
+  return {
+    path: toDisplayPath(target),
+    name,
+    parentPath: toDisplayPath(parentPath),
+    isDir: true,
+    isSymlink: false,
+  };
+}
+
+/**
+ * 同目录重命名（目录选择弹窗）。newName 仅是名字（校验拒绝分隔符），不支持跨目录移动。
+ * 目标名先预检再 rename：POSIX 的 rename 指向已存在空目录时会静默替换，预检保证跨平台
+ * 一致的 "already exists" 报错；大小写不敏感文件系统（macOS/Windows）上仅改大小写的
+ * 重命名会被判为重名而拒绝，属可接受的取舍。
+ * @param {string} dirPath 现目录绝对路径
+ * @param {string} newName 新名字
+ */
+export async function renameFsDirectory(dirPath, newName) {
+  validateAbsolutePath(dirPath);
+  const name = validateEntryName(newName, "newName");
+  const parent = path.dirname(dirPath);
+  if (parent === dirPath) {
+    // 覆盖 POSIX "/" 与 win32 "C:/" 等根目录
+    throw new ValidationError("cannot rename the root directory", { field: "path" });
+  }
+  const target = path.join(parent, name);
+  let targetExists;
+  try {
+    await fs.promises.stat(target);
+    targetExists = true;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw new ValidationError(`cannot rename (${error.code || error.message})`, { field: "path" });
+    }
+    targetExists = false;
+  }
+  if (targetExists) {
+    throw new ValidationError(`name already exists: ${name}`, { field: "newName" });
+  }
+  try {
+    await fs.promises.rename(dirPath, target);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new ValidationError("directory does not exist", { field: "path" });
+    }
+    throw new ValidationError(`cannot rename directory (${error.code || error.message})`, {
+      field: "newName",
+    });
+  }
+  return {
+    path: toDisplayPath(target),
+    name,
+    parentPath: toDisplayPath(parent),
+    isDir: true,
+    isSymlink: false,
+  };
 }

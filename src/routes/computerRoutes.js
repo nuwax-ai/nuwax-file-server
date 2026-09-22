@@ -20,7 +20,7 @@ import {
   importProject,
 } from "../utils/computer/computerFileUtils.js";
 import { resolveServiceContext } from "../utils/computer/workspaceContext.js";
-import { listFsRoots, listFsChildren } from "../utils/computer/fsBrowserUtils.js";
+import { listFsRoots, listFsChildren, createFsDirectory, renameFsDirectory } from "../utils/computer/fsBrowserUtils.js";
 
 const computerRouter = express.Router();
 
@@ -351,6 +351,26 @@ const routes = [
     handler: asyncHandler(async (req, res) => {
       const { path: dirPath } = req.query;
       const result = await listFsChildren(dirPath);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    // 目录选择弹窗：在指定目录下新建一层目录（参数走 JSON body，天然规避 query 编码问题）
+    path: "/fs/mkdir",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { parentPath, dirName } = req.body || {};
+      const result = await createFsDirectory(parentPath, dirName);
+      res.status(200).json({ success: true, ...result });
+    }),
+  },
+  {
+    // 目录选择弹窗：同目录重命名（newName 仅名字，不支持跨目录移动）
+    path: "/fs/rename",
+    method: "post",
+    handler: asyncHandler(async (req, res) => {
+      const { path: dirPath, newName } = req.body || {};
+      const result = await renameFsDirectory(dirPath, newName);
       res.status(200).json({ success: true, ...result });
     }),
   },
