@@ -49,6 +49,18 @@ function joinRelativeEntry(relativeDir, entryName) {
   return relativeDir ? `${relativeDir}/${entryName}` : entryName;
 }
 
+/** listOpts.limitState 是否已达上限（达限即提前终止扫描） */
+function isListLimitReached(limitState) {
+  return limitState != null && limitState.limit != null && limitState.pushed >= limitState.limit;
+}
+
+/** 计数一次已输出条目（供 limit 提前终止） */
+function countListPushed(limitState) {
+  if (limitState != null) {
+    limitState.pushed += 1;
+  }
+}
+
 /**
  * 列出目录下单层条目（不递归）
  * @param {string} listDir 待列出的绝对目录
@@ -56,9 +68,12 @@ function joinRelativeEntry(relativeDir, entryName) {
  * @param {string} logId 日志ID
  * @param {string} proxyPath 代理路径前缀
  * @param {string} [customTargetDir] 自定义目标目录
+ * @param {{typeFilter?: "file"|"dir"|null, limitState?: {limit: number|null, pushed: number}}} [opts]
+ *   typeFilter 过滤输出条目类型（null=全部）；limitState 达 limit 后提前终止
  * @returns {Promise<Array>}
  */
-async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, customTargetDir) {
+async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, customTargetDir, opts = {}) {
+  const { typeFilter = null, limitState = null } = opts;
   const files = [];
   const entries = await fs.promises.readdir(listDir, { withFileTypes: true });
 
@@ -72,6 +87,8 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
   const baseRelativeDir = toPosixRelativePath(workspaceDir, listDir);
 
   for (const entry of entries) {
+    if (isListLimitReached(limitState)) break;
+
     if (entry.name.startsWith(".") && entry.name !== ".gitignore") continue;
 
     const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
@@ -84,12 +101,16 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
     const relativePath = joinRelativeEntry(baseRelativeDir, entry.name);
 
     if (entry.isDirectory()) {
+      if (typeFilter === "file") continue;
       files.push({
         name: relativePath,
         isDir: true,
       });
+      countListPushed(limitState);
       continue;
     }
+
+    if (typeFilter === "dir") continue;
 
     try {
       files.push({
@@ -98,6 +119,7 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
         fileProxyUrl: buildFileProxyUrl(proxyPath, relativePath, customTargetDir),
         isLink: entry.isSymbolicLink(),
       });
+      countListPushed(limitState);
     } catch (error) {
       log(logId, "WARN", `处理文件失败: ${listDir}/${entry.name}`, { error: error.message });
     }
@@ -109,18 +131,27 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
 /**
  * 递归遍历目录（扁平文件列表；空目录以 isDir 返回）
  * @param {string} relativeDir 当前层相对遍历起点的正斜杠路径（顶层由调用方换算一次）
+ * @param {{typeFilter?: "file"|"dir"|null, limitState?: {limit: number|null, pushed: number}}} [opts]
+ *   typeFilter 只过滤输出条目（不影响遍历与空目录判定，目录仍会下钻以发现深层文件）；
+ *   limitState 达 limit 后提前终止扫描
+ * @returns {Promise<{entries: Array, naturalCount: number}>}
+ *   entries=过滤后输出；naturalCount=未过滤自然条目数（供父层空目录判定，与无过滤时的输出条数一致）
  */
-async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, relativeDir = "") {
-  const files = [];
-  const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
+async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, relativeDir = "", opts = {}) {
+  const { typeFilter = null, limitState = null } = opts;
+  const entries = [];
+  let naturalCount = 0;
+  const rawEntries = await fs.promises.readdir(targetDir, { withFileTypes: true });
 
-  entries.sort((a, b) => {
+  rawEntries.sort((a, b) => {
     if (a.isDirectory() && !b.isDirectory()) return -1;
     if (!a.isDirectory() && b.isDirectory()) return 1;
     return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
   });
 
-  for (const entry of entries) {
+  for (const entry of rawEntries) {
+    if (isListLimitReached(limitState)) break;
+
     const fullPath = path.join(targetDir, entry.name);
 
     if (entry.name.startsWith(".") && entry.name !== ".gitignore") continue;
@@ -133,32 +164,40 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
     }
 
     const relativePath = joinRelativeEntry(relativeDir, entry.name);
+    naturalCount += 1;
 
     if (entry.isDirectory()) {
-      const sub = await traverseDirectory(fullPath, logId, proxyPath, customTargetDir, relativePath);
-      if (sub.length === 0) {
-        files.push({
-          name: relativePath,
-          isDir: true,
-        });
+      const sub = await traverseDirectory(fullPath, logId, proxyPath, customTargetDir, relativePath, opts);
+      if (sub.naturalCount === 0) {
+        // 空目录：typeFilter=file 时不出条目；达限时不再输出（避免超限）
+        if (typeFilter !== "file" && !isListLimitReached(limitState)) {
+          entries.push({
+            name: relativePath,
+            isDir: true,
+          });
+          countListPushed(limitState);
+        }
       } else {
-        files.push(...sub);
+        entries.push(...sub.entries);
       }
     } else {
+      if (typeFilter === "dir") continue;
+
       try {
-        files.push({
+        entries.push({
           name: relativePath,
           isDir: false,
           fileProxyUrl: buildFileProxyUrl(proxyPath, relativePath, customTargetDir),
           isLink: entry.isSymbolicLink(),
         });
+        countListPushed(limitState);
       } catch (error) {
         log(logId, "WARN", `处理文件失败: ${fullPath}`, { error: error.message });
       }
     }
   }
 
-  return files;
+  return { entries, naturalCount };
 }
 
 /**
@@ -621,9 +660,13 @@ async function calculateDownloadableDirectorySize(
  * @param {string} [customTargetDir] 自定义目标目录，非空时直接扫描该目录，为空则按默认规则拼接 workspaceRoot/userId/cId
  * @param {string} [relativePath] 相对工作区根的目录路径（可多级），空则列出根目录
  * @param {boolean|string} [recursive] 是否递归扁平列出；默认 true（原全量逻辑）；显式 false 时仅当前目录一层
- * @returns {Promise<{files: Array, recursive: boolean}>}
+ * @param {string} [type] 返回条目类型过滤：file-仅文件、dir-仅目录（兼容 directory）、all-全部（默认）；
+ *   只过滤输出条目，不影响递归下钻与空目录判定；扫描时应用（与 limit 配合可提前终止）
+ * @param {number|string} [limit] 最多返回条目数（类型过滤后计数），非负整数；缺省不限
+ * @returns {Promise<{files: Array, recursive: boolean, type: string, limit: number|null}>}
+ *   type/limit 回显实际生效值（Java 网关以此识别 file-server 已应用过滤，旧版无回显则网关兜底）
  */
-async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, service = null) {
+async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, type, limit, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   // 默认 true=原全量递归；仅显式 false/"false" 时单层
@@ -634,6 +677,29 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
   }
   if (!cId) {
     throw new ValidationError("cId 不能为空", { field: "cId" });
+  }
+
+  // type 归一：缺省/空=不过滤；非法值直接报参数错误（不静默忽略）
+  const typeRaw = type == null ? "" : String(type).trim().toLowerCase();
+  let typeFilter = null;
+  if (typeRaw && typeRaw !== "all") {
+    if (typeRaw === "file") {
+      typeFilter = "file";
+    } else if (typeRaw === "dir" || typeRaw === "directory") {
+      typeFilter = "dir";
+    } else {
+      throw new ValidationError("type 仅支持 file/dir/all", { field: "type", value: type });
+    }
+  }
+
+  // limit 归一：缺省/空=不限；必须是非负整数（0 表示不返回条目）
+  let safeLimit = null;
+  if (limit != null && limit !== "") {
+    const n = Number(limit);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new ValidationError("limit 必须为非负整数", { field: "limit", value: limit });
+    }
+    safeLimit = n;
   }
 
   const normalizedUserId = String(userId);
@@ -650,7 +716,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       userId: normalizedUserId,
       cId: normalizedCId,
     });
-    return { files: [], recursive: isRecursive };
+    return { files: [], recursive: isRecursive, type: typeFilter || "all", limit: safeLimit };
   }
 
   const listDir = resolvePathWithinWorkspace(targetDir, relativePath);
@@ -663,7 +729,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       userId: normalizedUserId,
       cId: normalizedCId,
     });
-    return { files: [], recursive: isRecursive };
+    return { files: [], recursive: isRecursive, type: typeFilter || "all", limit: safeLimit };
   }
 
   const listStat = await fs.promises.stat(listDir);
@@ -684,10 +750,12 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
   });
 
   try {
+    // type/limit 在扫描时应用：类型不符的条目不输出，达 limit 提前终止遍历（大目录省扫描与传输）
+    const listOpts = { typeFilter, limitState: { limit: safeLimit, pushed: 0 } };
     // 递归模式：初始相对前缀一次换算（listDir 相对 targetDir），条目路径由遍历增量拼接
     const files = isRecursive
-      ? await traverseDirectory(listDir, logId, proxyPath, trimmedCustomTargetDir, toPosixRelativePath(targetDir, listDir))
-      : await listDirectoryLevel(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir);
+      ? (await traverseDirectory(listDir, logId, proxyPath, trimmedCustomTargetDir, toPosixRelativePath(targetDir, listDir), listOpts)).entries
+      : await listDirectoryLevel(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir, listOpts);
 
     log(logId, "INFO", "User file list obtained successfully", {
       fileCount: files.length,
@@ -695,12 +763,15 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       listDir,
       relativePath: relativePath || "",
       recursive: isRecursive,
+      type: typeFilter || "all",
+      limit: safeLimit,
       userId: normalizedUserId,
       cId: normalizedCId,
       elapsedMs: Date.now() - startTime,
     });
 
-    return { files, recursive: isRecursive };
+    // type/limit 回显生效值，供 Java 网关识别（旧版 file-server 无该回显，网关侧兜底过滤）
+    return { files, recursive: isRecursive, type: typeFilter || "all", limit: safeLimit };
   } catch (error) {
     if (error instanceof ValidationError) {
       throw error;

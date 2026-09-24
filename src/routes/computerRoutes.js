@@ -378,8 +378,8 @@ const routes = [
     path: "/get-file-list",
     method: "get",
     handler: asyncHandler(async (req, res) => {
-      const { userId, cId, proxyPath, customTargetDir, relativePath, recursive } = req.query;
-      const result = await getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, resolveServiceContext(req));
+      const { userId, cId, proxyPath, customTargetDir, relativePath, recursive, type, limit } = req.query;
+      const result = await getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, type, limit, resolveServiceContext(req));
       res.status(200).json({ success: true, ...result });
     }),
   },
