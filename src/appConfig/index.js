@@ -179,7 +179,7 @@ const config = {
     ? process.env.GIT_GITIGNORE_ENTRIES.split("|").map((s) => s.trim()).filter(Boolean)
     : ["node_modules/", ".pnpm-store/", "dist/", "build/", ".idea/", ".vscode/", ".DS_Store", ".npmrc", ".agents/", ".claude/", ".opencode/", ".codex/", ".agent-store/", ".tmp/", ".logs/", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"],
   GIT_ENABLED: process.env.GIT_ENABLED?.toLowerCase() === "true",
-  // 全量 add/commit 优先使用本机原生 git（大仓库更快）；false 时强制 isomorphic-git
+  // 全部 git 操作优先使用本机原生 git；仅本机无 git 时回退 isomorphic-git；false 时强制 isomorphic-git
   GIT_USE_NATIVE: process.env.GIT_USE_NATIVE?.toLowerCase() === "false" ? false : true,
   BASH_PATH: process.env.BASH_PATH || "",
   ZIP_WORKSPACE_EXCLUDE: process.env.ZIP_WORKSPACE_EXCLUDE

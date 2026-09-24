@@ -1,9 +1,5 @@
 import { resolveWorkspaceDir, WORKSPACE_TYPE } from "../utils/computer/workspaceContext.js";
-import path from "path";
 import fs from "fs";
-import crypto from "crypto";
-import git from "isomorphic-git";
-import { createPatch } from "diff";
 import config from "../appConfig/index.js";
 import { log } from "../utils/log/logUtils.js";
 import {
@@ -16,12 +12,27 @@ import { resolveProjectPath } from "../utils/common/projectPathUtils.js";
 import {
   isGitRepo,
   ensureGitRepo,
-  ensureGitignore,
+  initRepo,
+  getStatus,
   addAll,
   commitAllChanges,
+  commitFiles,
   stageFiles,
-  getDefaultAuthor,
-  hasGitHead,
+  unstageFiles,
+  discardChanges,
+  getLog,
+  getDiff,
+  getFileContentAtRef,
+  resetTo,
+  revertToTree,
+  checkoutFiles,
+  listTags as gitListTags,
+  createTag as gitCreateTag,
+  deleteTag as gitDeleteTag,
+  listBranches as gitListBranches,
+  createBranch as gitCreateBranch,
+  switchBranch as gitSwitchBranch,
+  deleteBranch as gitDeleteBranch,
 } from "../utils/git/gitUtils.js";
 
 /**
@@ -101,175 +112,41 @@ function resolveAndCheck(options) {
   return { targetPath, logId: `computer:${userId}:${cId}` };
 }
 
-// ──────────────────────────── helpers ────────────────────────────
-
 /**
- * 检测 buffer 是否为二进制内容（前 8000 字节中是否包含 \0）
- * @param {Buffer} buf
- * @returns {boolean}
+ * 将底层带 code 的错误映射为业务/校验错误，其余包装为 SystemError
+ * @param {unknown} e
+ * @param {string} logId
+ * @param {string} action
+ * @param {object} [extra]
  */
-function isBinaryBuffer(buf) {
-  for (let i = 0; i < Math.min(buf.length, 8000); i++) {
-    if (buf[i] === 0) return true;
+function rethrowGitError(e, logId, action, extra = {}) {
+  if (
+    e instanceof ValidationError ||
+    e instanceof BusinessError ||
+    e instanceof ResourceError
+  ) {
+    throw e;
   }
-  return false;
-}
-
-/**
- * 计算 git blob hash（SHA1 of "blob <size>\0<content>"）
- * @param {Buffer} buf
- * @returns {string} 40 字符的 hex hash
- */
-function gitBlobHash(buf) {
-  const header = Buffer.from(`blob ${buf.length}\0`);
-  return crypto.createHash("sha1").update(Buffer.concat([header, buf])).digest("hex");
-}
-
-/**
- * 生成 git diff 格式的差异文本并统计行数变更。
- * createPatch 生成 unified diff，但头部格式与 git diff 不同（Index:/===  vs diff --git）。
- * 这里保留 createPatch 的 hunk 内容不变，替换头部为 git diff 格式。
- *
- * @param {string} filepath  文件相对路径
- * @param {string} oldContent  旧内容（文本）
- * @param {string} newContent  新内容（文本）
- * @param {boolean} hasOld  是否存在旧版本
- * @param {boolean} hasNew  是否存在新版本
- * @param {Buffer|null} oldBuf  旧内容 Buffer（用于计算 blob hash）
- * @param {Buffer|null} newBuf  新内容 Buffer（用于计算 blob hash）
- * @returns {{ diff: string, insertions: number, deletions: number }}
- */
-function makeDiffPatch(filepath, oldContent, newContent, hasOld, hasNew, oldBuf, newBuf) {
-  const patch = createPatch(
-    filepath,
-    hasOld ? oldContent : "",
-    hasNew ? newContent : "",
-    hasOld ? `a/${filepath}` : "/dev/null",
-    hasNew ? `b/${filepath}` : "/dev/null"
-  );
-
-  // createPatch 前 4 行是头部（Index: / === / --- / +++），第 5 行起是 hunks
-  const lines = patch.split("\n");
-  const rawHunks = lines.slice(4);
-  if (rawHunks.length > 0 && rawHunks[rawHunks.length - 1] === "") rawHunks.pop();
-
-  // Pass 1: 修正 @@ 行（count=1 时省略），统计增删行数
-  const fixedHunks = [];
-  let insertions = 0;
-  let deletions = 0;
-
-  for (const line of rawHunks) {
-    if (line.startsWith("@@")) {
-      const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-      if (m) {
-        const oldStart = m[1];
-        const oldLines = m[2] !== undefined ? parseInt(m[2], 10) : 1;
-        const newStart = m[3];
-        const newLines = m[4] !== undefined ? parseInt(m[4], 10) : 1;
-        const oldPart = oldLines === 1 ? oldStart : `${oldStart},${oldLines}`;
-        const newPart = newLines === 1 ? newStart : `${newStart},${newLines}`;
-        fixedHunks.push(`@@ -${oldPart} +${newPart} @@`);
-        continue;
-      }
+  const code = e && typeof e === "object" && "code" in e ? e.code : null;
+  if (code === "VALIDATION") {
+    const details = { ...extra };
+    if (e && typeof e === "object") {
+      if (e.field != null) details.field = e.field;
+      if (e.target != null) details.target = e.target;
     }
-    if (line.startsWith("+") && !line.startsWith("+++")) insertions++;
-    else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
-    fixedHunks.push(line);
+    throw new ValidationError(e.message || "Validation failed", details);
   }
-
-  // Pass 2: 在最后一个 hunk 的尾部补充 \ No newline at end of file
-  const oldNoNewline = hasOld && oldContent !== "" && !oldContent.endsWith("\n");
-  const newNoNewline = hasNew && newContent !== "" && !newContent.endsWith("\n");
-
-  if ((oldNoNewline || newNoNewline) && fixedHunks.length > 0) {
-    // 找到最后一个 hunk 的起始位置
-    let lastHunkStart = 0;
-    for (let i = 0; i < fixedHunks.length; i++) {
-      if (fixedHunks[i].startsWith("@@")) lastHunkStart = i;
-    }
-    // 在最后一个 hunk 中，从后往前找最后一行各类型的位置
-    let lastDel = -1, lastAdd = -1, lastCtx = -1;
-    for (let i = fixedHunks.length - 1; i > lastHunkStart; i--) {
-      const l = fixedHunks[i];
-      if (l.startsWith("-") && !l.startsWith("---") && lastDel < 0) lastDel = i;
-      else if (l.startsWith("+") && !l.startsWith("++") && lastAdd < 0) lastAdd = i;
-      else if (l.startsWith(" ") && lastCtx < 0) lastCtx = i;
-    }
-    const lastIdx = Math.max(lastDel, lastAdd, lastCtx);
-
-    if (lastIdx >= 0) {
-      const lastLine = fixedHunks[lastIdx];
-      if (lastLine.startsWith(" ")) {
-        // 上下文行：新旧两侧内容相同
-        if (oldNoNewline || newNoNewline) {
-          fixedHunks.splice(lastIdx + 1, 0, "\\ No newline at end of file");
-        }
-      } else if (lastLine.startsWith("+")) {
-        // 新增行结尾：找前面最近的 - 行判断是否是替换
-        let prevIdx = -1;
-        for (let i = lastIdx - 1; i > lastHunkStart; i--) {
-          if (fixedHunks[i].startsWith("-") && !fixedHunks[i].startsWith("---")) { prevIdx = i; break; }
-        }
-        if (prevIdx >= 0 && oldNoNewline) {
-          fixedHunks.splice(prevIdx + 1, 0, "\\ No newline at end of file");
-          if (newNoNewline) fixedHunks.splice(lastIdx + 2, 0, "\\ No newline at end of file");
-        } else if (newNoNewline) {
-          fixedHunks.splice(lastIdx + 1, 0, "\\ No newline at end of file");
-        }
-      } else if (lastLine.startsWith("-") && oldNoNewline) {
-        fixedHunks.splice(lastIdx + 1, 0, "\\ No newline at end of file");
-      }
-    }
+  if (code === "BUSINESS") {
+    throw new BusinessError(e.message || "Business error", {
+      ...(e && typeof e === "object" && e.staged != null ? { staged: e.staged } : {}),
+      ...(e && typeof e === "object" && e.modified != null
+        ? { modified: e.modified }
+        : {}),
+      ...extra,
+    });
   }
-
-  // 构建 git diff 头部
-  const oldHash = hasOld && oldBuf ? gitBlobHash(oldBuf).substring(0, 7) : "0000000";
-  const newHash = hasNew && newBuf ? gitBlobHash(newBuf).substring(0, 7) : "0000000";
-
-  const header = [];
-  header.push(`diff --git a/${filepath} b/${filepath}`);
-
-  if (!hasOld) {
-    header.push("new file mode 100644");
-    header.push(`index 0000000..${newHash}`);
-  } else if (!hasNew) {
-    header.push("deleted file mode 100644");
-    header.push(`index ${oldHash}..0000000`);
-  } else {
-    header.push(`index ${oldHash}..${newHash} 100644`);
-  }
-
-  header.push(`--- ${hasOld ? `a/${filepath}` : "/dev/null"}`);
-  header.push(`+++ ${hasNew ? `b/${filepath}` : "/dev/null"}`);
-
-  const gitDiff = [...header, ...fixedHunks].join("\n") + "\n";
-  return { diff: gitDiff, insertions, deletions };
-}
-
-/**
- * 获取 HEAD commit OID
- * @param {string} dir
- * @returns {Promise<string>}
- */
-async function getHeadOid(dir) {
-  return git.resolveRef({ fs, dir, ref: "HEAD" });
-}
-
-/**
- * 从指定 commit 读取某文件的文本内容
- * @param {string} dir
- * @param {string} commitOid
- * @param {string} filepath
- * @returns {Promise<{content: string, buf: Buffer} | null>} null 表示文件不存在
- */
-async function readFileAtCommit(dir, commitOid, filepath) {
-  try {
-    const { blob } = await git.readBlob({ fs, dir, oid: commitOid, filepath });
-    const buf = Buffer.from(blob);
-    return { content: buf.toString("utf8"), buf };
-  } catch (_) {
-    return null;
-  }
+  log(logId, "ERROR", `Failed to ${action}`, { logId, error: e.message, ...extra });
+  throw new SystemError(`Failed to ${action}`, { originalError: e.message });
 }
 
 // ──────────────────────────── init ────────────────────────────
@@ -285,90 +162,41 @@ async function init(options = {}) {
   }
 
   try {
-    await git.init({ fs, dir: targetPath, defaultBranch: "main" });
-    ensureGitignore(targetPath);
-
-    await git.setConfig({ fs, dir: targetPath, path: "user.name", value: config.GIT_DEFAULT_AUTHOR_NAME });
-    await git.setConfig({ fs, dir: targetPath, path: "user.email", value: config.GIT_DEFAULT_AUTHOR_EMAIL });
-
+    await initRepo(targetPath);
     log(logId, "INFO", "Git repository initialized", { logId, targetPath });
     return { success: true, message: "Git repository initialized successfully", logId, alreadyExists: false };
   } catch (e) {
-    log(logId, "ERROR", "Failed to initialize Git repository", { logId, error: e.message });
-    throw new SystemError("Failed to initialize Git repository", { originalError: e.message });
+    rethrowGitError(e, logId, "initialize Git repository");
   }
 }
 
 // ──────────────────────────── status ────────────────────────────
 
 /**
- * 获取工作区状态（基于 statusMatrix 解析）
+ * 获取工作区状态
  */
 async function status(options = {}) {
   const { targetPath, logId } = resolveAndCheck(options);
   await ensureGitRepo(targetPath);
 
   try {
-    const current = await git.currentBranch({ fs, dir: targetPath, fullname: false });
-    const matrix = await git.statusMatrix({ fs, dir: targetPath });
-
-    const staged = [];
-    const modified = [];
-    const created = [];
-    const deleted = [];
-    const untracked = [];
-
-    // statusMatrix 列语义（见 isomorphic-git 源码 docs）：
-    //   HEAD:    0=absent, 1=present
-    //   WORKDIR: 0=absent, 1=与 HEAD 一致, 2=与 HEAD 不同
-    //   STAGE:   0=absent, 1=与 HEAD 一致, 2=与 WORKDIR 一致, 3=与 WORKDIR 不同
-    for (const [f, H, W, S] of matrix) {
-      // staged: HEAD 与 STAGE 不一致（下次 commit 会发生变化的文件）
-      if (H !== S) {
-        staged.push(f);
-      }
-
-      // created: 新增并已加入暂存区（HEAD 没有，STAGE 有）
-      if (H === 0 && S !== 0) {
-        created.push(f);
-      }
-
-      // deleted: 已删除
-      //   - 暂存区删除：H=1 且 S=0
-      //   - 工作区删除：W=0 且 S≠0（STAGE 有但 WORKDIR 没有）
-      if ((H === 1 && S === 0) || (W === 0 && S !== 0)) {
-        deleted.push(f);
-      }
-
-      // modified: 工作区有未 stage 的改动（WORKDIR 与 STAGE 不一致）
-      //   要求 STAGE 和 WORKDIR 都存在文件，且两者内容不同
-      if (S !== 0 && W !== 0 && W !== S) {
-        modified.push(f);
-      }
-
-      // untracked: 工作区有，但 HEAD 和 STAGE 都没有
-      if (H === 0 && S === 0 && W !== 0) {
-        untracked.push(f);
-      }
-    }
-
+    const result = await getStatus(targetPath);
     return {
       success: true,
       logId,
-      current,
-      staged: [...new Set(staged)],
-      modified: [...new Set(modified)],
-      created: [...new Set(created)],
-      deleted: [...new Set(deleted)],
-      untracked: [...new Set(untracked)],
-      conflicted: [],
-      ahead: 0,
-      behind: 0,
-      tracking: null,
+      current: result.current,
+      staged: result.staged,
+      modified: result.modified,
+      created: result.created,
+      deleted: result.deleted,
+      untracked: result.untracked,
+      conflicted: result.conflicted || [],
+      ahead: result.ahead || 0,
+      behind: result.behind || 0,
+      tracking: result.tracking ?? null,
     };
   } catch (e) {
-    log(logId, "ERROR", "Failed to get Git status", { logId, error: e.message });
-    throw new SystemError("Failed to get Git status", { originalError: e.message });
+    rethrowGitError(e, logId, "get Git status");
   }
 }
 
@@ -392,44 +220,22 @@ async function commit(options = {}) {
       email: authorEmail || config.GIT_DEFAULT_AUTHOR_EMAIL,
     };
 
-    // 指定文件：仍走 isomorphic-git（路径级 stage + 局部 statusMatrix）
+    let result;
     if (Array.isArray(files) && files.length > 0) {
-      const cache = {};
-      // API 显式指定路径：force 对齐 git add -f，避免被 gitignore 静默跳过
-      await stageFiles(targetPath, files, { cache, force: true });
-      // 只扫指定路径，避免大仓库下全量 statusMatrix
-      const matrix = await git.statusMatrix({ fs, dir: targetPath, cache, filepaths: files });
-      const hasChanges = matrix.some(([, , , S]) => S !== 1);
-
-      if (!hasChanges) {
-        return { success: true, message: "Nothing to commit", logId, nothingToCommit: true };
-      }
-
-      const commitHash = await git.commit({
-        fs,
-        dir: targetPath,
+      result = await commitFiles(targetPath, {
         message,
-        author,
-        cache,
+        files,
+        authorName: author.name,
+        authorEmail: author.email,
       });
-
-      log(logId, "INFO", "Git commit successful", { logId, commitHash, message });
-      return {
-        success: true,
-        message: "Commit successful",
-        logId,
-        commit: commitHash,
-        summary: { changes: 1 },
-      };
+    } else {
+      result = await commitAllChanges(targetPath, {
+        message,
+        authorName: author.name,
+        authorEmail: author.email,
+        cache: {},
+      });
     }
-
-    // 全量 commit（项目初始化热路径）：优先原生 git；仅本机无 git 时回退 isomorphic-git
-    const result = await commitAllChanges(targetPath, {
-      message,
-      authorName: author.name,
-      authorEmail: author.email,
-      cache: {},
-    });
 
     if (result.nothingToCommit) {
       return { success: true, message: "Nothing to commit", logId, nothingToCommit: true };
@@ -450,8 +256,7 @@ async function commit(options = {}) {
       summary: { changes: 1 },
     };
   } catch (e) {
-    log(logId, "ERROR", "Failed to commit", { logId, error: e.message });
-    throw new SystemError("Failed to commit", { originalError: e.message });
+    rethrowGitError(e, logId, "commit");
   }
 }
 
@@ -466,26 +271,23 @@ async function add(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const cache = {};
     if (Array.isArray(files) && files.length > 0) {
-      // API 显式指定路径：force 对齐 git add -f
-      await stageFiles(targetPath, files, { cache, force: true });
+      await stageFiles(targetPath, files, { force: true });
     } else {
-      await addAll(targetPath, { cache });
+      await addAll(targetPath, { cache: {} });
     }
 
     log(logId, "INFO", "Git add successful", { logId, filesCount: files ? files.length : "all" });
     return { success: true, message: "Files staged successfully", logId };
   } catch (e) {
-    log(logId, "ERROR", "Failed to add files", { logId, error: e.message });
-    throw new SystemError("Failed to add files", { originalError: e.message });
+    rethrowGitError(e, logId, "add files");
   }
 }
 
 // ──────────────────────────── unstage ────────────────────────────
 
 /**
- * 从暂存区撤回修改（git restore --staged），文件回到工作区 modified 状态
+ * 从暂存区撤回修改
  */
 async function unstage(options = {}) {
   const { files } = options;
@@ -493,64 +295,30 @@ async function unstage(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    if (Array.isArray(files) && files.length > 0) {
-      for (const f of files) {
-        await git.resetIndex({ fs, dir: targetPath, filepath: f });
-      }
-      log(logId, "INFO", "Git unstage specified files", { logId, files });
-      return { success: true, message: "Specified files unstaged successfully", logId, files };
-    }
-
-    // 撤回全部：找出所有已暂存的文件并 resetIndex
-    const matrix = await git.statusMatrix({ fs, dir: targetPath });
-    const stagedFiles = matrix.filter(([, , , S]) => S !== 1).map(([f]) => f);
-    for (const f of stagedFiles) {
-      await git.resetIndex({ fs, dir: targetPath, filepath: f });
-    }
-    log(logId, "INFO", "Git unstage all files", { logId });
-    return { success: true, message: "All files unstaged successfully", logId, files: "all" };
+    const result = await unstageFiles(
+      targetPath,
+      Array.isArray(files) && files.length > 0 ? files : null
+    );
+    const label = result.files === "all" ? "all files" : "specified files";
+    log(logId, "INFO", `Git unstage ${label}`, { logId, files: result.files });
+    return {
+      success: true,
+      message:
+        result.files === "all"
+          ? "All files unstaged successfully"
+          : "Specified files unstaged successfully",
+      logId,
+      files: result.files,
+    };
   } catch (e) {
-    log(logId, "ERROR", "Failed to unstage", { logId, error: e.message });
-    throw new SystemError("Failed to unstage files", { originalError: e.message });
+    rethrowGitError(e, logId, "unstage");
   }
 }
 
 // ──────────────────────────── discard ────────────────────────────
 
 /**
- * 清理因删除文件而产生的空目录。
- */
-async function cleanEmptyParentDirs(root, relativeFiles) {
-  const dirSet = new Set();
-  for (const f of relativeFiles) {
-    let dir = path.dirname(f);
-    while (dir && dir !== ".") {
-      dirSet.add(dir);
-      dir = path.dirname(dir);
-    }
-  }
-
-  const dirs = [...dirSet].sort((a, b) => {
-    const depthA = a.split(/[/\\]/).length;
-    const depthB = b.split(/[/\\]/).length;
-    return depthB - depthA;
-  });
-
-  for (const relDir of dirs) {
-    const absDir = path.join(root, relDir);
-    try {
-      const entries = await fs.promises.readdir(absDir);
-      if (entries.length === 0) {
-        await fs.promises.rmdir(absDir);
-      }
-    } catch (_) {
-      // 目录不存在或权限问题，跳过
-    }
-  }
-}
-
-/**
- * 从暂存区撤回并丢弃工作区修改，文件完全还原到上次 commit 的状态。
+ * 从暂存区撤回并丢弃工作区修改（未跟踪文件也会删除）
  */
 async function discard(options = {}) {
   const { files } = options;
@@ -558,89 +326,29 @@ async function discard(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const matrix = await git.statusMatrix({ fs, dir: targetPath });
+    const result = await discardChanges(
+      targetPath,
+      Array.isArray(files) && files.length > 0 ? files : null
+    );
 
-    const targetSet = Array.isArray(files) && files.length > 0 ? new Set(files) : null;
-
-    const trackedToRestore = [];
-    const newFilesToRemove = [];
-    const untrackedToDelete = [];
-
-    for (const [f, H, W, S] of matrix) {
-      if (targetSet && !targetSet.has(f)) continue;
-
-      if (H !== 0) {
-        // 已跟踪文件：若 index 或 workdir 与 HEAD 不一致，需要 checkout
-        if (S !== 1 || W !== 1) {
-          trackedToRestore.push(f);
-        }
-      } else if (H === 0 && S !== 0) {
-        // 暂存区中的新增文件（从未 commit 过）
-        newFilesToRemove.push(f);
-      } else if (H === 0 && S === 0 && W !== 0) {
-        // 未跟踪文件
-        untrackedToDelete.push(f);
-      }
-    }
-
-    // 1) 已跟踪文件：从 HEAD 读取内容，写回 workdir 和 index（无提交时跳过）
-    if (trackedToRestore.length > 0) {
-      const headOid = await getHeadOid(targetPath);
-      for (const f of trackedToRestore) {
-        const result = await readFileAtCommit(targetPath, headOid, f);
-        if (!result) continue;
-        const fullPath = path.join(targetPath, f);
-        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        fs.writeFileSync(fullPath, result.buf);
-        await git.add({ fs, dir: targetPath, filepath: f });
-      }
-    }
-
-    // 2) 新增文件（暂存区）：从 index 移除 + 从磁盘删除
-    for (const f of newFilesToRemove) {
-      try {
-        await git.remove({ fs, dir: targetPath, filepath: f });
-      } catch (_) {}
-      const absPath = path.join(targetPath, f);
-      if (fs.existsSync(absPath)) {
-        await fs.promises.unlink(absPath);
-      }
-    }
-    if (newFilesToRemove.length > 0) {
-      await cleanEmptyParentDirs(targetPath, newFilesToRemove);
-    }
-
-    // 3) 未跟踪文件：直接从磁盘删除
-    for (const f of untrackedToDelete) {
-      const absPath = path.join(targetPath, f);
-      if (fs.existsSync(absPath)) {
-        await fs.promises.unlink(absPath);
-      }
-    }
-    if (untrackedToDelete.length > 0) {
-      await cleanEmptyParentDirs(targetPath, untrackedToDelete);
-    }
-
-    const discardedCount = trackedToRestore.length + newFilesToRemove.length + untrackedToDelete.length;
     log(logId, "INFO", "Git discard", {
       logId,
-      trackedFiles: trackedToRestore.length,
-      newFiles: newFilesToRemove.length,
-      untrackedFiles: untrackedToDelete.length,
+      trackedFiles: result.trackedFiles.length,
+      newFiles: result.newFiles.length,
+      untrackedFiles: result.untrackedFiles.length,
     });
 
     return {
       success: true,
       message: "Files discarded successfully",
       logId,
-      discardedCount,
-      trackedFiles: trackedToRestore,
-      newFiles: newFilesToRemove,
-      untrackedFiles: untrackedToDelete,
+      discardedCount: result.discardedCount,
+      trackedFiles: result.trackedFiles,
+      newFiles: result.newFiles,
+      untrackedFiles: result.untrackedFiles,
     };
   } catch (e) {
-    log(logId, "ERROR", "Failed to discard", { logId, error: e.message });
-    throw new SystemError("Failed to discard files", { originalError: e.message });
+    rethrowGitError(e, logId, "discard");
   }
 }
 
@@ -655,64 +363,19 @@ async function logHistory(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    // 仅 git init、尚无任何 commit 时（HEAD 无法解析）直接返回空列表
-    if (!(await hasGitHead(targetPath))) {
-      return { success: true, logId, commits: [], total: 0 };
-    }
-
     const maxCount = Math.min(Math.max(1, rawMax), 500);
     const skip = Math.max(0, rawSkip);
-
-    const logArgs = {
-      fs,
-      dir: targetPath,
-      depth: maxCount + skip,
-    };
-    if (branch) logArgs.ref = branch;
-    if (filePath) logArgs.filepath = filePath;
-
-    const logResult = await git.log(logArgs);
-
-    // 应用 skip
-    const entries = logResult.slice(skip, skip + maxCount);
-
-    const commits = entries.map((entry) => ({
-      hash: entry.oid,
-      date: new Date(entry.commit.author.timestamp * 1000).toISOString(),
-      message: entry.commit.message,
-      author_name: entry.commit.author.name,
-      author_email: entry.commit.author.email,
-    }));
-
+    const commits = await getLog(targetPath, { maxCount, skip, branch, filePath });
     return { success: true, logId, commits, total: commits.length };
   } catch (e) {
-    // 空分支 / 无法解析 ref 时返回空列表（含 isomorphic-git: does not have any commits）
-    if (
-      e?.code === "NotFoundError" ||
-      /NotFoundError|Could not find|unable to resolve|does not have any commits/i.test(
-        String(e?.message || "")
-      )
-    ) {
-      return { success: true, logId, commits: [], total: 0 };
-    }
-    log(logId, "ERROR", "Failed to get Git log", { logId, error: e.message });
-    throw new SystemError("Failed to get Git log", { originalError: e.message });
+    rethrowGitError(e, logId, "get Git log");
   }
 }
 
 // ──────────────────────────── diff ────────────────────────────
 
 /**
- * 差异对比（基于 isomorphic-git listFiles/readBlob + jsdiff 实现）
- *
- * @param {Object} options
- * @param {"worktree"|"staged"|"commit"} [options.source] 对比来源：
- *   - "worktree": 工作区 vs HEAD（默认）
- *   - "staged":   暂存区 vs HEAD（git diff --cached）
- *   - "commit":   两个 commit 之间的对比，需配合 from/to 使用
- * @param {string} [options.from] commit hash（source=commit 时使用）
- * @param {string} [options.to]   commit hash（source=commit 时使用）
- * @param {string[]} [options.paths] 限定文件范围
+ * 差异对比（优先原生 git diff；无 git 时回退 isomorphic + jsdiff）
  */
 async function diff(options = {}) {
   const { source = "worktree", from, to, paths } = options;
@@ -720,157 +383,20 @@ async function diff(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const pathFilter = Array.isArray(paths) && paths.length > 0 ? new Set(paths) : null;
-    let diffText = "";
-    const summaryFiles = [];
-    let totalInsertions = 0;
-    let totalDeletions = 0;
-
-    /**
-     * 处理单个文件的 diff 并累积结果
-     */
-    async function processFile(filepath, oldResult, newResult) {
-      const hasOld = !!oldResult;
-      const hasNew = !!newResult;
-
-      // 检查内容是否相同
-      if (hasOld && hasNew && oldResult.content === newResult.content) return;
-
-      let isBinary = false;
-      if (hasOld && isBinaryBuffer(oldResult.buf)) isBinary = true;
-      if (hasNew && !isBinary && isBinaryBuffer(newResult.buf)) isBinary = true;
-
-      if (isBinary) {
-        const oldHash = hasOld ? gitBlobHash(oldResult.buf).substring(0, 7) : "0000000";
-        const newHash = hasNew ? gitBlobHash(newResult.buf).substring(0, 7) : "0000000";
-        const binHeader = [`diff --git a/${filepath} b/${filepath}`];
-        if (!hasOld) {
-          binHeader.push("new file mode 100644");
-          binHeader.push(`index 0000000..${newHash}`);
-        } else if (!hasNew) {
-          binHeader.push("deleted file mode 100644");
-          binHeader.push(`index ${oldHash}..0000000`);
-        } else {
-          binHeader.push(`index ${oldHash}..${newHash} 100644`);
-        }
-        binHeader.push(`Binary files ${hasOld ? `a/${filepath}` : "/dev/null"} and ${hasNew ? `b/${filepath}` : "/dev/null"} differ`);
-        diffText += binHeader.join("\n") + "\n";
-        summaryFiles.push({ file: filepath, changes: 0, insertions: 0, deletions: 0, binary: true });
-        return;
-      }
-
-      const { diff: patch, insertions, deletions } = makeDiffPatch(
-        filepath,
-        hasOld ? oldResult.content : "",
-        hasNew ? newResult.content : "",
-        hasOld, hasNew,
-        hasOld ? oldResult.buf : null,
-        hasNew ? newResult.buf : null
-      );
-      diffText += patch;
-      summaryFiles.push({ file: filepath, changes: insertions + deletions, insertions, deletions, binary: false });
-      totalInsertions += insertions;
-      totalDeletions += deletions;
+    if (source === "commit" && !from) {
+      throw new ValidationError("source=commit requires at least 'from'", { field: "from" });
     }
 
-    // ── commit 模式：两个 commit 之间 ──
-    if (source === "commit") {
-      let fromOid, toOid;
-
-      if (from && to) {
-        fromOid = from;
-        toOid = to;
-      } else if (from) {
-        // 只有 from：对比 from 相对其父提交的变化
-        const commit = await git.readCommit({ fs, dir: targetPath, oid: from });
-        if (commit.commit.parent && commit.commit.parent.length > 0) {
-          fromOid = commit.commit.parent[0];
-          toOid = from;
-        } else {
-          // 初始 commit：对比空树，所有文件都是新增
-          fromOid = null;
-          toOid = from;
-        }
-      } else {
-        throw new ValidationError("source=commit requires at least 'from'", { field: "from" });
-      }
-
-      const fromFiles = fromOid
-        ? new Set(await git.listFiles({ fs, dir: targetPath, ref: fromOid }))
-        : new Set();
-      const toFiles = new Set(await git.listFiles({ fs, dir: targetPath, ref: toOid }));
-      const allFiles = new Set([...fromFiles, ...toFiles]);
-
-      for (const f of allFiles) {
-        if (pathFilter && !pathFilter.has(f)) continue;
-
-        const oldResult = fromFiles.has(f) ? await readFileAtCommit(targetPath, fromOid, f) : null;
-        const newResult = toFiles.has(f) ? await readFileAtCommit(targetPath, toOid, f) : null;
-
-        await processFile(f, oldResult, newResult);
-      }
-    } else {
-      // ── worktree / staged 模式：基于 statusMatrix + HEAD ──
-      // 尚无提交时没有相对 HEAD 的差异（untracked 在此模式下本就不输出）
-      if (!(await hasGitHead(targetPath))) {
-        return {
-          success: true,
-          logId,
-          source,
-          diff: "",
-          summary: { files: [], insertions: 0, deletions: 0 },
-        };
-      }
-
-      const headOid = await getHeadOid(targetPath);
-      const matrix = await git.statusMatrix({ fs, dir: targetPath });
-
-      for (const [f, H, W, S] of matrix) {
-        if (pathFilter && !pathFilter.has(f)) continue;
-
-        if (source === "staged") {
-          // staged：只看 index vs HEAD（S !== 1），排除 untracked
-          if (S === 1 || (H === 0 && S === 0)) continue;
-        } else {
-          // worktree：看所有与 HEAD 的差异，排除 untracked
-          if (H === 0 && S === 0) continue;
-          if (H === 1 && W === 1 && S === 1) continue;
-        }
-
-        // 读取 HEAD 版本
-        const oldResult = H !== 0 ? await readFileAtCommit(targetPath, headOid, f) : null;
-
-        // 读取当前版本（workdir 文件内容）
-        let newResult = null;
-        if (W !== 0) {
-          const fullPath = path.join(targetPath, f);
-          if (fs.existsSync(fullPath)) {
-            try {
-              const buf = fs.readFileSync(fullPath);
-              newResult = { content: buf.toString("utf8"), buf };
-            } catch (_) {}
-          }
-        }
-
-        await processFile(f, oldResult, newResult);
-      }
-    }
-
+    const result = await getDiff(targetPath, { source, from, to, paths });
     return {
       success: true,
       logId,
       source,
-      diff: diffText,
-      summary: {
-        files: summaryFiles,
-        insertions: totalInsertions,
-        deletions: totalDeletions,
-      },
+      diff: result.diff,
+      summary: result.summary,
     };
   } catch (e) {
-    if (e instanceof ValidationError) throw e;
-    log(logId, "ERROR", "Failed to get Git diff", { logId, error: e.message });
-    throw new SystemError("Failed to get Git diff", { originalError: e.message });
+    rethrowGitError(e, logId, "get Git diff", { source });
   }
 }
 
@@ -878,12 +404,6 @@ async function diff(options = {}) {
 
 /**
  * 获取指定 git 版本的文件内容
- * @param {Object} options
- * @param {string} [options.ref] git 引用
- *   - "worktree": 读取工作区文件
- *   - "staged" 或 "": 读取暂存区文件（近似：读取工作区文件）
- *   - 其他: 读取指定版本的文件
- * @param {string} [options.filePath] 文件相对路径
  */
 async function fileContent(options = {}) {
   const { ref = "HEAD", filePath } = options;
@@ -895,26 +415,10 @@ async function fileContent(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    let content;
-
-    if (ref === "worktree" || ref === "staged" || ref === "") {
-      const fullPath = path.join(targetPath, filePath);
-      content = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, "utf8") : "";
-    } else {
-      try {
-        const oid = await git.resolveRef({ fs, dir: targetPath, ref });
-        const { blob } = await git.readBlob({ fs, dir: targetPath, oid, filepath: filePath });
-        content = Buffer.from(blob).toString("utf8");
-      } catch (_) {
-        content = "";
-      }
-    }
-
+    const content = await getFileContentAtRef(targetPath, { ref, filePath });
     return { success: true, logId, filePath, ref, content };
   } catch (e) {
-    if (e instanceof ResourceError) throw e;
-    log(logId, "ERROR", "Failed to get file content", { logId, ref, filePath, error: e.message });
-    throw new SystemError("Failed to get file content", { originalError: e.message });
+    rethrowGitError(e, logId, "get file content", { ref, filePath });
   }
 }
 
@@ -922,9 +426,6 @@ async function fileContent(options = {}) {
 
 /**
  * 重置 HEAD 到指定版本
- * - soft:  HEAD 移到 target，index 和 workdir 不变
- * - mixed: HEAD 移到 target，index 跟随，workdir 不变
- * - hard:  HEAD 移到 target，index 和 workdir 全部恢复
  */
 async function reset(options = {}) {
   const { target, mode = "mixed" } = options;
@@ -939,84 +440,13 @@ async function reset(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    if (!(await hasGitHead(targetPath))) {
-      throw new BusinessError("Cannot reset: repository has no commits yet");
-    }
-
-    // 记录当前 HEAD
-    const currentLog = await git.log({ fs, dir: targetPath, depth: 1 });
-    const previousHead = currentLog.length > 0 ? currentLog[0].oid : null;
-
-    const currentBranch = await git.currentBranch({ fs, dir: targetPath, fullname: false });
-    if (!currentBranch) {
-      throw new BusinessError("Cannot reset: detached HEAD");
-    }
-
-    // hard 模式：先记录当前 HEAD 的文件列表，用于后续清理
-    const oldFiles = mode === "hard"
-      ? new Set(await git.listFiles({ fs, dir: targetPath, ref: "HEAD" }))
-      : null;
-
-    // 移动分支指针到 target
-    await git.writeRef({
-      fs,
-      dir: targetPath,
-      ref: `refs/heads/${currentBranch}`,
-      value: target,
-      force: true,
+    const result = await resetTo(targetPath, { target, mode });
+    log(logId, "INFO", "Git reset successful", {
+      logId,
+      target,
+      mode,
+      previousHead: result.previousHead,
     });
-
-    if (mode === "mixed" || mode === "hard") {
-      // resetIndex 要求逐文件操作，先获取 target 文件列表
-      const targetFiles = await git.listFiles({ fs, dir: targetPath, ref: target });
-      const targetSet = new Set(targetFiles);
-
-      // 将 target 中每个文件在 index 中重置为 target 版本
-      for (const f of targetFiles) {
-        await git.resetIndex({ fs, dir: targetPath, filepath: f, ref: target });
-      }
-
-      // 从 index 中移除 target 不存在的文件
-      const matrix = await git.statusMatrix({ fs, dir: targetPath });
-      for (const [f, , , S] of matrix) {
-        if (!targetSet.has(f) && S !== 0) {
-          try { await git.remove({ fs, dir: targetPath, filepath: f }); } catch (_) {}
-        }
-      }
-    }
-
-    if (mode === "hard") {
-      // 手动同步 workdir：写入 target 的所有文件
-      const hardTargetFiles = await git.listFiles({ fs, dir: targetPath, ref: target });
-      const hardTargetSet = new Set(hardTargetFiles);
-
-      for (const f of hardTargetFiles) {
-        const result = await readFileAtCommit(targetPath, target, f);
-        if (!result) continue;
-        const fullPath = path.join(targetPath, f);
-        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        fs.writeFileSync(fullPath, result.buf);
-      }
-
-      // 删除旧 HEAD 中存在但 target 中不存在的文件
-      if (oldFiles) {
-        for (const f of oldFiles) {
-          if (!hardTargetSet.has(f)) {
-            const fullPath = path.join(targetPath, f);
-            if (fs.existsSync(fullPath)) {
-              fs.unlinkSync(fullPath);
-            }
-          }
-        }
-      }
-
-      // 确保 .gitignore 包含服务端必选条目，避免后续 git 操作中
-      // ensureGitignore 追加内容导致 .gitignore 变成 modified
-      ensureGitignore(targetPath);
-      await git.add({ fs, dir: targetPath, filepath: ".gitignore" });
-    }
-
-    log(logId, "INFO", "Git reset successful", { logId, target, mode, previousHead });
 
     return {
       success: true,
@@ -1024,37 +454,17 @@ async function reset(options = {}) {
       logId,
       target,
       mode,
-      previousHead,
+      previousHead: result.previousHead,
     };
   } catch (e) {
-    if (e instanceof BusinessError) throw e;
-    log(logId, "ERROR", "Failed to reset", { logId, target, mode, error: e.message });
-    throw new SystemError("Failed to reset", { originalError: e.message });
+    rethrowGitError(e, logId, "reset", { target, mode });
   }
 }
 
 // ──────────────────────────── revert ────────────────────────────
 
 /**
- * 通过新建 commit 的方式将仓库文件树回退到 target 版本（保留完整历史）。
- *
- * 与 reset 的核心区别：
- *   - reset：移动分支指针向后回退，target 之后的 commit 从分支上消失
- *   - revert：不移动分支指针，而是新建一个 commit 使文件树等于 target
- *
- * 行为说明：
- *   - target 中存在的文件：用 target 版本覆盖 workdir + index
- *   - HEAD 中存在但 target 不存在的文件：从 workdir + index 删除
- *   - 未跟踪文件不受影响
- *
- * 要求工作区 clean（未跟踪文件除外），否则抛出 BusinessError。
- *
- * @param {Object} options
- * @param {string} options.target 目标 commit hash（支持短 hash）
- * @param {string} [options.message] 自定义 commit message，默认 "Revert to <short-hash>"
- * @param {string} [options.authorName]
- * @param {string} [options.authorEmail]
- * @returns {Promise<{ success: boolean, message: string, logId: string, commit: string, target: string, previousHead: string }>}
+ * 通过新建 commit 将文件树回退到 target（保留完整历史）
  */
 async function revert(options = {}) {
   const { target, message, authorName, authorEmail } = options;
@@ -1066,142 +476,53 @@ async function revert(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    if (!(await hasGitHead(targetPath))) {
-      throw new BusinessError("Cannot revert: repository has no commits yet");
-    }
-    // 1. 验证 target 存在并解析为完整 OID
-    let targetOid;
-    try {
-      const result = await git.readCommit({ fs, dir: targetPath, oid: target });
-      targetOid = result.oid;
-    } catch (_) {
-      throw new ValidationError("Revert target commit does not exist", {
-        field: "target",
-        target,
-      });
-    }
-
-    // 2. 检查工作区是否 clean（未跟踪文件不阻止）
-    const beforeMatrix = await git.statusMatrix({ fs, dir: targetPath });
-    const hasUncommitted = beforeMatrix.some(([f, H, W, S]) => {
-      if (H === 0 && S === 0) return false; // 未跟踪文件不阻止
-      return W !== 1 || S !== 1;
+    const revertMessage =
+      message || `Revert to ${String(target).substring(0, 7)}`;
+    const result = await revertToTree(targetPath, {
+      target,
+      message: revertMessage,
+      authorName,
+      authorEmail,
     });
-    if (hasUncommitted) {
-      const tracked = beforeMatrix.filter(([, H]) => H !== 0);
-      const modified = tracked.filter(([, , W]) => W !== 1).map(([f]) => f);
-      const staged = tracked.filter(([, , , S]) => S !== 1).map(([f]) => f);
-      throw new BusinessError(
-        "Working directory is not clean, please commit or stash your changes before reverting",
-        { staged, modified }
-      );
-    }
 
-    // 3. 获取 target 和当前 HEAD 的文件列表
-    const targetFiles = new Set(
-      await git.listFiles({ fs, dir: targetPath, ref: targetOid })
-    );
-    const headOid = await getHeadOid(targetPath);
-    const headFiles = new Set(
-      await git.listFiles({ fs, dir: targetPath, ref: headOid })
-    );
-
-    const removedFiles = [];
-
-    // 4. 写入 target 中存在的文件（覆盖 workdir + index）
-    for (const filepath of targetFiles) {
-      const result = await readFileAtCommit(targetPath, targetOid, filepath);
-      if (!result) continue;
-      const fullPath = path.join(targetPath, filepath);
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      fs.writeFileSync(fullPath, result.buf);
-      await git.add({ fs, dir: targetPath, filepath });
-    }
-
-    // 5. 删除 target 不存在但 HEAD 中存在的文件（workdir + index）
-    for (const filepath of headFiles) {
-      if (!targetFiles.has(filepath)) {
-        removedFiles.push(filepath);
-        try {
-          await git.remove({ fs, dir: targetPath, filepath });
-        } catch (_) {}
-        const fullPath = path.join(targetPath, filepath);
-        if (fs.existsSync(fullPath)) {
-          await fs.promises.unlink(fullPath);
-        }
-      }
-    }
-
-    // 6. 清理因删除产生的空目录
-    if (removedFiles.length > 0) {
-      await cleanEmptyParentDirs(targetPath, removedFiles);
-    }
-
-    // 6.5 确保 .gitignore 包含服务端必选条目（GIT_GITIGNORE_ENTRIES），
-    //     避免 commit 后下一次 git 操作中 ensureGitignore 追加内容
-    //     导致 .gitignore 出现在 modified 列表
-    ensureGitignore(targetPath);
-    await git.add({ fs, dir: targetPath, filepath: ".gitignore" });
-
-    // 7. 检查是否有实际变更（HEAD 可能已经等于 target）
-    const afterMatrix = await git.statusMatrix({ fs, dir: targetPath });
-    const hasRealChanges = afterMatrix.some(([, , , S]) => S !== 1);
-    if (!hasRealChanges) {
+    if (result.nothingToCommit) {
       log(logId, "INFO", "Nothing to revert, current HEAD already matches target", {
         logId,
-        target: targetOid,
+        target: result.targetOid,
       });
       return {
         success: true,
         message: "Nothing to revert, already at target state",
         logId,
         nothingToCommit: true,
-        target: targetOid,
+        target: result.targetOid,
       };
     }
 
-    // 8. 创建新 commit（分支指针向前推进，历史完整保留）
-    const author = {
-      name: authorName || config.GIT_DEFAULT_AUTHOR_NAME,
-      email: authorEmail || config.GIT_DEFAULT_AUTHOR_EMAIL,
-    };
-    const revertMessage = message || `Revert to ${targetOid.substring(0, 7)}`;
-
-    const commitHash = await git.commit({
-      fs,
-      dir: targetPath,
-      message: revertMessage,
-      author,
-    });
-
     log(logId, "INFO", "Git revert successful", {
       logId,
-      target: targetOid,
-      commitHash,
-      previousHead: headOid,
-      removedFilesCount: removedFiles.length,
+      target: result.targetOid,
+      commitHash: result.commitHash,
+      previousHead: result.previousHead,
     });
 
     return {
       success: true,
       message: "Revert successful",
       logId,
-      commit: commitHash,
-      target: targetOid,
-      previousHead: headOid,
+      commit: result.commitHash,
+      target: result.targetOid,
+      previousHead: result.previousHead,
     };
   } catch (e) {
-    if (e instanceof ValidationError || e instanceof BusinessError) throw e;
-    log(logId, "ERROR", "Failed to revert", { logId, target, error: e.message });
-    throw new SystemError("Failed to revert", { originalError: e.message });
+    rethrowGitError(e, logId, "revert", { target });
   }
 }
 
 // ──────────────────────────── checkout ────────────────────────────
 
 /**
- * 将 target 版本的文件检出到工作区和暂存区，HEAD 不动。
- * isomorphic-git 的 checkout 会切换分支，因此用 listFiles + readBlob 手动恢复文件。
+ * 将 target 版本的文件检出到工作区和暂存区，HEAD 不动
  */
 async function checkout(options = {}) {
   const { target } = options;
@@ -1213,32 +534,11 @@ async function checkout(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const files = await git.listFiles({ fs, dir: targetPath, ref: target });
-
-    for (const filepath of files) {
-      const result = await readFileAtCommit(targetPath, target, filepath);
-      if (!result) continue;
-
-      const fullPath = path.join(targetPath, filepath);
-
-      // 确保父目录存在
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      // 写入工作区
-      fs.writeFileSync(fullPath, result.buf);
-      // 加入暂存区
-      await git.add({ fs, dir: targetPath, filepath });
-    }
-
-    // 确保 .gitignore 包含服务端必选条目，避免后续 git 操作中
-    // ensureGitignore 追加内容导致 .gitignore 变成 modified
-    ensureGitignore(targetPath);
-    await git.add({ fs, dir: targetPath, filepath: ".gitignore" });
-
+    await checkoutFiles(targetPath, target);
     log(logId, "INFO", "Git checkout files successful", { logId, target });
     return { success: true, message: `Checkout files from ${target} successful`, logId, target };
   } catch (e) {
-    log(logId, "ERROR", "Failed to checkout files", { logId, target, error: e.message });
-    throw new SystemError("Failed to checkout files", { originalError: e.message });
+    rethrowGitError(e, logId, "checkout files", { target });
   }
 }
 
@@ -1252,7 +552,7 @@ async function listTags(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const tags = await git.listTags({ fs, dir: targetPath });
+    const tags = await gitListTags(targetPath);
     return {
       success: true,
       logId,
@@ -1260,8 +560,7 @@ async function listTags(options = {}) {
       latest: tags.length > 0 ? tags[tags.length - 1] : null,
     };
   } catch (e) {
-    log(logId, "ERROR", "Failed to list tags", { logId, error: e.message });
-    throw new SystemError("Failed to list tags", { originalError: e.message });
+    rethrowGitError(e, logId, "list tags");
   }
 }
 
@@ -1278,22 +577,11 @@ async function createTag(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    if (tagMessage) {
-      await git.annotatedTag({
-        fs, dir: targetPath,
-        ref: tagName,
-        message: tagMessage,
-        tagger: getDefaultAuthor(),
-      });
-    } else {
-      await git.tag({ fs, dir: targetPath, ref: tagName });
-    }
-
+    await gitCreateTag(targetPath, { tagName, message: tagMessage });
     log(logId, "INFO", "Git tag created", { logId, tagName, annotated: !!tagMessage });
     return { success: true, message: "Tag created successfully", logId, tagName };
   } catch (e) {
-    log(logId, "ERROR", "Failed to create tag", { logId, tagName, error: e.message });
-    throw new SystemError("Failed to create tag", { originalError: e.message });
+    rethrowGitError(e, logId, "create tag", { tagName });
   }
 }
 
@@ -1310,13 +598,11 @@ async function deleteTag(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    await git.deleteRef({ fs, dir: targetPath, ref: `refs/tags/${tagName}` });
-
+    await gitDeleteTag(targetPath, tagName);
     log(logId, "INFO", "Git tag deleted", { logId, tagName });
     return { success: true, message: "Tag deleted successfully", logId, tagName };
   } catch (e) {
-    log(logId, "ERROR", "Failed to delete tag", { logId, tagName, error: e.message });
-    throw new SystemError("Failed to delete tag", { originalError: e.message });
+    rethrowGitError(e, logId, "delete tag", { tagName });
   }
 }
 
@@ -1330,18 +616,15 @@ async function listBranches(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const branches = await git.listBranches({ fs, dir: targetPath });
-    const current = await git.currentBranch({ fs, dir: targetPath, fullname: false });
-
-    const branchesObj = {};
-    for (const name of branches) {
-      branchesObj[name] = { name, current: name === current };
-    }
-
-    return { success: true, logId, branches: branchesObj, current };
+    const result = await gitListBranches(targetPath);
+    return {
+      success: true,
+      logId,
+      branches: result.branches,
+      current: result.current,
+    };
   } catch (e) {
-    log(logId, "ERROR", "Failed to list branches", { logId, error: e.message });
-    throw new SystemError("Failed to list branches", { originalError: e.message });
+    rethrowGitError(e, logId, "list branches");
   }
 }
 
@@ -1358,14 +641,11 @@ async function createBranch(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const object = startPoint || "HEAD";
-    await git.branch({ fs, dir: targetPath, ref: branchName, object, checkout: true });
-
+    await gitCreateBranch(targetPath, { branchName, startPoint });
     log(logId, "INFO", "Git branch created", { logId, branchName, startPoint });
     return { success: true, message: "Branch created and switched to", logId, branchName };
   } catch (e) {
-    log(logId, "ERROR", "Failed to create branch", { logId, branchName, error: e.message });
-    throw new SystemError("Failed to create branch", { originalError: e.message });
+    rethrowGitError(e, logId, "create branch", { branchName });
   }
 }
 
@@ -1382,30 +662,11 @@ async function switchBranch(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    // 检查工作区是否 clean（忽略未跟踪文件，git checkout 允许在有未跟踪文件时切换）
-    const matrix = await git.statusMatrix({ fs, dir: targetPath });
-    const hasChanges = matrix.some(([f, H, W, S]) => {
-      if (H === 0 && S === 0) return false; // 未跟踪文件不阻止切换
-      return W !== 1 || S !== 1;
-    });
-    if (hasChanges) {
-      const tracked = matrix.filter(([, H]) => H !== 0);
-      const modified = tracked.filter(([, , W]) => W !== 1).map(([f]) => f);
-      const staged = tracked.filter(([, , , S]) => S !== 1).map(([f]) => f);
-      throw new BusinessError(
-        "Working directory is not clean, please commit or stash your changes before switching branches",
-        { staged, modified }
-      );
-    }
-
-    await git.checkout({ fs, dir: targetPath, ref: branchName });
-
+    await gitSwitchBranch(targetPath, branchName);
     log(logId, "INFO", "Git branch switched", { logId, branchName });
     return { success: true, message: "Branch switched successfully", logId, branchName };
   } catch (e) {
-    if (e instanceof BusinessError) throw e;
-    log(logId, "ERROR", "Failed to switch branch", { logId, branchName, error: e.message });
-    throw new SystemError("Failed to switch branch", { originalError: e.message });
+    rethrowGitError(e, logId, "switch branch", { branchName });
   }
 }
 
@@ -1422,19 +683,11 @@ async function deleteBranch(options = {}) {
   await ensureGitRepo(targetPath);
 
   try {
-    const current = await git.currentBranch({ fs, dir: targetPath, fullname: false });
-    if (current === branchName) {
-      throw new BusinessError("Cannot delete the current branch, please switch to another branch first");
-    }
-
-    await git.deleteBranch({ fs, dir: targetPath, ref: branchName, force });
-
+    await gitDeleteBranch(targetPath, { branchName, force });
     log(logId, "INFO", "Git branch deleted", { logId, branchName, force });
     return { success: true, message: "Branch deleted successfully", logId, branchName };
   } catch (e) {
-    if (e instanceof BusinessError) throw e;
-    log(logId, "ERROR", "Failed to delete branch", { logId, branchName, error: e.message });
-    throw new SystemError("Failed to delete branch", { originalError: e.message });
+    rethrowGitError(e, logId, "delete branch", { branchName });
   }
 }
 
