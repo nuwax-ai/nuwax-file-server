@@ -70,7 +70,10 @@ function runGit(cwd, args, options = {}) {
   } = options;
 
   return new Promise((resolve, reject) => {
-    const child = spawn("git", args, {
+    // core.quotePath=false：让 porcelain/numstat/ls-tree/diff 等输出对非 ASCII 路径直接给
+    // UTF-8 原文，而非 C 风格八进制转义（默认开启时中文路径会变成 "\346\207..."，下游
+    // Set 比对/名称透出全错；含 " 与控制符的路径 git 仍会 C-quote，由 decodeGitPorcelainPath 兜底）
+    const child = spawn("git", ["-c", "core.quotePath=false", ...args], {
       cwd,
       env: {
         ...process.env,
@@ -258,7 +261,9 @@ async function nativeListFiles(dir, ref) {
   return stdout
     .split("\n")
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    // quotePath=false 下中文原样；含 " / 控制符的路径仍被 C-quote，统一解码兜底
+    .map((l) => decodeGitPorcelainPath(l));
 }
 
 /**
@@ -717,6 +722,11 @@ function toLiteralPathspecs(paths) {
 /**
  * 解码 git status --porcelain 中的引号路径（C 风格转义，非 JSON）。
  * 例：`"foo\\tbar"`、`"\\001x"`、含 `\"` 的路径。
+ *
+ * 注意：八进制转义是文件名字节的逐字节转义（UTF-8 多字节字符被拆成多个 \xxx），
+ * 必须先还原成字节序列再整体按 UTF-8 解码；逐码点 fromCharCode 等价于按 Latin-1
+ * 解码，中文文件名会变成 mojibake（如 成都天气.md 被解成 Ã¦ÂˆÃ©Â½…）。
+ * 字节序列不是合法 UTF-8 时（极端：非 UTF-8 文件名）回退 Latin-1，避免替换符丢信息。
  * @param {string} filePath
  * @returns {string}
  */
@@ -727,10 +737,25 @@ function decodeGitPorcelainPath(filePath) {
   }
 
   const inner = raw.slice(1, -1);
+  // 混合解码：runGit 全局 core.quotePath=false 后，引号串里的中文通常是明文字符（直接保留，
+  // 严禁 &0xff 截断——会把 U+5E26 等截成 &）；仅含 " / \ / 控制符的片段被 C 转义，其中
+  // 八进制转义是文件名字节的逐字节转义（UTF-8 多字节字符被拆成多个 \xxx），相邻八进制须
+  // 攒成字节段整体按 UTF-8 解码——逐码点 fromCharCode 等价 Latin-1 解码，中文会变 mojibake。
   let out = "";
+  let pendingBytes = null;
+  const flushPending = () => {
+    if (pendingBytes && pendingBytes.length) {
+      const buffer = Buffer.from(pendingBytes);
+      const decoded = buffer.toString("utf8");
+      // 非 UTF-8 字节序列（极端：非 UTF-8 文件名）回退 Latin-1 逐字节呈现，避免替换符丢信息
+      out += decoded.includes("\uFFFD") ? buffer.toString("latin1") : decoded;
+    }
+    pendingBytes = null;
+  };
   for (let i = 0; i < inner.length; i++) {
     const ch = inner[i];
     if (ch !== "\\") {
+      flushPending();
       out += ch;
       continue;
     }
@@ -739,30 +764,39 @@ function decodeGitPorcelainPath(filePath) {
     const esc = inner[i];
     switch (esc) {
       case "\\":
+        flushPending();
         out += "\\";
         break;
       case '"':
+        flushPending();
         out += '"';
         break;
       case "a":
-        out += "\u0007";
+        flushPending();
+        out += "\x07";
         break;
       case "b":
+        flushPending();
         out += "\b";
         break;
       case "t":
+        flushPending();
         out += "\t";
         break;
       case "n":
+        flushPending();
         out += "\n";
         break;
       case "v":
+        flushPending();
         out += "\v";
         break;
       case "f":
+        flushPending();
         out += "\f";
         break;
       case "r":
+        flushPending();
         out += "\r";
         break;
       default:
@@ -774,14 +808,16 @@ function decodeGitPorcelainPath(filePath) {
               oct += inner[++i];
             }
           }
-          out += String.fromCharCode(parseInt(oct, 8));
+          (pendingBytes ??= []).push(parseInt(oct, 8) & 0xff);
         } else {
           // 未知转义：保留后续字符
+          flushPending();
           out += esc;
         }
         break;
     }
   }
+  flushPending();
   return out;
 }
 
@@ -1186,7 +1222,7 @@ function parseNumstat(text) {
     const insertions = binary ? 0 : parseInt(insStr, 10) || 0;
     const deletions = binary ? 0 : parseInt(delStr, 10) || 0;
     files.push({
-      file,
+      file: decodeGitPorcelainPath(file),
       changes: insertions + deletions,
       insertions,
       deletions,
