@@ -876,6 +876,8 @@ function isSearchTimedOut(startTime, timeoutMs) {
 /**
  * 无索引有界实时搜索：返回命中项（相对路径可还原目录结构）。
  * limit / maxVisit / timeoutMs 为必填正整数，由调用方（Java 网关）传入，本层不设默认值。
+ * type：file-仅返回文件命中；dir/directory-仅返回目录命中；空/非法-全部（默认，保持既有行为）。
+ * 仅过滤命中输出，不影响遍历下钻——type=file 时目录仍会递归，否则深层文件搜不到。
  * @returns {Promise<{files: Array, truncated: boolean, visited: number}>}
  */
 async function searchFiles(
@@ -885,6 +887,7 @@ async function searchFiles(
   kw,
   customTargetDir,
   relativePath,
+  type,
   limit,
   maxVisit,
   timeoutMs,
@@ -908,6 +911,17 @@ async function searchFiles(
   const safeMaxVisit = requirePositiveInt(maxVisit, "maxVisit");
   const safeTimeoutMs = requirePositiveInt(timeoutMs, "timeoutMs");
   const kwLower = keyword.toLowerCase();
+
+  // type 归一（与 get-file-list 的 type 口径一致）：file/dir/其他按 all
+  const normalizedSearchType = (() => {
+    const t = type == null ? "" : String(type).trim().toLowerCase();
+    if (t === "file") return "file";
+    if (t === "dir" || t === "directory") return "dir";
+    return null;
+  })();
+  // 仅控制“命中是否输出”，不影响遍历（目录永远下钻，type=file 才能搜到深层文件）
+  const allowsMatch = (isDir) =>
+    normalizedSearchType == null || (normalizedSearchType === "dir") === isDir;
 
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
@@ -1003,6 +1017,7 @@ async function searchFiles(
       if (entry.isDirectory()) {
         childDirs.push(rel);
         if (
+          allowsMatch(true) &&
           matches.length < safeLimit &&
           entryMatchesKeyword(rel, entry.name, kwLower)
         ) {
@@ -1023,6 +1038,7 @@ async function searchFiles(
 
       try {
         if (
+          allowsMatch(false) &&
           matches.length < safeLimit &&
           entryMatchesKeyword(rel, entry.name, kwLower)
         ) {
