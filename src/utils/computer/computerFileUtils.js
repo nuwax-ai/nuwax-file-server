@@ -62,18 +62,20 @@ function countListPushed(limitState) {
 }
 
 /**
- * 列出目录下单层条目（不递归）
+ * 列出目录下条目（默认单层；opts.levelsLeft > 1 时按层级受限递归展开子目录）
  * @param {string} listDir 待列出的绝对目录
  * @param {string} workspaceDir 工作区根目录（用于计算初始相对前缀）
  * @param {string} logId 日志ID
  * @param {string} proxyPath 代理路径前缀
  * @param {string} [customTargetDir] 自定义目标目录
- * @param {{typeFilter?: "file"|"dir"|null, limitState?: {limit: number|null, pushed: number}}} [opts]
- *   typeFilter 过滤输出条目类型（null=全部）；limitState 达 limit 后提前终止
+ * @param {{typeFilter?: "file"|"dir"|null, limitState?: {limit: number|null, pushed: number}, levelsLeft?: number}} [opts]
+ *   typeFilter 过滤输出条目类型（null=全部）；limitState 达 limit 后提前终止；
+ *   levelsLeft 受限层级数（默认 1=单层）：目录条目本身始终输出，levelsLeft>1 时对其下钻一层，
+ *   下钻不因 typeFilter=file 而跳过（否则深层文件取不到，与 search 的 type 口径一致）
  * @returns {Promise<Array>}
  */
 async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, customTargetDir, opts = {}) {
-  const { typeFilter = null, limitState = null } = opts;
+  const { typeFilter = null, limitState = null, levelsLeft = 1 } = opts;
   const files = [];
   const entries = await fs.promises.readdir(listDir, { withFileTypes: true });
 
@@ -101,12 +103,30 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
     const relativePath = joinRelativeEntry(baseRelativeDir, entry.name);
 
     if (entry.isDirectory()) {
-      if (typeFilter === "file") continue;
-      files.push({
-        name: relativePath,
-        isDir: true,
-      });
-      countListPushed(limitState);
+      if (typeFilter !== "file") {
+        files.push({
+          name: relativePath,
+          isDir: true,
+        });
+        countListPushed(limitState);
+      }
+      // 层级未用尽且未达 limit 时下钻（DFS：子目录条目后紧跟其子项）。
+      // 单个子目录不可读/扫描中被删除：保留目录条目、跳过其子树，不拖垮整个请求（与 search 的 readdir 容错口径一致）
+      if (levelsLeft > 1 && !isListLimitReached(limitState)) {
+        try {
+          const sub = await listDirectoryLevel(
+            path.join(listDir, entry.name),
+            workspaceDir,
+            logId,
+            proxyPath,
+            customTargetDir,
+            { typeFilter, limitState, levelsLeft: levelsLeft - 1 }
+          );
+          files.push(...sub);
+        } catch (error) {
+          log(logId, "WARN", `Depth descent failed, skip subtree: ${relativePath}`, { error: error.message });
+        }
+      }
       continue;
     }
 
@@ -666,7 +686,7 @@ async function calculateDownloadableDirectorySize(
  * @returns {Promise<{files: Array, recursive: boolean, type: string, limit: number|null}>}
  *   type/limit 回显实际生效值（Java 网关以此识别 file-server 已应用过滤，旧版无回显则网关兜底）
  */
-async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, type, limit, service = null) {
+async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath, recursive, depth, type, limit, service = null) {
   const startTime = Date.now();
   const logId = `computer:${userId}:${cId}`;
   // 默认 true=原全量递归；仅显式 false/"false" 时单层
@@ -702,6 +722,19 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
     safeLimit = n;
   }
 
+  // depth 归一：仅单层模式（recursive=false）下生效的受限展开层级数。
+  // 1=仅当前层（与原单层一致）；N=目录条目向下再展开 N-1 级；缺省=不展开。
+  // 更深请直接用 recursive=true 全量。上限 10 防单请求扫描爆炸。
+  // 递归模式下 depth 不生效：不校验、不展开、回显 null（与 Java 网关口径一致）。
+  let safeDepth = null;
+  if (!isRecursive && depth != null && depth !== "") {
+    const d = Number(depth);
+    if (!Number.isInteger(d) || d < 1 || d > 10) {
+      throw new ValidationError("depth 需为 1-10 的整数", { field: "depth", value: depth });
+    }
+    safeDepth = d;
+  }
+
   const normalizedUserId = String(userId);
   const normalizedCId = String(cId);
   const trimmedCustomTargetDir =
@@ -716,7 +749,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       userId: normalizedUserId,
       cId: normalizedCId,
     });
-    return { files: [], recursive: isRecursive, type: typeFilter || "all", limit: safeLimit };
+    return { files: [], recursive: isRecursive, depth: safeDepth, type: typeFilter || "all", limit: safeLimit };
   }
 
   const listDir = resolvePathWithinWorkspace(targetDir, relativePath);
@@ -729,7 +762,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       userId: normalizedUserId,
       cId: normalizedCId,
     });
-    return { files: [], recursive: isRecursive, type: typeFilter || "all", limit: safeLimit };
+    return { files: [], recursive: isRecursive, depth: safeDepth, type: typeFilter || "all", limit: safeLimit };
   }
 
   const listStat = await fs.promises.stat(listDir);
@@ -751,7 +784,12 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
 
   try {
     // type/limit 在扫描时应用：类型不符的条目不输出，达 limit 提前终止遍历（大目录省扫描与传输）
-    const listOpts = { typeFilter, limitState: { limit: safeLimit, pushed: 0 } };
+    // depth 仅单层模式下生效：levelsLeft 传入受限展开层级数
+    const listOpts = {
+      typeFilter,
+      limitState: { limit: safeLimit, pushed: 0 },
+      levelsLeft: !isRecursive && safeDepth != null ? safeDepth : 1,
+    };
     // 递归模式：初始相对前缀一次换算（listDir 相对 targetDir），条目路径由遍历增量拼接
     const files = isRecursive
       ? (await traverseDirectory(listDir, logId, proxyPath, trimmedCustomTargetDir, toPosixRelativePath(targetDir, listDir), listOpts)).entries
@@ -763,6 +801,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       listDir,
       relativePath: relativePath || "",
       recursive: isRecursive,
+      depth: safeDepth,
       type: typeFilter || "all",
       limit: safeLimit,
       userId: normalizedUserId,
@@ -770,8 +809,8 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
       elapsedMs: Date.now() - startTime,
     });
 
-    // type/limit 回显生效值，供 Java 网关识别（旧版 file-server 无该回显，网关侧兜底过滤）
-    return { files, recursive: isRecursive, type: typeFilter || "all", limit: safeLimit };
+    // type/limit 回显生效值，供 Java 网关识别（旧版 file-server 无该回显，网关侧兜底过滤）；depth 一并回显便于排查
+    return { files, recursive: isRecursive, depth: safeDepth, type: typeFilter || "all", limit: safeLimit };
   } catch (error) {
     if (error instanceof ValidationError) {
       throw error;
