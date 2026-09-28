@@ -815,14 +815,46 @@ function entryMatchesKeyword(relativePath, entryName, kwLower) {
   return relativePath.toLowerCase().includes(kwLower);
 }
 
+/**
+ * 搜索遍历的目录黑名单：仅纯噪音目录（VCS 元数据/依赖/解释器缓存）。
+ * 刻意放行产品运行时目录（.claude/.agents/.codex/.opencode/.local-deploy 等）——
+ * 其下的技能（SKILL.md）与配置文件正是搜索要找的目标；与浏览列表的隐藏口径
+ * （listDirectoryLevel 对点开头条目的整体隐藏）解耦，各管各的。
+ * 与 env TRAVERSE_EXCLUDE_DIRS 合并生效：配置可追加排除项，不可放行内置噪音项。
+ */
+const SEARCH_NOISE_DIR_NAMES = new Set([
+  ".git",
+  ".svn",
+  ".hg",
+  "node_modules",
+  "__pycache__",
+  ".venv",
+  "venv",
+  "virtualenv",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".cache",
+]);
+
+/** 搜索遍历的文件黑名单：系统生成的噪音文件（点开头文件不再整体排除） */
+const SEARCH_NOISE_FILE_NAMES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+
+/**
+ * 搜索遍历的条目排除判定（仅 searchFiles 使用，不影响文件列表）：
+ * 排除噪音目录/噪音文件 + 配置排除项（CONTENT_TRAVERSE_EXCLUDE_FILES / TRAVERSE_EXCLUDE_DIRS）。
+ */
 function isExcludedSearchEntry(entry, excludeFiles, excludeDirs) {
-  if (entry.name.startsWith(".") && entry.name !== ".gitignore") {
+  if (SEARCH_NOISE_FILE_NAMES.has(entry.name)) {
     return true;
   }
   if (excludeFiles.includes(entry.name)) {
     return true;
   }
-  if (entry.isDirectory() && excludeDirs.includes(entry.name)) {
+  if (
+    entry.isDirectory() &&
+    (SEARCH_NOISE_DIR_NAMES.has(entry.name) || excludeDirs.includes(entry.name))
+  ) {
     return true;
   }
   return false;
