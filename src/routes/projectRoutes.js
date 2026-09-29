@@ -46,7 +46,10 @@ const storage = multer.diskStorage({
       file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname);
     // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 的影响，
     // 如 upload-project 移库后会回填新路径——绝不能删到移库后的正式文件）
-    trackMulterTempPath(req, path.join(req._multerUploadDir || "", filename));
+    // 目录缺失不登记（防御：join("", filename) 得到相对 CWD 的路径，请求结束误删 CWD 下同名文件）
+    if (req._multerUploadDir) {
+      trackMulterTempPath(req, path.join(req._multerUploadDir, filename));
+    }
     cb(null, filename);
   },
 });
@@ -89,7 +92,10 @@ const attachmentStorage = multer.diskStorage({
       file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname);
     // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 的影响，
     // 如 upload-project 移库后会回填新路径——绝不能删到移库后的正式文件）
-    trackMulterTempPath(req, path.join(req._multerUploadDir || "", filename));
+    // 目录缺失不登记（防御：join("", filename) 得到相对 CWD 的路径，请求结束误删 CWD 下同名文件）
+    if (req._multerUploadDir) {
+      trackMulterTempPath(req, path.join(req._multerUploadDir, filename));
+    }
     cb(null, filename);
   },
 });

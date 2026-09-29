@@ -9,6 +9,7 @@ import { errorHandler, notFoundHandler } from "./utils/error/errorHandler.js";
 import router from "./routes/router.js";
 import { cleanupInitProjectOnStartup } from "./utils/project/initProjectCleanupUtils.js";
 import { resolveServiceContext, resolveWorkspaceDir } from "./utils/computer/workspaceContext.js";
+import { escapesRoot } from "./utils/computer/computerFileUtils.js";
 import { startScheduler, stopScheduler } from "./scheduler/pnpmPruneScheduler.js";
 import path from "path";
 import fsp from "fs/promises";
@@ -102,7 +103,13 @@ app.use("/api/page/static/:projectId", async (req, res, next) => {
   // 对可能被多次编码的路径做安全解码（支持中文等）
   const decodedPath = safeDecodePath(filePath);
 
-  const fullPath = path.join(config.PROJECT_SOURCE_DIR, projectId, decodedPath);
+  const projectRoot = path.join(config.PROJECT_SOURCE_DIR, projectId);
+  const fullPath = path.join(projectRoot, decodedPath);
+  // realpath 级根边界：路径经符号链接（含目录链接中段，如 link->/etc 后取 link/passwd）
+  // 解析后越出项目目录的按 404 处理，不泄露内容与大小
+  if (await escapesRoot(projectRoot, fullPath)) {
+    return res.status(404).send("Not Found");
+  }
   // 设置文件大小自定义头（须在 sendFile 之前）
   await setFileSizeHeader(res, fullPath);
   // 使用 headers 选项确保 CORS 头被保留
@@ -166,9 +173,16 @@ app.use("/api/computer/static/:userId/:cId", async (req, res, next) => {
   // customTargetDir 非空时直接从该目录解析文件，否则按项目类型定位（userapp: USERAPP_WORKSPACE_DIR/{appId}，其余: COMPUTER_WORKSPACE_DIR/{userId}/{cId}）
   const { customTargetDir } = req.query;
   const service = resolveServiceContext(req);
-  const fullPath = (customTargetDir && customTargetDir.trim())
-    ? path.join(customTargetDir, decodedPath)
-    : path.join(resolveWorkspaceDir(service, userId, cId), decodedPath);
+  const targetRoot = (customTargetDir && customTargetDir.trim())
+    ? customTargetDir.trim()
+    : resolveWorkspaceDir(service, userId, cId);
+  const fullPath = path.join(targetRoot, decodedPath);
+
+  // realpath 级根边界：路径经符号链接（含目录链接中段）解析后越出目标根的按 404 处理，
+  // 不泄露内容与大小（与 file-list/resolve-file 的 escapesRoot 同一守卫）
+  if (await escapesRoot(targetRoot, fullPath)) {
+    return res.status(404).send("Not Found");
+  }
 
   // 设置文件大小自定义头（须在 sendFile 之前）
   await setFileSizeHeader(res, fullPath);

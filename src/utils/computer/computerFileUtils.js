@@ -134,7 +134,7 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
 
     // 根外符号链接不可见（对齐 Rust）：链接目标越出 workspaceDir 的条目不输出，
     // 防止预置链接把工作区外的宿主文件带进列表与静态读取链路
-    if (entry.isSymbolicLink() && (await isSymlinkOutsideRoot(workspaceDir, path.join(listDir, entry.name)))) {
+    if (entry.isSymbolicLink() && (await escapesRoot(workspaceDir, path.join(listDir, entry.name)))) {
       continue;
     }
 
@@ -192,7 +192,7 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
     }
 
     // 根外符号链接不可见（对齐 Rust）；放在 naturalCount 之前，"仅含越界链接的目录"仍按空目录处理
-    if (entry.isSymbolicLink() && (await isSymlinkOutsideRoot(traverseRoot, fullPath))) {
+    if (entry.isSymbolicLink() && (await escapesRoot(traverseRoot, fullPath))) {
       continue;
     }
 
@@ -237,20 +237,19 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
 const LEADING_SEP_RE = process.platform === "win32" ? /^[\/\\]+/ : /^\/+/;
 
 /**
- * symlink 根边界判定：符号链接条目的目标（readlink 后相对链接所在目录 resolve）落在
- * rootDir 之外则视为越界（悬空链接按字面目标路径判定）。根外链接对 file-list 不可见、
- * 对 resolve-file 按不存在处理——防止预置链接把工作区外的宿主文件带进列表与读取链路。
+ * realpath 级根边界判定：fullPath 与 rootDir 均经 fs.realpath 解析路径上全部符号链接
+ * （含目录链接中段、链式链接）后比较是否越出根。比字面/readlink 单级判定强：
+ * "link -> /etc 后 filePath=link/passwd" 这类路径中段逃逸也拦得住。
+ * realpath 失败（路径不存在等）按未越界返回 false，由调用方常规逻辑兜底。
  */
-async function isSymlinkOutsideRoot(rootDir, fullPath) {
-  let target;
+async function escapesRoot(rootDir, fullPath) {
   try {
-    target = await fs.promises.readlink(fullPath);
+    const realRoot = await fs.promises.realpath(rootDir);
+    const realPath = await fs.promises.realpath(fullPath);
+    return realPath !== realRoot && !realPath.startsWith(realRoot + path.sep);
   } catch {
-    return false; // 非链接或读取失败：按常规处理
+    return false;
   }
-  const resolvedTarget = path.resolve(path.dirname(fullPath), target);
-  const root = path.resolve(rootDir);
-  return resolvedTarget !== root && !resolvedTarget.startsWith(root + path.sep);
 }
 
 /**
@@ -391,9 +390,9 @@ async function resolveExistingFile(userId, cId, filePath, proxyPath, customTarge
   }
 
   try {
-    // 根外符号链接按不存在处理（对齐 Rust）：字面路径在界内，但链接目标越出目标根
-    const lstat = await fs.promises.lstat(resolved.absPath);
-    if (lstat.isSymbolicLink() && (await isSymlinkOutsideRoot(targetDir, resolved.absPath))) {
+    // realpath 级根边界（对齐 Rust）：字面路径在界内，但路径上任何符号链接（含目录链接
+    // 中段，如 link->/etc 后 filePath=link/passwd）解析后越出目标根的，按不存在处理
+    if (await escapesRoot(targetDir, resolved.absPath)) {
       return { exists: false };
     }
     // 与静态文件 sendFile 一致：跟随（界内）符号链接，只要最终是文件即可
@@ -502,6 +501,10 @@ async function queryFileMetaEntry(targetDir, filePath, logId) {
     }
   }
   if (!resolved) {
+    return emptyFileMeta(input, "illegal path");
+  }
+  // realpath 级根边界：路径经符号链接（含目录链接中段）解析后越出目标根，按非法路径处理
+  if (await escapesRoot(targetDir, resolved.absPath)) {
     return emptyFileMeta(input, "illegal path");
   }
   try {
@@ -801,6 +804,15 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
 
   const listDir = resolvePathWithinWorkspace(targetDir, relativePath);
 
+  // realpath 级根边界：relativePath 指进目录符号链接（如 link->/etc 后 relativePath=link）
+  // 时列表起点实际位于目标根之外，按非法路径拒绝（与字面 .. 穿越同一报错口径）
+  if (await escapesRoot(targetDir, listDir)) {
+    throw new ValidationError("relativePath 非法，不允许越出目标目录", {
+      field: "relativePath",
+      relativePath,
+    });
+  }
+
   if (!fs.existsSync(listDir)) {
     log(logId, "INFO", "List path does not exist, returning empty list", {
       targetDir,
@@ -1025,6 +1037,13 @@ async function searchFiles(
   const searchRootAbs = resolvePathWithinWorkspace(targetDir, relativePath);
   if (!fs.existsSync(searchRootAbs)) {
     return { files: [], truncated: false, visited: 0 };
+  }
+  // realpath 级根边界：搜索起点指进目录符号链接时实际位于目标根之外，按非法路径拒绝
+  if (await escapesRoot(targetDir, searchRootAbs)) {
+    throw new ValidationError("relativePath 非法，不允许越出目标目录", {
+      field: "relativePath",
+      relativePath,
+    });
   }
   const searchRootStat = await fs.promises.stat(searchRootAbs);
   if (!searchRootStat.isDirectory()) {
@@ -2445,6 +2464,7 @@ async function generateFile(userId, cId, fileName, content, customTargetDir, ser
 }
 
 export {
+  escapesRoot,
   getFileList,
   getFileMeta,
   resolveExistingFile,

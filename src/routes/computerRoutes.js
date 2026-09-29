@@ -85,8 +85,11 @@ const upload = multer({
       const baseName = path.basename(file.originalname, ext);
       const uniqueSuffix = `${Date.now()}_${Math.round(Math.random() * 1e6)}`;
       const filename = `${baseName}_${uniqueSuffix}${ext}`;
-      // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 影响）
-      trackMulterTempPath(req, path.join(req._multerUploadDir || "", filename));
+      // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 影响）。
+      // 目录缺失不登记——防御：join("", filename) 会得到相对进程 CWD 的路径，请求结束误删 CWD 下同名文件
+      if (req._multerUploadDir) {
+        trackMulterTempPath(req, path.join(req._multerUploadDir, filename));
+      }
       cb(null, filename);
     },
   }),
