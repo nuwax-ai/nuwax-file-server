@@ -21,8 +21,12 @@ import {
 } from "../utils/computer/computerFileUtils.js";
 import { resolveServiceContext } from "../utils/computer/workspaceContext.js";
 import { listFsRoots, listFsChildren, createFsDirectory, renameFsDirectory } from "../utils/computer/fsBrowserUtils.js";
+import { trackMulterTempPath, cleanupMulterFiles } from "../utils/common/multerCleanup.js";
 
 const computerRouter = express.Router();
+
+// 上传暂存文件请求级清理：见 utils/common/multerCleanup.js（挂在 router 级，覆盖全部上传路由）
+computerRouter.use(cleanupMulterFiles);
 
 // 使用磁盘存储，便于后续解压 zip
 const upload = multer({
@@ -70,6 +74,7 @@ const upload = multer({
           fs.mkdirSync(tmpUploadDir, { recursive: true });
         }
 
+        req._multerUploadDir = tmpUploadDir;
         cb(null, tmpUploadDir);
       } catch (err) {
         cb(err);
@@ -79,7 +84,10 @@ const upload = multer({
       const ext = path.extname(file.originalname) || ".zip";
       const baseName = path.basename(file.originalname, ext);
       const uniqueSuffix = `${Date.now()}_${Math.round(Math.random() * 1e6)}`;
-      cb(null, `${baseName}_${uniqueSuffix}${ext}`);
+      const filename = `${baseName}_${uniqueSuffix}${ext}`;
+      // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 影响）
+      trackMulterTempPath(req, path.join(req._multerUploadDir || "", filename));
+      cb(null, filename);
     },
   }),
   limits: {

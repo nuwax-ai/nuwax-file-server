@@ -178,7 +178,9 @@ export async function renameFsDirectory(dirPath, newName) {
   const target = path.join(parent, name);
   let targetExists;
   try {
-    await fs.promises.stat(target);
+    // lstat 不跟随链接：悬空符号链接也算"已存在"（stat 跟随后报 ENOENT 会放行，
+    // rename 静默落在链接本体上，行为不可预期）
+    await fs.promises.lstat(target);
     targetExists = true;
   } catch (error) {
     if (error.code !== "ENOENT") {

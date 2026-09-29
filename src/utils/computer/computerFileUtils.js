@@ -132,6 +132,12 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
 
     if (typeFilter === "dir") continue;
 
+    // 根外符号链接不可见（对齐 Rust）：链接目标越出 workspaceDir 的条目不输出，
+    // 防止预置链接把工作区外的宿主文件带进列表与静态读取链路
+    if (entry.isSymbolicLink() && (await isSymlinkOutsideRoot(workspaceDir, path.join(listDir, entry.name)))) {
+      continue;
+    }
+
     try {
       files.push({
         name: relativePath,
@@ -159,6 +165,8 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
  */
 async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, relativeDir = "", opts = {}) {
   const { typeFilter = null, limitState = null } = opts;
+  // 根边界：首层调用由 getFileList 注入目标根（customTargetDir 或工作区），递归沿用
+  const traverseRoot = opts.rootDir || targetDir;
   const entries = [];
   let naturalCount = 0;
   const rawEntries = await fs.promises.readdir(targetDir, { withFileTypes: true });
@@ -180,6 +188,11 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
     if (excludeFiles.includes(entry.name)) continue;
 
     if (entry.isDirectory() && config.TRAVERSE_EXCLUDE_DIRS.includes(entry.name)) {
+      continue;
+    }
+
+    // 根外符号链接不可见（对齐 Rust）；放在 naturalCount 之前，"仅含越界链接的目录"仍按空目录处理
+    if (entry.isSymbolicLink() && (await isSymlinkOutsideRoot(traverseRoot, fullPath))) {
       continue;
     }
 
@@ -220,6 +233,26 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
   return { entries, naturalCount };
 }
 
+/** 前导分隔符剥离：win32 下 / 与 \ 均为分隔符一并剥离；POSIX 下 \ 是合法文件名字符，只剥 /（防 \foo 被误剥成 foo） */
+const LEADING_SEP_RE = process.platform === "win32" ? /^[\/\\]+/ : /^\/+/;
+
+/**
+ * symlink 根边界判定：符号链接条目的目标（readlink 后相对链接所在目录 resolve）落在
+ * rootDir 之外则视为越界（悬空链接按字面目标路径判定）。根外链接对 file-list 不可见、
+ * 对 resolve-file 按不存在处理——防止预置链接把工作区外的宿主文件带进列表与读取链路。
+ */
+async function isSymlinkOutsideRoot(rootDir, fullPath) {
+  let target;
+  try {
+    target = await fs.promises.readlink(fullPath);
+  } catch {
+    return false; // 非链接或读取失败：按常规处理
+  }
+  const resolvedTarget = path.resolve(path.dirname(fullPath), target);
+  const root = path.resolve(rootDir);
+  return resolvedTarget !== root && !resolvedTarget.startsWith(root + path.sep);
+}
+
 /**
  * 将 relativePath 解析到目标根目录内，防止 .. 穿越
  * @param {string} rootDir 目标根目录（默认工作区或 customTargetDir）
@@ -227,17 +260,20 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
  * @returns {string} 绝对路径
  */
 function resolvePathWithinWorkspace(rootDir, relativePath) {
-  const trimmed = (relativePath == null ? "" : String(relativePath)).trim();
-  if (!trimmed || trimmed === "." || trimmed === "/") {
+  // 名称原样使用不做 trim（POSIX 下首尾空格是合法文件名字符，trim 会静默指向错误目标）；
+  // 仅以 trim 判"纯空白=未输入"
+  const raw = relativePath == null ? "" : String(relativePath);
+  const blank = raw.trim();
+  if (!blank || blank === "." || blank === "/") {
     return path.resolve(rootDir);
   }
 
-  const normalized = path.normalize(trimmed).replace(/^[\/\\]+/, "");
+  const normalized = path.normalize(raw).replace(LEADING_SEP_RE, "");
   if (!normalized || normalized === ".") {
     return path.resolve(rootDir);
   }
 
-  if (path.isAbsolute(trimmed) || normalized.split(path.sep).includes("..")) {
+  if (path.isAbsolute(raw) || normalized.split(path.sep).includes("..")) {
     throw new ValidationError("relativePath 非法，不允许越出目标目录", {
       field: "relativePath",
       relativePath,
@@ -266,18 +302,19 @@ function resolvePathWithinWorkspace(rootDir, relativePath) {
  * @returns {{ absPath: string, name: string } | null}
  */
 function resolveFilePathWithinWorkspace(rootDir, filePathInput) {
-  const trimmed = (filePathInput == null ? "" : String(filePathInput)).trim();
-  if (!trimmed) {
+  // 名称原样使用不做 trim（POSIX 下首尾空格是合法文件名字符）；仅以 trim 判空白
+  const raw = filePathInput == null ? "" : String(filePathInput);
+  if (!raw.trim()) {
     return null;
   }
 
   const resolvedRoot = path.resolve(rootDir);
   let absPath;
 
-  if (path.isAbsolute(trimmed)) {
-    absPath = path.resolve(trimmed);
+  if (path.isAbsolute(raw)) {
+    absPath = path.resolve(raw);
   } else {
-    const normalized = path.normalize(trimmed).replace(/^[\/\\]+/, "");
+    const normalized = path.normalize(raw).replace(LEADING_SEP_RE, "");
     if (!normalized || normalized === "." || normalized.split(path.sep).includes("..")) {
       return null;
     }
@@ -343,9 +380,9 @@ async function resolveExistingFile(userId, cId, filePath, proxyPath, customTarge
 
   let resolved = resolveFilePathWithinWorkspace(targetDir, filePath);
   // 兼容以 / 开头、实为相对目标根的写法（如 /src/a.md）
-  if (!resolved) {
-    const asRelative = String(filePath).trim().replace(/^[\/\\]+/, "");
-    if (asRelative && asRelative !== String(filePath).trim()) {
+  if (!resolved && String(filePath).startsWith("/")) {
+    const asRelative = String(filePath).replace(LEADING_SEP_RE, "");
+    if (asRelative) {
       resolved = resolveFilePathWithinWorkspace(targetDir, asRelative);
     }
   }
@@ -354,7 +391,12 @@ async function resolveExistingFile(userId, cId, filePath, proxyPath, customTarge
   }
 
   try {
-    // 与静态文件 sendFile 一致：跟随符号链接，只要最终是文件即可
+    // 根外符号链接按不存在处理（对齐 Rust）：字面路径在界内，但链接目标越出目标根
+    const lstat = await fs.promises.lstat(resolved.absPath);
+    if (lstat.isSymbolicLink() && (await isSymlinkOutsideRoot(targetDir, resolved.absPath))) {
+      return { exists: false };
+    }
+    // 与静态文件 sendFile 一致：跟随（界内）符号链接，只要最终是文件即可
     const stat = await fs.promises.stat(resolved.absPath);
     if (!stat.isFile()) {
       return { exists: false };
@@ -449,12 +491,13 @@ function emptyFileMeta(filePath, error) {
  * 保证响应与请求条目可按键/按序关联（规范路径以 file-list 的 name 为准）
  */
 async function queryFileMetaEntry(targetDir, filePath, logId) {
-  const input = (filePath == null ? "" : String(filePath)).trim();
-  let resolved = input ? resolveFilePathWithinWorkspace(targetDir, input) : null;
+  // 名称原样使用与回显（不 trim，POSIX 下首尾空格是合法文件名字符）；仅以 trim 判空白
+  const input = filePath == null ? "" : String(filePath);
+  let resolved = input.trim() ? resolveFilePathWithinWorkspace(targetDir, input) : null;
   // 兼容以 / 开头、实为相对目标根的写法（与 /resolve-file 同款重试）
   if (!resolved && input.startsWith("/")) {
-    const asRelative = input.replace(/^[\/\\]+/, "");
-    if (asRelative && asRelative !== input) {
+    const asRelative = input.replace(LEADING_SEP_RE, "");
+    if (asRelative) {
       resolved = resolveFilePathWithinWorkspace(targetDir, asRelative);
     }
   }
@@ -712,10 +755,14 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
     }
   }
 
+  // limit/depth 十进制严格解析：仅接受纯十进制数字串，拒绝 Number() 宽松接受的
+  // "0x3"/"1e1" 及带首尾空白的 " 3 " 等形态（与 Rust 口径一致，不做 trim）
+  const parseDecimalInt = (v) => (/^\d+$/.test(String(v)) ? parseInt(String(v), 10) : NaN);
+
   // limit 归一：缺省/空=不限；必须是非负整数（0 表示不返回条目）
   let safeLimit = null;
   if (limit != null && limit !== "") {
-    const n = Number(limit);
+    const n = parseDecimalInt(limit);
     if (!Number.isInteger(n) || n < 0) {
       throw new ValidationError("limit 必须为非负整数", { field: "limit", value: limit });
     }
@@ -728,7 +775,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
   // 递归模式下 depth 不生效：不校验、不展开、回显 null（与 Java 网关口径一致）。
   let safeDepth = null;
   if (!isRecursive && depth != null && depth !== "") {
-    const d = Number(depth);
+    const d = parseDecimalInt(depth);
     if (!Number.isInteger(d) || d < 1 || d > 10) {
       throw new ValidationError("depth 需为 1-10 的整数", { field: "depth", value: depth });
     }
@@ -792,7 +839,7 @@ async function getFileList(userId, cId, proxyPath, customTargetDir, relativePath
     };
     // 递归模式：初始相对前缀一次换算（listDir 相对 targetDir），条目路径由遍历增量拼接
     const files = isRecursive
-      ? (await traverseDirectory(listDir, logId, proxyPath, trimmedCustomTargetDir, toPosixRelativePath(targetDir, listDir), listOpts)).entries
+      ? (await traverseDirectory(listDir, logId, proxyPath, trimmedCustomTargetDir, toPosixRelativePath(targetDir, listDir), { ...listOpts, rootDir: targetDir })).entries
       : await listDirectoryLevel(listDir, targetDir, logId, proxyPath, trimmedCustomTargetDir, listOpts);
 
     log(logId, "INFO", "User file list obtained successfully", {
@@ -874,6 +921,7 @@ const SEARCH_NOISE_DIR_NAMES = new Set([
   ".pytest_cache",
   ".ruff_cache",
   ".cache",
+  ".tmp",
 ]);
 
 /** 搜索遍历的文件黑名单：系统生成的噪音文件（点开头文件不再整体排除） */
@@ -1554,7 +1602,7 @@ async function uploadFile(userId, cId, file, filePath, customTargetDir, service 
       fileSize: file.buffer
         ? file.buffer.length
         : file.contents
-        ? file.contents.length
+        ? Buffer.byteLength(file.contents, "utf8")
         : 0,
       elapsedMs: Date.now() - startTime,
     });
@@ -1565,7 +1613,7 @@ async function uploadFile(userId, cId, file, filePath, customTargetDir, service 
       fileSize: file.buffer
         ? file.buffer.length
         : file.contents
-        ? file.contents.length
+        ? Buffer.byteLength(file.contents, "utf8")
         : 0,
     };
   } catch (error) {

@@ -311,7 +311,9 @@ async function nativeInit(dir, options) {
  * }>}
  */
 async function nativeStatus(dir) {
-  const { stdout } = await runGit(dir, ["status", "--porcelain=v1", "-b"]);
+  // --untracked-files=all：untracked 按叶子文件展开（默认 normal 会把未跟踪目录折叠成
+  // 带尾斜杠的目录级条目 "dir/"，nuwax-client 的 buildChangeFileTree 无法表示该形态）
+  const { stdout } = await runGit(dir, ["status", "--porcelain=v1", "-b", "--untracked-files=all"]);
   const lines = stdout.split("\n").filter((l) => l.length > 0);
 
   let current = null;

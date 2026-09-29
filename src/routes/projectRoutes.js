@@ -22,7 +22,12 @@ import {
   asyncHandler,
 } from "../utils/error/errorHandler.js";
 
+import { trackMulterTempPath, cleanupMulterFiles } from "../utils/common/multerCleanup.js";
+
 const projectRouter = express.Router();
+
+// 上传暂存文件请求级清理：见 utils/common/multerCleanup.js（挂在 router 级，覆盖全部上传路由）
+projectRouter.use(cleanupMulterFiles);
 
 // 配置multer用于文件上传
 const storage = multer.diskStorage({
@@ -32,14 +37,17 @@ const storage = multer.diskStorage({
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
+    req._multerUploadDir = uploadDir;
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e6);
-    cb(
-      null,
-      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
-    );
+    const filename =
+      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname);
+    // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 的影响，
+    // 如 upload-project 移库后会回填新路径——绝不能删到移库后的正式文件）
+    trackMulterTempPath(req, path.join(req._multerUploadDir || "", filename));
+    cb(null, filename);
   },
 });
 
@@ -72,14 +80,17 @@ const attachmentStorage = multer.diskStorage({
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
+    req._multerUploadDir = uploadDir;
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e6);
-    cb(
-      null,
-      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
-    );
+    const filename =
+      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname);
+    // 写盘时登记暂存路径，请求结束统一清理（不受 handler 改写 req.file.path 的影响，
+    // 如 upload-project 移库后会回填新路径——绝不能删到移库后的正式文件）
+    trackMulterTempPath(req, path.join(req._multerUploadDir || "", filename));
+    cb(null, filename);
   },
 });
 
