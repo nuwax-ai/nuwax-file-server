@@ -33,7 +33,9 @@ function isNativeGitEnabled() {
 /**
  * 判断错误是否属于「本机无可用 git」（允许回退 isomorphic-git）
  * 其它错误（hook 失败、磁盘满、index 锁等）应直接抛出，禁止静默回退。
- * 注意：不匹配裸 "ENOENT"，避免 hook/脚本 stderr 误伤。
+ * 注意：裸 e.code==="ENOENT" 会命中（cross-spawn 找不到 git 二进制时的错误形态，必须识别）——
+ * 因此调用方不得让文件系统操作的裸 ENOENT 外泄到 withNativeFallback（文件缺失须先归一为
+ * 返回值或附带其他 code），否则会被误判为 git 不可用，触发全进程 30s native 降级。
  * @param {unknown} err
  * @returns {boolean}
  */
@@ -1337,11 +1339,71 @@ async function nativeDiff(dir, options = {}) {
 async function nativeFileContent(dir, options) {
   const { ref, filePath } = options;
 
-  if (ref === "worktree" || ref === "staged" || ref === "") {
-    const fullPath = path.join(dir, filePath);
-    return fs.existsSync(fullPath) ? fs.readFileSync(fullPath, "utf8") : "";
+  // 越界防护：filePath 解析后必须落在仓库目录内（防 ../ 与绝对路径读取仓库外的主机文件）
+  const resolvedRoot = path.resolve(dir);
+  const resolvedPath = path.resolve(dir, filePath || "");
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + path.sep)) {
+    const err = new Error("filePath is outside the workspace");
+    err.code = "VALIDATION";
+    err.field = "filePath";
+    throw err;
   }
 
+  if (ref === "worktree" || ref === "staged" || ref === "") {
+    // 竞态安全：fs 调用的裸 ENOENT 必须就地归一为"缺失返回空串"——一旦外泄会被
+    // isNativeGitUnavailableError 误判成"git 不可用"，触发全进程 30s native 降级（withNativeFallback）
+    let st;
+    try {
+      st = fs.lstatSync(resolvedPath);
+    } catch {
+      return "";
+    }
+    // 符号链接按 git 语义返回链接目标文本（git 中 symlink 是内容为目标路径的 blob），
+    // 与 git ref 分支保持一致——跟随链接读目标内容会造成 worktree 与 git ref 两分支结果分叉
+    if (st.isSymbolicLink()) {
+      try {
+        return fs.readlinkSync(resolvedPath, "utf8");
+      } catch (e) {
+        // lstat 后链接被并发删除：按缺失归一，裸 ENOENT 外泄会被 isNativeGitUnavailableError
+        // 误判成 git 不可用，触发全进程 30s native 降级
+        if (e.code === "ENOENT") return "";
+        throw e;
+      }
+    }
+    // 目录不是"文件内容"：按入参错误拒绝（前端误传目录条目，常带尾随 /）。
+    // lstat 不跟随链接，指向目录的符号链接由此处的 readFileSync EISDIR 兜底
+    if (st.isDirectory()) {
+      const err = new Error("filePath is a directory, file-content only supports files");
+      err.code = "VALIDATION";
+      err.field = "filePath";
+      throw err;
+    }
+    try {
+      return fs.readFileSync(resolvedPath, "utf8");
+    } catch (e) {
+      if (e.code === "ENOENT") return ""; // 扫描中被删除：按缺失处理
+      if (e.code === "EISDIR") {
+        const err = new Error("filePath is a directory, file-content only supports files");
+        err.code = "VALIDATION";
+        err.field = "filePath";
+        throw err;
+      }
+      throw e;
+    }
+  }
+
+  // git ref：先确认对象类型是 blob——目录（tree）会被 git show 当 ls-tree "成功"返回树清单文本；
+  // 路径不存在于该版本仍按原语义返回空串
+  const typeResult = await runGit(dir, ["cat-file", "-t", `${ref}:${filePath}`], {
+    allowFailure: true,
+  });
+  if (typeResult.exitCode !== 0) return "";
+  if (typeResult.stdout.trim() !== "blob") {
+    const err = new Error("filePath is not a file in this ref (directory)");
+    err.code = "VALIDATION";
+    err.field = "filePath";
+    throw err;
+  }
   const result = await runGit(dir, ["show", `${ref}:${filePath}`], {
     allowFailure: true,
   });
@@ -1455,10 +1517,14 @@ async function nativeRevertToTree(dir, options) {
     ]);
   }
 
-  // 删除 HEAD 有但 target 没有的文件（分批 rm，同样规避 argv 上限）
+  // 删除 HEAD 有但 target 没有的文件（分批 rm，同样规避 argv 上限）。
+  // 必须 --ignore-unmatch：上一步 restore --staged --source=<target> 已把 index 同步成 target 树，
+  // 这些路径（target 之后新增的文件）此刻已不在 index 中，不带该标志会 fatal:
+  // pathspec ':(literal)xxx' did not match any files，且失败发生在改写 index 之后，工作区留半完成状态。
+  // 与本文件 stageFiles 的 rm --cached -f --ignore-unmatch（:490）同款处理。
   const removed = [...headFiles].filter((f) => !targetFiles.has(f));
   if (removed.length > 0) {
-    await runGitWithPathBatches(dir, ["rm", "-f"], removed);
+    await runGitWithPathBatches(dir, ["rm", "-f", "--ignore-unmatch"], removed);
     await cleanEmptyParentDirs(dir, removed);
   }
 

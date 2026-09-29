@@ -11,6 +11,7 @@ import { cleanupInitProjectOnStartup } from "./utils/project/initProjectCleanupU
 import { resolveServiceContext, resolveWorkspaceDir } from "./utils/computer/workspaceContext.js";
 import { startScheduler, stopScheduler } from "./scheduler/pnpmPruneScheduler.js";
 import path from "path";
+import fsp from "fs/promises";
 
 const app = express();
 
@@ -52,9 +53,24 @@ const safeDecodePath = (p) => {
   return prev;
 };
 
+// 帮助方法：获取文件大小并通过自定义头 X-File-Size 返回
+// 说明：网关开启 gzip 压缩时会去掉 Content-Length（改为 chunked），
+// 且跨域下未在 Access-Control-Expose-Headers 中暴露的头前端也读不到，
+// 因此通过自定义头 X-File-Size 始终返回完整文件大小（Range 请求时也是全量大小）
+const setFileSizeHeader = async (res, fullPath) => {
+  try {
+    const stat = await fsp.stat(fullPath);
+    if (stat.isFile()) {
+      res.setHeader("X-File-Size", stat.size);
+    }
+  } catch (e) {
+    // 文件不存在或不可访问时不设置该头，交由 sendFile 正常处理（404）
+  }
+};
+
 // 静态文件服务：提供页面工程文件的直接访问
 // 格式1: /api/page/static/<projectId>/<path/to/file> -> config.PROJECT_SOURCE_DIR
-app.use("/api/page/static/:projectId", (req, res, next) => {
+app.use("/api/page/static/:projectId", async (req, res, next) => {
   const { projectId } = req.params;
   // req.path 是挂载点之后的路径，形如 "/path/to/file"
   let filePath = req.path || "/";
@@ -70,7 +86,7 @@ app.use("/api/page/static/:projectId", (req, res, next) => {
   res.header("Access-Control-Allow-Origin", allowOrigin);
   res.header("Access-Control-Allow-Methods", "HEAD,GET,POST,PUT,DELETE,OPTIONS");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Fragment");
-  res.header("Access-Control-Expose-Headers", "Content-Type");
+  res.header("Access-Control-Expose-Headers", "Content-Type, X-File-Size");
   if (origin) {
     res.header("Access-Control-Allow-Credentials", "true");
     res.header("Vary", "Origin");
@@ -87,6 +103,8 @@ app.use("/api/page/static/:projectId", (req, res, next) => {
   const decodedPath = safeDecodePath(filePath);
 
   const fullPath = path.join(config.PROJECT_SOURCE_DIR, projectId, decodedPath);
+  // 设置文件大小自定义头（须在 sendFile 之前）
+  await setFileSizeHeader(res, fullPath);
   // 使用 headers 选项确保 CORS 头被保留
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowOrigin,
@@ -113,7 +131,7 @@ app.use("/api/page/static/:projectId", (req, res, next) => {
 
 // 静态文件服务：提供桌面文件的直接访问
 // 格式2: /api/computer/static/<userId>/<cId>/<path/to/file> -> config.COMPUTER_WORKSPACE_DIR
-app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
+app.use("/api/computer/static/:userId/:cId", async (req, res, next) => {
   const { userId, cId } = req.params;
   let filePath = req.path || "/";
 
@@ -129,7 +147,7 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
   res.header("Access-Control-Allow-Origin", allowOrigin);
   res.header("Access-Control-Allow-Methods", "HEAD,GET,POST,PUT,DELETE,OPTIONS");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Range, If-Range");
-  res.header("Access-Control-Expose-Headers", "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified");
+  res.header("Access-Control-Expose-Headers", "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified, X-File-Size");
   if (origin) {
     res.header("Access-Control-Allow-Credentials", "true");
     res.header("Vary", "Origin");
@@ -152,12 +170,15 @@ app.use("/api/computer/static/:userId/:cId", (req, res, next) => {
     ? path.join(customTargetDir, decodedPath)
     : path.join(resolveWorkspaceDir(service, userId, cId), decodedPath);
 
+  // 设置文件大小自定义头（须在 sendFile 之前）
+  await setFileSizeHeader(res, fullPath);
+
   // 使用 headers 选项确保 CORS 头被保留
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "HEAD,GET,POST,PUT,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Range, If-Range",
-    "Access-Control-Expose-Headers": "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified",
+    "Access-Control-Expose-Headers": "Content-Type, Content-Length, Content-Range, Accept-Ranges, ETag, Last-Modified, X-File-Size",
   };
   if (origin) {
     corsHeaders["Access-Control-Allow-Credentials"] = "true";

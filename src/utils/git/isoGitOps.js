@@ -642,11 +642,56 @@ async function isoDiff(dir, options = {}) {
  */
 async function isoFileContent(dir, options) {
   const { ref, filePath } = options;
-  if (ref === "worktree" || ref === "staged" || ref === "") {
-    const fullPath = path.join(dir, filePath);
-    return fs.existsSync(fullPath) ? fs.readFileSync(fullPath, "utf8") : "";
+
+  // 越界防护：与 nativeFileContent 同口径（防 ../ 与绝对路径读取仓库外文件）
+  const resolvedRoot = path.resolve(dir);
+  const resolvedPath = path.resolve(dir, filePath || "");
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + path.sep)) {
+    const err = new Error("filePath is outside the workspace");
+    err.code = "VALIDATION";
+    err.field = "filePath";
+    throw err;
   }
 
+  if (ref === "worktree" || ref === "staged" || ref === "") {
+    let st;
+    try {
+      st = fs.lstatSync(resolvedPath);
+    } catch {
+      return "";
+    }
+    // 符号链接按 git 语义返回链接目标文本，与 native/git ref 分支一致
+    if (st.isSymbolicLink()) {
+      try {
+        return fs.readlinkSync(resolvedPath, "utf8");
+      } catch (e) {
+        // lstat 后链接被并发删除：按缺失归一，不外泄裸 ENOENT
+        if (e.code === "ENOENT") return "";
+        throw e;
+      }
+    }
+    if (st.isDirectory()) {
+      const err = new Error("filePath is a directory, file-content only supports files");
+      err.code = "VALIDATION";
+      err.field = "filePath";
+      throw err;
+    }
+    try {
+      return fs.readFileSync(resolvedPath, "utf8");
+    } catch (e) {
+      if (e.code === "ENOENT") return "";
+      if (e.code === "EISDIR") {
+        const err = new Error("filePath is a directory, file-content only supports files");
+        err.code = "VALIDATION";
+        err.field = "filePath";
+        throw err;
+      }
+      throw e;
+    }
+  }
+
+  // 注：git ref 分支 readBlob 对 tree 抛错 → 按缺失返回空串；native 路径（优先）已做更严格的
+  // blob 类型校验（目录返回 VALIDATION 错误），iso 仅在 git 二进制不可用时兜底
   try {
     const oid = await git.resolveRef({ fs, dir, ref });
     const { blob } = await git.readBlob({ fs, dir, oid, filepath: filePath });
