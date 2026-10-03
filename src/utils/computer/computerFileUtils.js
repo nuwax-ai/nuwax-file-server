@@ -96,7 +96,7 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
     const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
     if (excludeFiles.includes(entry.name)) continue;
 
-    if (entry.isDirectory() && config.TRAVERSE_EXCLUDE_DIRS.includes(entry.name)) {
+    if (entry.isDirectory() && isTraverseExcludedDir(entry.name)) {
       continue;
     }
 
@@ -132,9 +132,9 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
 
     if (typeFilter === "dir") continue;
 
-    // 根外符号链接不可见（对齐 Rust）：链接目标越出 workspaceDir 的条目不输出，
-    // 防止预置链接把工作区外的宿主文件带进列表与静态读取链路
-    if (entry.isSymbolicLink() && (await escapesRoot(workspaceDir, path.join(listDir, entry.name)))) {
+    // 根外/断链符号链接不可见（对齐 Rust）：链接目标越出 workspaceDir 或目标不存在（断链）的条目不输出，
+    // 防止预置链接把工作区外的宿主文件带进列表，断链条目打开必 404 也不进列表
+    if (entry.isSymbolicLink() && (await isHiddenSymlink(workspaceDir, path.join(listDir, entry.name)))) {
       continue;
     }
 
@@ -155,20 +155,19 @@ async function listDirectoryLevel(listDir, workspaceDir, logId, proxyPath, custo
 }
 
 /**
- * 递归遍历目录（扁平文件列表；空目录以 isDir 返回）
+ * 递归遍历目录（扁平文件列表；目录条目始终输出，DFS：目录条目后紧跟其子项）
  * @param {string} relativeDir 当前层相对遍历起点的正斜杠路径（顶层由调用方换算一次）
  * @param {{typeFilter?: "file"|"dir"|null, limitState?: {limit: number|null, pushed: number}}} [opts]
- *   typeFilter 只过滤输出条目（不影响遍历与空目录判定，目录仍会下钻以发现深层文件）；
+ *   typeFilter 只过滤输出条目（不影响遍历与下钻，目录仍会下钻以发现深层文件）；
  *   limitState 达 limit 后提前终止扫描
- * @returns {Promise<{entries: Array, naturalCount: number}>}
- *   entries=过滤后输出；naturalCount=未过滤自然条目数（供父层空目录判定，与无过滤时的输出条数一致）
+ * @returns {Promise<{entries: Array}>}
+ *   entries=过滤后输出条目（目录条目始终包含，含非空目录）
  */
 async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, relativeDir = "", opts = {}) {
   const { typeFilter = null, limitState = null } = opts;
   // 根边界：首层调用由 getFileList 注入目标根（customTargetDir 或工作区），递归沿用
   const traverseRoot = opts.rootDir || targetDir;
   const entries = [];
-  let naturalCount = 0;
   const rawEntries = await fs.promises.readdir(targetDir, { withFileTypes: true });
 
   rawEntries.sort((a, b) => {
@@ -187,50 +186,52 @@ async function traverseDirectory(targetDir, logId, proxyPath, customTargetDir, r
     const excludeFiles = config.CONTENT_TRAVERSE_EXCLUDE_FILES || [];
     if (excludeFiles.includes(entry.name)) continue;
 
-    if (entry.isDirectory() && config.TRAVERSE_EXCLUDE_DIRS.includes(entry.name)) {
+    if (entry.isDirectory() && isTraverseExcludedDir(entry.name)) {
       continue;
     }
 
-    // 根外符号链接不可见（对齐 Rust）；放在 naturalCount 之前，"仅含越界链接的目录"仍按空目录处理
-    if (entry.isSymbolicLink() && (await escapesRoot(traverseRoot, fullPath))) {
+    // 根外/断链符号链接不可见（对齐 Rust；断链目标不存在，打开必 404，不进列表）
+    if (entry.isSymbolicLink() && (await isHiddenSymlink(traverseRoot, fullPath))) {
       continue;
     }
 
     const relativePath = joinRelativeEntry(relativeDir, entry.name);
-    naturalCount += 1;
 
     if (entry.isDirectory()) {
-      const sub = await traverseDirectory(fullPath, logId, proxyPath, customTargetDir, relativePath, opts);
-      if (sub.naturalCount === 0) {
-        // 空目录：typeFilter=file 时不出条目；达限时不再输出（避免超限）
-        if (typeFilter !== "file" && !isListLimitReached(limitState)) {
-          entries.push({
-            name: relativePath,
-            isDir: true,
-          });
-          countListPushed(limitState);
-        }
-      } else {
-        entries.push(...sub.entries);
-      }
-    } else {
-      if (typeFilter === "dir") continue;
-
-      try {
+      // 目录条目始终输出（与 listDirectoryLevel 口径一致）：非空目录不再"只铺开子项不输出自身"
+      if (typeFilter !== "file" && !isListLimitReached(limitState)) {
         entries.push({
           name: relativePath,
-          isDir: false,
-          fileProxyUrl: buildFileProxyUrl(proxyPath, relativePath, customTargetDir),
-          isLink: entry.isSymbolicLink(),
+          isDir: true,
         });
         countListPushed(limitState);
-      } catch (error) {
-        log(logId, "WARN", `处理文件失败: ${fullPath}`, { error: error.message });
       }
+      // 单个子目录不可读/扫描中被删除：保留目录条目、跳过其子树，不拖垮整个请求（与 listDirectoryLevel 的下钻容错口径一致）
+      try {
+        const sub = await traverseDirectory(fullPath, logId, proxyPath, customTargetDir, relativePath, opts);
+        entries.push(...sub.entries);
+      } catch (error) {
+        log(logId, "WARN", `Depth descent failed, skip subtree: ${relativePath}`, { error: error.message });
+      }
+      continue;
+    }
+
+    if (typeFilter === "dir") continue;
+
+    try {
+      entries.push({
+        name: relativePath,
+        isDir: false,
+        fileProxyUrl: buildFileProxyUrl(proxyPath, relativePath, customTargetDir),
+        isLink: entry.isSymbolicLink(),
+      });
+      countListPushed(limitState);
+    } catch (error) {
+      log(logId, "WARN", `处理文件失败: ${fullPath}`, { error: error.message });
     }
   }
 
-  return { entries, naturalCount };
+  return { entries };
 }
 
 /** 前导分隔符剥离：win32 下 / 与 \ 均为分隔符一并剥离；POSIX 下 \ 是合法文件名字符，只剥 /（防 \foo 被误剥成 foo） */
@@ -250,6 +251,37 @@ async function escapesRoot(rootDir, fullPath) {
   } catch {
     return false;
   }
+}
+
+/**
+ * 列表场景的符号链接隐藏判定：目标越出根（同 escapesRoot 语义）或断链（realpath 失败，
+ * 目标不存在）都不可见——断链打开必 404，混进列表只会产生打不开的条目。
+ * 与 escapesRoot 的"realpath 失败按未越界返回 false"不同：这里失败即隐藏。
+ * 仅用于列表条目过滤，不影响 resolve-file 等读取链路的 fail-open 口径。
+ */
+async function isHiddenSymlink(rootDir, fullPath) {
+  try {
+    const realRoot = await fs.promises.realpath(rootDir);
+    const realPath = await fs.promises.realpath(fullPath);
+    return realPath !== realRoot && !realPath.startsWith(realRoot + path.sep);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 排除目录名命中：Windows 文件名不区分大小写（Node_Modules 与 node_modules 是同一目录），
+ * 忽略大小写匹配；POSIX 区分大小写，精确匹配（Linux 下 Dist 是合法的另一个目录，不能误杀）
+ */
+const TRAVERSE_EXCLUDE_DIR_SET =
+  process.platform === "win32"
+    ? new Set((config.TRAVERSE_EXCLUDE_DIRS || []).map((name) => String(name).toLowerCase()))
+    : new Set(config.TRAVERSE_EXCLUDE_DIRS || []);
+
+function isTraverseExcludedDir(name) {
+  return process.platform === "win32"
+    ? TRAVERSE_EXCLUDE_DIR_SET.has(name.toLowerCase())
+    : TRAVERSE_EXCLUDE_DIR_SET.has(name);
 }
 
 /**

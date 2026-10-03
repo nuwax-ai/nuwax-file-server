@@ -15,6 +15,12 @@ node_modules
 coverage
 *.local
 
+# Agent tool local config
+.agents/
+.claude/
+.codex/
+.opencode/
+
 
 ### IntelliJ IDEA ###
 .idea
