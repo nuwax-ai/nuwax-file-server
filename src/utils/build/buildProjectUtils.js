@@ -6,7 +6,6 @@ import BuildErrorParser from "../error/buildErrorParser.js";
 import config from "../../appConfig/index.js";
 import {
   BusinessError,
-  SystemError,
   FileError,
   ResourceError,
 } from "../error/errorHandler.js";
@@ -83,6 +82,26 @@ async function copyBuildOutputToTarget({
   }
 }
 
+/**
+ * 组装构建脚本失败的业务错误：turbo/tsc 的错误明细多在 stdout（stderr 通常只有摘要），
+ * 两者合并后交错误解析器生成友好信息，并将明细（截断）拼进 message 透传给调用方
+ * （agent/用户要能看到具体报错）。用业务错误（4xx）而非系统错误（5xx）：调用方按业务
+ * 失败处理并直接展示 message，平台侧 PageAppFileClient 走 4xx 分支即可解析到响应体。
+ */
+function composeBuildScriptError(projectId, command, error, stdout, stderr) {
+  const rawOutput = [stderr, stdout].filter(Boolean).join("\n").trim() || error.message;
+  const errorParser = new BuildErrorParser();
+  const userFriendlyMessage = errorParser.parseBuildError(rawOutput, projectId);
+  const maxRawLength = 6000;
+  const truncatedRaw = rawOutput.length > maxRawLength
+    ? rawOutput.slice(0, maxRawLength) + `\n... (output truncated, total ${rawOutput.length} chars)`
+    : rawOutput;
+  return new BusinessError(`${userFriendlyMessage}\n${truncatedRaw}`, {
+    originalError: error.message,
+    command,
+  });
+}
+
 //执行build脚本
 function runBuildScript(projectId, projectPath, scriptName, extraArgs = []) {
   return new Promise((resolve, reject) => {
@@ -108,23 +127,9 @@ function runBuildScript(projectId, projectPath, scriptName, extraArgs = []) {
         logBuild(projectId, "ERROR", "Execution error", {
           error: error.message,
           stderr,
+          stdout,
         });
-
-        // 使用错误解析器提供用户友好的错误信息
-        const errorParser = new BuildErrorParser();
-        const errorMessage = stderr || error.message;
-        const userFriendlyMessage = errorParser.parseBuildError(
-          errorMessage,
-          projectId
-        );
-
-        // 创建包含用户友好信息的构建错误
-        const buildError = new SystemError(userFriendlyMessage, {
-          originalError: error.message,
-          command: command,
-        });
-
-        return reject(buildError);
+        return reject(composeBuildScriptError(projectId, command, error, stdout, stderr));
       }
       logBuild(projectId, "INFO", "Script execution completed", { stdout });
       resolve(stdout);
@@ -238,18 +243,9 @@ async function buildProject(req, projectId) {
             logBuild(projectId, "ERROR", "Execution error", {
               error: error.message,
               stderr,
+              stdout,
             });
-            const errorParser = new BuildErrorParser();
-            const errorMessage = stderr || error.message;
-            const userFriendlyMessage = errorParser.parseBuildError(
-              errorMessage,
-              projectId
-            );
-            const buildError = new SystemError(userFriendlyMessage, {
-              originalError: error.message,
-              command,
-            });
-            return reject(buildError);
+            return reject(composeBuildScriptError(projectId, command, error, stdout, stderr));
           }
           logBuild(projectId, "INFO", "Script execution completed", { stdout });
           resolve(stdout);

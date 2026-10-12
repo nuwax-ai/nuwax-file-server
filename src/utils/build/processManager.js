@@ -18,6 +18,7 @@ import { ensureDevBinariesExecutable } from "../buildPermission/permissionManage
 import { installDependencies } from "../buildDependency/dependencyManager.js";
 import portPool from "../buildArg/portPool.js";
 import { isProjectAlive } from "../buildJudge/aliveJudgeUtils.js";
+import { runDevTypecheckGate } from "./devTypecheckUtils.js";
 
 /**
  * 从日志文件中提取执行命令后的所有行
@@ -441,6 +442,15 @@ async function startDev_NonBlocking({
       safeWrite(tempOutStream, errorMessage, "Temp log", true);  // flush = true
       throw error;
     }
+
+    // dev 启动前类型检查闸门：与 build 同一标准（typecheck 脚本/turbo/tsc --noEmit），
+    // 类型错误就地拦截；环境问题（无 tsconfig/缺工具/超时/无 TS 诊断）内部放行，不影响 dev 启动。
+    // 类型错误抛 BusinessError（4xx）并携带完整错误明细，start/restart 两条链路在此处收敛。
+    const writeTypecheckLog = (data) => {
+      safeWrite(outStream, data, "Main log");
+      safeWrite(tempOutStream, data, "Temp log");
+    };
+    await runDevTypecheckGate({ projectId, projectPath, writeLog: writeTypecheckLog });
 
     // 在日志文件开头写入开始执行
     const startMessage = `Start executing script: dev\n`;
