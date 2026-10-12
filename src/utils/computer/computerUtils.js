@@ -641,6 +641,8 @@ async function createWorkspaceWithAgentStore(options) {
   const extractRoots = [];
   const updatedSkillSet = new Set();
   const skippedSkillSet = new Set();
+  // 单个技能下载/解压/安装失败不阻断整体，记入 failedSkills 随响应返回给上游
+  const failedSkills = [];
   let lockPath = null;
   let skippedStoreUpdate = false;
 
@@ -671,7 +673,8 @@ async function createWorkspaceWithAgentStore(options) {
   };
 
   /**
-   * 下载并安装单个 skill zip；destName 为 skill.md name（协议约定的目录名）
+   * 下载并安装单个 skill zip；destName 为 skill.md name（协议约定的目录名）。
+   * 单个技能失败（下载/解压/无技能目录）记入 failedSkills，不阻断其余技能。
    */
   const downloadAndInstallSkillUrl = async (skillUrl, destName, index) => {
     const downloadedZipPath = path.join(
@@ -686,61 +689,99 @@ async function createWorkspaceWithAgentStore(options) {
     extractRoots.push(urlExtractRoot);
     await fs.promises.mkdir(urlExtractRoot, { recursive: true });
 
-    log(logId, "INFO", "Start download skill zip from url", {
-      userId,
-      cId,
-      agentId,
-      skillName: destName,
-      skillUrl,
-    });
-    await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
-    await extractZip(downloadedZipPath, urlExtractRoot);
-
-    const candidateSkillDirs = await collectSkillDirsFromExtractRoot(urlExtractRoot);
-    if (candidateSkillDirs.length === 0) {
-      log(logId, "WARN", "No skill dir found in downloaded zip", { skillUrl, destName });
+    try {
+      log(logId, "INFO", "Start download skill zip from url", {
+        userId,
+        cId,
+        agentId,
+        skillName: destName,
+        skillUrl,
+      });
+      await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
+      await extractZip(downloadedZipPath, urlExtractRoot);
+    } catch (error) {
+      log(logId, "ERROR", "Download/extract skill zip failed, skip this skill", {
+        userId,
+        cId,
+        agentId,
+        skillName: destName,
+        skillUrl,
+        error: error.message,
+      });
+      failedSkills.push({
+        name: destName || null,
+        url: skillUrl,
+        reason: `Download/extract skill zip failed: ${error.message}`,
+      });
       return;
     }
 
-    let sourceDir = destName
-      ? candidateSkillDirs.find((d) => d.name === destName)
-      : null;
-    if (!sourceDir && candidateSkillDirs.length === 1) {
-      sourceDir = candidateSkillDirs[0];
-    }
-    if (destName && sourceDir) {
-      if (!shouldInstallSkill(destName)) {
-        skippedSkillSet.add(destName);
+    try {
+      const candidateSkillDirs = await collectSkillDirsFromExtractRoot(urlExtractRoot);
+      if (candidateSkillDirs.length === 0) {
+        log(logId, "WARN", "No skill dir found in downloaded zip", { skillUrl, destName });
+        failedSkills.push({
+          name: destName || null,
+          url: skillUrl,
+          reason: "No skill directory found in downloaded zip",
+        });
         return;
       }
-      await installSkillDir(sourceDir.sourcePath, agentSkillsDir, destName, { asDynamic: false });
-      updatedSkillSet.add(destName);
-      log(logId, "INFO", "Skill from url updated to agent store", {
-        userId,
-        cId,
-        agentId,
-        skillUrl,
-        skillName: destName,
-        zipDirName: sourceDir.name,
-      });
-      return;
-    }
 
-    for (const skillDir of candidateSkillDirs) {
-      if (!shouldInstallSkill(skillDir.name)) {
-        skippedSkillSet.add(skillDir.name);
-        continue;
+      let sourceDir = destName
+        ? candidateSkillDirs.find((d) => d.name === destName)
+        : null;
+      if (!sourceDir && candidateSkillDirs.length === 1) {
+        sourceDir = candidateSkillDirs[0];
       }
-      await installSkillDir(skillDir.sourcePath, agentSkillsDir, skillDir.name, {
-        asDynamic: false,
-      });
-      updatedSkillSet.add(skillDir.name);
-      log(logId, "INFO", "Skill from url updated to agent store", {
+      if (destName && sourceDir) {
+        if (!shouldInstallSkill(destName)) {
+          skippedSkillSet.add(destName);
+          return;
+        }
+        await installSkillDir(sourceDir.sourcePath, agentSkillsDir, destName, { asDynamic: false });
+        updatedSkillSet.add(destName);
+        log(logId, "INFO", "Skill from url updated to agent store", {
+          userId,
+          cId,
+          agentId,
+          skillUrl,
+          skillName: destName,
+          zipDirName: sourceDir.name,
+        });
+        return;
+      }
+
+      for (const skillDir of candidateSkillDirs) {
+        if (!shouldInstallSkill(skillDir.name)) {
+          skippedSkillSet.add(skillDir.name);
+          continue;
+        }
+        await installSkillDir(skillDir.sourcePath, agentSkillsDir, skillDir.name, {
+          asDynamic: false,
+        });
+        updatedSkillSet.add(skillDir.name);
+        log(logId, "INFO", "Skill from url updated to agent store", {
+          userId,
+          cId,
+          agentId,
+          skillUrl,
+          skillName: skillDir.name,
+        });
+      }
+    } catch (error) {
+      log(logId, "ERROR", "Install skill from url failed, skip this skill", {
         userId,
         cId,
         agentId,
+        skillName: destName,
         skillUrl,
-        skillName: skillDir.name,
+        error: error.message,
+      });
+      failedSkills.push({
+        name: destName || null,
+        url: skillUrl,
+        reason: `Install skill failed: ${error.message}`,
       });
     }
   };
@@ -887,6 +928,7 @@ async function createWorkspaceWithAgentStore(options) {
       agentStorePath,
       updatedSkills: Array.from(updatedSkillSet),
       skippedSkills: Array.from(skippedSkillSet),
+      failedSkills,
       skippedStoreUpdate,
       linkElapsedMs: linkResult?.elapsedMs,
       elapsedMs: Date.now() - startTime,
@@ -900,6 +942,7 @@ async function createWorkspaceWithAgentStore(options) {
       agentStorePath,
       updatedSkills: Array.from(updatedSkillSet),
       skippedSkills: Array.from(skippedSkillSet),
+      failedSkills,
       skippedStoreUpdate,
     };
   } catch (error) {
@@ -1006,6 +1049,8 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
   const downloadedZipPaths = [];
   const extractRoots = [];
   const updatedSkillSet = new Set();
+  // 单个技能下载/解压/安装失败不阻断整体，记入 failedSkills 随响应返回给上游
+  const failedSkills = [];
 
   if (!userId) {
     throw new ValidationError("userId cannot be empty", { field: "userId" });
@@ -1219,80 +1264,99 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
       }
     }
 
-    // 处理 skillUrls（每个 zip 解压后直接是 skillName 目录）
+    // 处理 skillUrls（每个 zip 解压后直接是 skillName 目录）；单个失败跳过并记入 failedSkills
     for (let i = 0; i < normalizedSkillUrls.length; i += 1) {
       const skillUrl = normalizedSkillUrls[i];
-      const downloadedZipPath = path.join(
-        tmpRoot,
-        `skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
-      );
-      downloadedZipPaths.push(downloadedZipPath);
-      const urlExtractRoot = path.join(
-        tmpRoot,
-        `skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
-      );
-      extractRoots.push(urlExtractRoot);
-      await fs.promises.mkdir(urlExtractRoot, { recursive: true });
+      try {
+        const downloadedZipPath = path.join(
+          tmpRoot,
+          `skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
+        );
+        downloadedZipPaths.push(downloadedZipPath);
+        const urlExtractRoot = path.join(
+          tmpRoot,
+          `skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
+        );
+        extractRoots.push(urlExtractRoot);
+        await fs.promises.mkdir(urlExtractRoot, { recursive: true });
 
-      log(logId, "INFO", "Start download skill zip from url", {
-        userId,
-        cId,
-        skillUrl,
-      });
-      await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
-      log(logId, "INFO", "Skill zip downloaded, start extracting", {
-        userId,
-        cId,
-        skillUrl,
-        downloadedZipPath,
-      });
-      await extractZip(downloadedZipPath, urlExtractRoot);
-
-      const extractedEntries = await fs.promises.readdir(urlExtractRoot, {
-        withFileTypes: true,
-      });
-      const rootDirs = extractedEntries.filter(
-        (entry) => entry.isDirectory() && !entry.name.startsWith(".")
-      );
-
-      const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
-      const candidateSkillDirs = skillsRootDir
-        ? (await fs.promises.readdir(path.join(urlExtractRoot, "skills"), { withFileTypes: true }))
-            .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-            .map((entry) => ({
-              name: entry.name,
-              sourcePath: path.join(urlExtractRoot, "skills", entry.name),
-            }))
-        : rootDirs.map((entry) => ({
-            name: entry.name,
-            sourcePath: path.join(urlExtractRoot, entry.name),
-          }));
-
-      if (candidateSkillDirs.length === 0) {
-        log(logId, "WARN", "No skill directory found after extracting skill url zip", {
+        log(logId, "INFO", "Start download skill zip from url", {
           userId,
           cId,
           skillUrl,
-          extractRoot: urlExtractRoot,
         });
-        continue;
-      }
-
-      await fs.promises.mkdir(targetSkillsDir, { recursive: true });
-      for (const skillDir of candidateSkillDirs) {
-        const destSkillPath = path.join(targetSkillsDir, skillDir.name);
-        if (fs.existsSync(destSkillPath)) {
-          await removeDirIfExists(destSkillPath);
-        }
-        await moveDirectory(skillDir.sourcePath, destSkillPath);
-        updatedSkillSet.add(skillDir.name);
-
-        log(logId, "INFO", "Skill from url updated to workspace", {
+        await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
+        log(logId, "INFO", "Skill zip downloaded, start extracting", {
           userId,
           cId,
           skillUrl,
-          skillName: skillDir.name,
-          destSkillPath,
+          downloadedZipPath,
+        });
+        await extractZip(downloadedZipPath, urlExtractRoot);
+
+        const extractedEntries = await fs.promises.readdir(urlExtractRoot, {
+          withFileTypes: true,
+        });
+        const rootDirs = extractedEntries.filter(
+          (entry) => entry.isDirectory() && !entry.name.startsWith(".")
+        );
+
+        const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
+        const candidateSkillDirs = skillsRootDir
+          ? (await fs.promises.readdir(path.join(urlExtractRoot, "skills"), { withFileTypes: true }))
+              .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+              .map((entry) => ({
+                name: entry.name,
+                sourcePath: path.join(urlExtractRoot, "skills", entry.name),
+              }))
+          : rootDirs.map((entry) => ({
+              name: entry.name,
+              sourcePath: path.join(urlExtractRoot, entry.name),
+            }));
+
+        if (candidateSkillDirs.length === 0) {
+          log(logId, "WARN", "No skill directory found after extracting skill url zip", {
+            userId,
+            cId,
+            skillUrl,
+            extractRoot: urlExtractRoot,
+          });
+          failedSkills.push({
+            name: null,
+            url: skillUrl,
+            reason: "No skill directory found in downloaded zip",
+          });
+          continue;
+        }
+
+        await fs.promises.mkdir(targetSkillsDir, { recursive: true });
+        for (const skillDir of candidateSkillDirs) {
+          const destSkillPath = path.join(targetSkillsDir, skillDir.name);
+          if (fs.existsSync(destSkillPath)) {
+            await removeDirIfExists(destSkillPath);
+          }
+          await moveDirectory(skillDir.sourcePath, destSkillPath);
+          updatedSkillSet.add(skillDir.name);
+
+          log(logId, "INFO", "Skill from url updated to workspace", {
+            userId,
+            cId,
+            skillUrl,
+            skillName: skillDir.name,
+            destSkillPath,
+          });
+        }
+      } catch (error) {
+        log(logId, "ERROR", "Download/extract skill zip failed, skip this skill", {
+          userId,
+          cId,
+          skillUrl,
+          error: error.message,
+        });
+        failedSkills.push({
+          name: null,
+          url: skillUrl,
+          reason: `Download/extract skill zip failed: ${error.message}`,
         });
       }
 
@@ -1344,6 +1408,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
       message,
       workspaceRoot,
       updatedSkills,
+      failedSkills,
     };
   } catch (error) {
     log(logId, "ERROR", "Failed to process workspace resources", {
@@ -1422,6 +1487,8 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, ser
   const downloadedZipPaths = [];
   const extractRoots = [];
   const updatedSkillSet = new Set();
+  // 单个技能下载/解压/安装失败不阻断整体，记入 failedSkills 随响应返回给上游
+  const failedSkills = [];
   let lockPath = null;
 
   if (!userId) {
@@ -1494,25 +1561,50 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, ser
     }
 
     await mapPool(normalizedSkillUrls, SKILL_INSTALL_CONCURRENCY, async (skillUrl, i) => {
-      const downloadedZipPath = path.join(
-        tmpRoot,
-        `push_skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
-      );
-      downloadedZipPaths.push(downloadedZipPath);
-      const urlExtractRoot = path.join(
-        tmpRoot,
-        `push_skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
-      );
-      extractRoots.push(urlExtractRoot);
-      await fs.promises.mkdir(urlExtractRoot, { recursive: true });
-      await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
-      await extractZip(downloadedZipPath, urlExtractRoot);
-      const candidateSkillDirs = await collectSkillDirsFromExtractRoot(urlExtractRoot);
-      for (const skillDir of candidateSkillDirs) {
-        await installSkillDir(skillDir.sourcePath, agentSkillsDir, skillDir.name, {
-          asDynamic: true,
+      try {
+        const downloadedZipPath = path.join(
+          tmpRoot,
+          `push_skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
+        );
+        downloadedZipPaths.push(downloadedZipPath);
+        const urlExtractRoot = path.join(
+          tmpRoot,
+          `push_skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
+        );
+        extractRoots.push(urlExtractRoot);
+        await fs.promises.mkdir(urlExtractRoot, { recursive: true });
+        await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
+        await extractZip(downloadedZipPath, urlExtractRoot);
+        const candidateSkillDirs = await collectSkillDirsFromExtractRoot(urlExtractRoot);
+        if (candidateSkillDirs.length === 0) {
+          log(logId, "WARN", "No skill dir found in downloaded zip", { skillUrl });
+          failedSkills.push({
+            name: null,
+            url: skillUrl,
+            reason: "No skill directory found in downloaded zip",
+          });
+          return;
+        }
+        for (const skillDir of candidateSkillDirs) {
+          await installSkillDir(skillDir.sourcePath, agentSkillsDir, skillDir.name, {
+            asDynamic: true,
+          });
+          updatedSkillSet.add(skillDir.name);
+        }
+      } catch (error) {
+        // 单个技能下载/解压/安装失败只跳过该技能，不阻断其余技能
+        log(logId, "ERROR", "Download/extract/install skill zip failed, skip this skill", {
+          userId,
+          cId,
+          agentId,
+          skillUrl,
+          error: error.message,
         });
-        updatedSkillSet.add(skillDir.name);
+        failedSkills.push({
+          name: null,
+          url: skillUrl,
+          reason: `Download/extract/install skill zip failed: ${error.message}`,
+        });
       }
     });
 
@@ -1551,6 +1643,7 @@ async function pushSkillsToAgentStore(userId, cId, agentId, file, skillUrls, ser
       workspaceRoot,
       agentStorePath,
       updatedSkills,
+      failedSkills,
     };
   } catch (error) {
     log(logId, "ERROR", "Failed to push skills to agent store", {
@@ -1698,6 +1791,8 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId, serv
 
     const updatedSkills = [];
     const updatedSkillSet = new Set();
+    // 单个技能下载/解压失败不阻断整体，记入 failedSkills 随响应返回给上游
+    const failedSkills = [];
 
     // 处理上传 zip：要求 zip 中包含 skills 目录
     if (file) {
@@ -1753,72 +1848,91 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId, serv
       }
     }
 
-    // 处理 skillUrls：解压后可为 skills/<skillName> 或直接 <skillName>
+    // 处理 skillUrls：解压后可为 skills/<skillName> 或直接 <skillName>；单个失败跳过并记入 failedSkills
     for (let i = 0; i < normalizedSkillUrls.length; i += 1) {
       const skillUrl = normalizedSkillUrls[i];
-      const downloadedZipPath = path.join(
-        tmpRoot,
-        `skill_push_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
-      );
-      downloadedZipPaths.push(downloadedZipPath);
-      const urlExtractRoot = path.join(
-        tmpRoot,
-        `skill_push_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
-      );
-      extractRoots.push(urlExtractRoot);
-      await fs.promises.mkdir(urlExtractRoot, { recursive: true });
+      try {
+        const downloadedZipPath = path.join(
+          tmpRoot,
+          `skill_push_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
+        );
+        downloadedZipPaths.push(downloadedZipPath);
+        const urlExtractRoot = path.join(
+          tmpRoot,
+          `skill_push_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
+        );
+        extractRoots.push(urlExtractRoot);
+        await fs.promises.mkdir(urlExtractRoot, { recursive: true });
 
-      log(logId, "INFO", "Start download skill zip for push from url", {
-        userId,
-        cId,
-        skillUrl,
-      });
-      await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
-      await extractZip(downloadedZipPath, urlExtractRoot);
-
-      const extractedEntries = await fs.promises.readdir(urlExtractRoot, {
-        withFileTypes: true,
-      });
-      const rootDirs = extractedEntries.filter(
-        (entry) => entry.isDirectory() && !entry.name.startsWith(".")
-      );
-      const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
-      const candidateSkillDirs = skillsRootDir
-        ? (await fs.promises.readdir(path.join(urlExtractRoot, "skills"), { withFileTypes: true }))
-            .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-            .map((entry) => ({
-              name: entry.name,
-              sourcePath: path.join(urlExtractRoot, "skills", entry.name),
-            }))
-        : rootDirs.map((entry) => ({
-            name: entry.name,
-            sourcePath: path.join(urlExtractRoot, entry.name),
-          }));
-
-      if (candidateSkillDirs.length === 0) {
-        log(logId, "WARN", "No skill directory found after extracting push skill url zip", {
+        log(logId, "INFO", "Start download skill zip for push from url", {
           userId,
           cId,
           skillUrl,
-          extractRoot: urlExtractRoot,
         });
-        continue;
-      }
+        await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
+        await extractZip(downloadedZipPath, urlExtractRoot);
 
-      for (const skillDir of candidateSkillDirs) {
-        const destSkillPath = path.join(targetSkillsDir, skillDir.name);
-        if (fs.existsSync(destSkillPath)) {
-          await removeDirIfExists(destSkillPath);
+        const extractedEntries = await fs.promises.readdir(urlExtractRoot, {
+          withFileTypes: true,
+        });
+        const rootDirs = extractedEntries.filter(
+          (entry) => entry.isDirectory() && !entry.name.startsWith(".")
+        );
+        const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
+        const candidateSkillDirs = skillsRootDir
+          ? (await fs.promises.readdir(path.join(urlExtractRoot, "skills"), { withFileTypes: true }))
+              .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+              .map((entry) => ({
+                name: entry.name,
+                sourcePath: path.join(urlExtractRoot, "skills", entry.name),
+              }))
+          : rootDirs.map((entry) => ({
+              name: entry.name,
+              sourcePath: path.join(urlExtractRoot, entry.name),
+            }));
+
+        if (candidateSkillDirs.length === 0) {
+          log(logId, "WARN", "No skill directory found after extracting push skill url zip", {
+            userId,
+            cId,
+            skillUrl,
+            extractRoot: urlExtractRoot,
+          });
+          failedSkills.push({
+            name: null,
+            url: skillUrl,
+            reason: "No skill directory found in downloaded zip",
+          });
+          continue;
         }
-        await moveDirectory(skillDir.sourcePath, destSkillPath);
-        updatedSkillSet.add(skillDir.name);
 
-        log(logId, "INFO", "skill pushed to workspace from url zip", {
+        for (const skillDir of candidateSkillDirs) {
+          const destSkillPath = path.join(targetSkillsDir, skillDir.name);
+          if (fs.existsSync(destSkillPath)) {
+            await removeDirIfExists(destSkillPath);
+          }
+          await moveDirectory(skillDir.sourcePath, destSkillPath);
+          updatedSkillSet.add(skillDir.name);
+
+          log(logId, "INFO", "skill pushed to workspace from url zip", {
+            userId,
+            cId,
+            skillUrl,
+            skillName: skillDir.name,
+            destSkillPath,
+          });
+        }
+      } catch (error) {
+        log(logId, "ERROR", "Download/extract skill zip failed, skip this skill", {
           userId,
           cId,
           skillUrl,
-          skillName: skillDir.name,
-          destSkillPath,
+          error: error.message,
+        });
+        failedSkills.push({
+          name: null,
+          url: skillUrl,
+          reason: `Download/extract skill zip failed: ${error.message}`,
         });
       }
     }
@@ -1857,6 +1971,7 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId, serv
       message,
       workspaceRoot,
       updatedSkills,
+      failedSkills,
     };
   } catch (error) {
     log(logId, "ERROR", "Failed to push skill to workspace", {

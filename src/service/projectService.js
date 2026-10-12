@@ -733,6 +733,8 @@ async function pushSkillsToWorkspace(
   const normalizedSkillUrls = normalizeSkillUrls(skillUrls);
   const downloadedZipPaths = [];
   const extractRoots = [];
+  // 单个技能下载/解压失败不阻断整体，记入 failedSkills 随响应返回给上游
+  const failedSkills = [];
 
   if (!projectId) {
     throw new ValidationError("Project ID cannot be empty", { field: "projectId" });
@@ -803,59 +805,77 @@ async function pushSkillsToWorkspace(
       }
     }
 
-    // 处理技能 URL（结构兼容 skills/<skillName> 或直接 <skillName>）
+    // 处理技能 URL（结构兼容 skills/<skillName> 或直接 <skillName>）；单个失败跳过并记入 failedSkills
     for (let i = 0; i < normalizedSkillUrls.length; i += 1) {
       const skillUrl = normalizedSkillUrls[i];
-      const downloadedZipPath = path.join(
-        tempRoot,
-        `project_skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
-      );
-      downloadedZipPaths.push(downloadedZipPath);
-      const extractRoot = path.join(
-        tempRoot,
-        `project_skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
-      );
-      extractRoots.push(extractRoot);
+      try {
+        const downloadedZipPath = path.join(
+          tempRoot,
+          `project_skill_url_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}.zip`
+        );
+        downloadedZipPaths.push(downloadedZipPath);
+        const extractRoot = path.join(
+          tempRoot,
+          `project_skill_url_extract_${Date.now()}_${i}_${Math.round(Math.random() * 1e6)}`
+        );
+        extractRoots.push(extractRoot);
 
-      await fs.promises.mkdir(extractRoot, { recursive: true });
-      await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
-      await extractZip(downloadedZipPath, extractRoot);
+        await fs.promises.mkdir(extractRoot, { recursive: true });
+        await downloadUrlToFile(skillUrl, downloadedZipPath, logId);
+        await extractZip(downloadedZipPath, extractRoot);
 
-      const rootEntries = await fs.promises.readdir(extractRoot, { withFileTypes: true });
-      const rootDirs = rootEntries.filter(
-        (entry) => entry.isDirectory() && !entry.name.startsWith(".")
-      );
-      const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
-      const skillCandidates = skillsRootDir
-        ? (await fs.promises.readdir(path.join(extractRoot, "skills"), {
-            withFileTypes: true,
-          }))
-            .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-            .map((entry) => ({
-              name: entry.name,
-              sourcePath: path.join(extractRoot, "skills", entry.name),
+        const rootEntries = await fs.promises.readdir(extractRoot, { withFileTypes: true });
+        const rootDirs = rootEntries.filter(
+          (entry) => entry.isDirectory() && !entry.name.startsWith(".")
+        );
+        const skillsRootDir = rootDirs.find((entry) => entry.name === "skills");
+        const skillCandidates = skillsRootDir
+          ? (await fs.promises.readdir(path.join(extractRoot, "skills"), {
+              withFileTypes: true,
             }))
-        : rootDirs.map((entry) => ({
-            name: entry.name,
-            sourcePath: path.join(extractRoot, entry.name),
-          }));
+              .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+              .map((entry) => ({
+                name: entry.name,
+                sourcePath: path.join(extractRoot, "skills", entry.name),
+              }))
+          : rootDirs.map((entry) => ({
+              name: entry.name,
+              sourcePath: path.join(extractRoot, entry.name),
+            }));
 
-      if (skillCandidates.length === 0) {
-        log(logId, "WARN", "No skill directory found after extracting skill url zip", {
+        if (skillCandidates.length === 0) {
+          log(logId, "WARN", "No skill directory found after extracting skill url zip", {
+            projectId,
+            skillUrl,
+            extractRoot,
+          });
+          failedSkills.push({
+            name: null,
+            url: skillUrl,
+            reason: "No skill directory found in downloaded zip",
+          });
+          continue;
+        }
+
+        for (const skillDir of skillCandidates) {
+          const destSkillPath = path.join(targetSkillsDir, skillDir.name);
+          if (fs.existsSync(destSkillPath)) {
+            await removeDirIfExists(destSkillPath);
+          }
+          await moveDirectory(skillDir.sourcePath, destSkillPath);
+          updatedSkillSet.add(skillDir.name);
+        }
+      } catch (error) {
+        log(logId, "ERROR", "Download/extract skill zip failed, skip this skill", {
           projectId,
           skillUrl,
-          extractRoot,
+          error: error.message,
         });
-        continue;
-      }
-
-      for (const skillDir of skillCandidates) {
-        const destSkillPath = path.join(targetSkillsDir, skillDir.name);
-        if (fs.existsSync(destSkillPath)) {
-          await removeDirIfExists(destSkillPath);
-        }
-        await moveDirectory(skillDir.sourcePath, destSkillPath);
-        updatedSkillSet.add(skillDir.name);
+        failedSkills.push({
+          name: null,
+          url: skillUrl,
+          reason: `Download/extract skill zip failed: ${error.message}`,
+        });
       }
     }
 
@@ -892,6 +912,7 @@ async function pushSkillsToWorkspace(
       message,
       projectPath,
       updatedSkills,
+      failedSkills,
     };
   } catch (error) {
     log(logId, "ERROR", "Push skills to project workspace failed", {
