@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 
 import { ValidationError } from "../error/errorHandler.js";
+import { log } from "../log/logUtils.js";
 
 /**
  * 文件系统目录浏览（目录选择弹窗用）：按绝对路径列一层子项，不锚定工作空间。
@@ -28,18 +29,28 @@ function toDisplayPath(p) {
  * home 单独返回，前端作为快捷入口
  */
 export async function listFsRoots() {
+  const startedAt = Date.now();
   const home = toDisplayPath(os.homedir());
   const roots = [];
   if (process.platform === "win32") {
-    for (let code = 65; code <= 90; code++) {
+    // 并行探测：不可达网络映射盘/读卡器的单次 stat 可阻塞秒级，串行 26 盘求和会把请求拖到平台侧读超时
+    const probeDrive = async (code) => {
       const drive = String.fromCharCode(code) + ":/";
-      try {
-        await fs.promises.stat(drive);
+      const probeStart = Date.now();
+      await fs.promises.stat(drive);
+      return { drive, ms: Date.now() - probeStart }; // stat 失败（盘符不存在）直接 reject，由 allSettled 吞掉
+    };
+    const probes = await Promise.allSettled([...Array(26)].map((_, i) => probeDrive(65 + i)));
+    const driveTimings = [];
+    for (const probe of probes) {
+      if (probe.status === "fulfilled") {
+        const { drive, ms } = probe.value;
         roots.push({ name: drive, path: drive, isDir: true });
-      } catch {
-        // 不存在的盘符跳过
+        driveTimings.push(`${drive}${ms}ms`);
       }
     }
+    // 定位慢盘用：总耗时 + 每个存在盘符的探测耗时（不存在的盘符不记，避免噪声）
+    log("default", "INFO", `fs roots probed in ${Date.now() - startedAt}ms`, { drives: driveTimings });
   } else {
     roots.push({ name: "/", path: "/", isDir: true });
   }
