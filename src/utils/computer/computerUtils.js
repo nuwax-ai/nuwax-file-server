@@ -2038,6 +2038,13 @@ async function pushSkillsToWorkspace(userId, cId, file, skillUrls, agentId, serv
 }
 
 /**
+ * initProjectTemplate 不落盘的模板顶层条目：
+ * .tmp 是工作区暂存根（multer 上传与解压 staging 都在里面），
+ * rename 进去必现 ENOTEMPTY，语义上与 importProject 的保留名单一致，直接跳过
+ */
+const INIT_TEMPLATE_RESERVED_ENTRIES = new Set([".tmp"]);
+
+/**
  * 初始化项目模板
  * 将模板 zip 解压到工作空间目录，并执行 git init + commit
  * @param {string|number} userId
@@ -2092,6 +2099,12 @@ async function initProjectTemplate(userId, cId, file, enableGit, service = null)
     // 将解压后的内容直接移动到目标目录（保留 zip 的顶层目录结构）
     const items = await fs.promises.readdir(extractRoot, { withFileTypes: true });
     for (const item of items) {
+      if (INIT_TEMPLATE_RESERVED_ENTRIES.has(item.name)) {
+        log(logId, "WARN", "Skip reserved workspace entry in template zip", {
+          name: item.name,
+        });
+        continue;
+      }
       const srcPath = path.join(extractRoot, item.name);
       const destPath = path.join(targetDir, item.name);
       if (item.isDirectory()) {
