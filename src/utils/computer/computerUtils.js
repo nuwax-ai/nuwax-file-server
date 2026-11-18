@@ -123,7 +123,7 @@ async function tryFileViewLink(linkPath, targetFile, logId) {
 /**
  * 共享工作区（userapp / normalProject）的技能视图同步：manifest 驱动、链级增量、无整体重建。
  *
- * 工作区四个 agent 目录（.agents/.claude/.opencode/.codex）下 skills/ 与 agents/ 为实体目录，
+ * 工作区四个 agent 目录（.agents/.claude/.opencode/.nuwax-harness）下 skills/ 与 agents/ 为实体目录，
  * 内部每个技能 / subagent 一条相对软链指向提供方的 store 子树——不同智能体的技能各占各的链，
  * 互不抢占；运行中的智能体任意时刻读到的都是完整并集（单个技能在增删属正常上下线）。
  *
@@ -182,7 +182,7 @@ async function syncSharedSkillView(userId, userWorkspaceRoot, agentId, service, 
     // 若为旧软链也替换为实体目录（一次性迁移，幂等）。已是正确链则跳过重建，避免运行中的
     // 智能体读到瞬时空目录；链接不可用时（Windows 无符号链接权限走 junction，junction 也不可用
     // 如 FAT 盘）复制主目录内容兜底，四目录各自保持完整可用
-    const AGENT_DIRS = [".agents", ".claude", ".opencode", ".codex"];
+    const AGENT_DIRS = [".agents", ".claude", ".opencode", ".nuwax-harness"];
     const copyFallbackSubs = []; // 内链不可用的目录：待主目录（并集）填充完成后再复制内容
     for (const dir of AGENT_DIRS) {
       for (const sub of ["skills", "agents"]) {
@@ -1134,7 +1134,7 @@ async function createWorkspace(userId, cId, file, skillUrls, mcpServersConfig, p
     agentsExists: agentsExistsAfter,
   });
 
-  // 写入 Claude Code / Codex / OpenCode 配置（解析失败时不误删旧配置）
+  // 写入 Claude Code / nuwax-harness / OpenCode 配置（解析失败时不误删旧配置）
   await writeAgentHookConfigs(
     userWorkspaceRoot,
     { mcpServersConfig, hooksConfig, permissionsConfig, hookScripts },

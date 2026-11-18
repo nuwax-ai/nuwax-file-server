@@ -18,9 +18,9 @@ coverage
 # Agent tool local config
 .agents/
 .claude/
-.codex/
 .opencode/
-
+.nuwax-harness/
+.codex/
 
 ### IntelliJ IDEA ###
 .idea

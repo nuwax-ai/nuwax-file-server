@@ -12,7 +12,7 @@ describe("importProjectUtils", () => {
       expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".git")).toBe(true);
       expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".agents")).toBe(true);
       expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".claude")).toBe(true);
-      expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".codex")).toBe(true);
+      expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".nuwax-harness")).toBe(true);
       expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".opencode")).toBe(true);
       expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".tmp")).toBe(true);
       expect(IMPORT_PROJECT_PRESERVED_ENTRIES.has(".logs")).toBe(true);

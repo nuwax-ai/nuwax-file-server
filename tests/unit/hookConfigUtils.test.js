@@ -5,10 +5,10 @@ import {
   normalizeHooksMap,
   parseHooksConfigString,
   parseHooksConfigWithStatus,
-  transformHooksForCodex,
+  transformHooksForNuwaxHarness,
   buildHttpWrapperScript,
-  buildCodexHookCommand,
-  normalizeCodexCommand,
+  buildNuwaxHarnessHookCommand,
+  normalizeNuwaxHarnessCommand,
   isLikelyScriptPath,
   toBashEnvExpandable,
   parseTimeoutSeconds,
@@ -88,21 +88,21 @@ describe("hookConfigUtils", () => {
     expect(script).toContain("Bearer ${my_token}");
   });
 
-  test("normalizeCodexCommand resolves relative script paths from git root", () => {
-    expect(normalizeCodexCommand("echo stop")).toBe("echo stop");
-    expect(normalizeCodexCommand("bash -c 'echo hi'")).toBe("bash -c 'echo hi'");
-    expect(normalizeCodexCommand("./scripts/hook.sh")).toContain("git rev-parse --show-toplevel");
-    expect(normalizeCodexCommand("./scripts/hook.sh")).toContain("/scripts/hook.sh");
-    expect(normalizeCodexCommand(".codex/hooks/custom.sh")).toBe(
-      buildCodexHookCommand("custom.sh")
+  test("normalizeNuwaxHarnessCommand resolves relative script paths from git root", () => {
+    expect(normalizeNuwaxHarnessCommand("echo stop")).toBe("echo stop");
+    expect(normalizeNuwaxHarnessCommand("bash -c 'echo hi'")).toBe("bash -c 'echo hi'");
+    expect(normalizeNuwaxHarnessCommand("./scripts/hook.sh")).toContain("git rev-parse --show-toplevel");
+    expect(normalizeNuwaxHarnessCommand("./scripts/hook.sh")).toContain("/scripts/hook.sh");
+    expect(normalizeNuwaxHarnessCommand(".nuwax-harness/hooks/custom.sh")).toBe(
+      buildNuwaxHarnessHookCommand("custom.sh")
     );
-    expect(normalizeCodexCommand("custom.sh")).toBe(buildCodexHookCommand("custom.sh"));
-    expect(normalizeCodexCommand(buildCodexHookCommand("already.sh"))).toBe(
-      buildCodexHookCommand("already.sh")
+    expect(normalizeNuwaxHarnessCommand("custom.sh")).toBe(buildNuwaxHarnessHookCommand("custom.sh"));
+    expect(normalizeNuwaxHarnessCommand(buildNuwaxHarnessHookCommand("already.sh"))).toBe(
+      buildNuwaxHarnessHookCommand("already.sh")
     );
   });
 
-  test("transformHooksForCodex normalizes native command script paths", async () => {
+  test("transformHooksForNuwaxHarness normalizes native command script paths", async () => {
     const hooksMap = normalizeHooksMap({
       Stop: [
         {
@@ -114,24 +114,24 @@ describe("hookConfigUtils", () => {
       ],
     });
 
-    const codexHooks = await transformHooksForCodex(
+    const nuwaxHarnessHooks = await transformHooksForNuwaxHarness(
       hooksMap,
-      path.join(tmpDir, ".codex", "hooks"),
+      path.join(tmpDir, ".nuwax-harness", "hooks"),
       "test"
     );
 
-    expect(codexHooks.Stop[0].hooks[0].command).toBe("echo stop");
-    expect(codexHooks.Stop[0].hooks[1].command).toMatch(/^bash "/);
-    expect(codexHooks.Stop[0].hooks[1].command).toContain("/scripts/stop.sh");
+    expect(nuwaxHarnessHooks.Stop[0].hooks[0].command).toBe("echo stop");
+    expect(nuwaxHarnessHooks.Stop[0].hooks[1].command).toMatch(/^bash "/);
+    expect(nuwaxHarnessHooks.Stop[0].hooks[1].command).toContain("/scripts/stop.sh");
   });
 
-  test("buildCodexHookCommand resolves from git root via bash", () => {
-    expect(buildCodexHookCommand("http-hook-0.sh")).toMatch(/^bash "/);
-    expect(buildCodexHookCommand("http-hook-0.sh")).toContain("git rev-parse --show-toplevel");
-    expect(buildCodexHookCommand("http-hook-0.sh")).toContain(".codex/hooks/http-hook-0.sh");
+  test("buildNuwaxHarnessHookCommand resolves from git root via bash", () => {
+    expect(buildNuwaxHarnessHookCommand("http-hook-0.sh")).toMatch(/^bash "/);
+    expect(buildNuwaxHarnessHookCommand("http-hook-0.sh")).toContain("git rev-parse --show-toplevel");
+    expect(buildNuwaxHarnessHookCommand("http-hook-0.sh")).toContain(".nuwax-harness/hooks/http-hook-0.sh");
   });
 
-  test("transformHooksForCodex converts http hook to command wrapper script", async () => {
+  test("transformHooksForNuwaxHarness converts http hook to command wrapper script", async () => {
     const hooksMap = normalizeHooksMap({
       UserPromptSubmit: [
         {
@@ -140,14 +140,14 @@ describe("hookConfigUtils", () => {
       ],
     });
 
-    const codexHooksDir = path.join(tmpDir, ".codex", "hooks");
-    const codexHooks = await transformHooksForCodex(hooksMap, codexHooksDir, "test");
+    const nuwaxHarnessHooksDir = path.join(tmpDir, ".nuwax-harness", "hooks");
+    const nuwaxHarnessHooks = await transformHooksForNuwaxHarness(hooksMap, nuwaxHarnessHooksDir, "test");
 
-    expect(codexHooks.UserPromptSubmit[0].hooks[0].type).toBe("command");
-    expect(codexHooks.UserPromptSubmit[0].hooks[0].command).toMatch(/^bash "/);
-    expect(codexHooks.UserPromptSubmit[0].hooks[0].timeout).toBe(15);
+    expect(nuwaxHarnessHooks.UserPromptSubmit[0].hooks[0].type).toBe("command");
+    expect(nuwaxHarnessHooks.UserPromptSubmit[0].hooks[0].command).toMatch(/^bash "/);
+    expect(nuwaxHarnessHooks.UserPromptSubmit[0].hooks[0].timeout).toBe(15);
 
-    const scriptPath = path.join(codexHooksDir, "http-hook-0.sh");
+    const scriptPath = path.join(nuwaxHarnessHooksDir, "http-hook-0.sh");
     expect(fs.existsSync(scriptPath)).toBe(true);
     const script = fs.readFileSync(scriptPath, "utf-8");
     expect(script).toContain("https://example.com/hook");
@@ -155,7 +155,7 @@ describe("hookConfigUtils", () => {
     expect(script).toContain("curl -fsS");
   });
 
-  test("writeAgentHookConfigs writes claude, codex and opencode plugin files", async () => {
+  test("writeAgentHookConfigs writes claude, nuwax-harness and opencode plugin files", async () => {
     const hooksConfig = JSON.stringify({
       PreToolUse: [
         {
@@ -178,10 +178,10 @@ describe("hookConfigUtils", () => {
     expect(claudeSettings.hooks.PreToolUse).toBeDefined();
     expect(claudeSettings.hooks.UserPromptSubmit[0].hooks[0].type).toBe("http");
 
-    const codexSettings = JSON.parse(
-      fs.readFileSync(path.join(tmpDir, ".codex", "hooks.json"), "utf-8")
+    const nuwaxHarnessSettings = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"), "utf-8")
     );
-    expect(codexSettings.hooks.UserPromptSubmit[0].hooks[0].type).toBe("command");
+    expect(nuwaxHarnessSettings.hooks.UserPromptSubmit[0].hooks[0].type).toBe("command");
 
     expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin.js"))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin", "dist", "index.js"))).toBe(true);
@@ -194,13 +194,13 @@ describe("hookConfigUtils", () => {
       }),
     }, "test");
 
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin.js"))).toBe(true);
 
     await writeAgentHookConfigs(tmpDir, { hooksConfig: "{}" }, "test");
 
     expect(fs.existsSync(path.join(tmpDir, ".claude", "settings.json"))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin.js"))).toBe(false);
   });
 
@@ -220,10 +220,10 @@ describe("hookConfigUtils", () => {
     );
     expect(claudeSettings.hooks.Stop).toBeDefined();
     expect(claudeSettings.permissions).toEqual({ allow: ["Bash"] });
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
   });
 
-  test("codex-only-unsupported events removes stale codex hooks.json", async () => {
+  test("nuwax-harness-only-unsupported events removes stale nuwax-harness hooks.json", async () => {
     await writeAgentHookConfigs(tmpDir, {
       hooksConfig: JSON.stringify({
         UserPromptSubmit: [
@@ -231,7 +231,7 @@ describe("hookConfigUtils", () => {
         ],
       }),
     }, "test");
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
 
     await writeAgentHookConfigs(tmpDir, {
       hooksConfig: JSON.stringify({
@@ -245,7 +245,7 @@ describe("hookConfigUtils", () => {
       fs.readFileSync(path.join(tmpDir, ".claude", "settings.json"), "utf-8")
     );
     expect(claudeSettings.hooks.PostToolUseFailure).toBeDefined();
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin.js"))).toBe(true);
   });
 
@@ -265,19 +265,19 @@ describe("hookConfigUtils", () => {
     expect(fs.readFileSync(settingsPath, "utf-8")).toContain("echo stop");
   });
 
-  test("hookScripts-only update does not remove codex hooks.json", async () => {
+  test("hookScripts-only update does not remove nuwax-harness hooks.json", async () => {
     await writeAgentHookConfigs(tmpDir, {
       hooksConfig: JSON.stringify({
         Stop: [{ hooks: [{ type: "command", command: "echo stop" }] }],
       }),
     }, "test");
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
 
     await writeAgentHookConfigs(tmpDir, {
       hookScripts: [{ path: "hooks/only.sh", content: "#!/bin/bash\necho only\n" }],
     }, "test");
 
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
     expect(fs.readFileSync(path.join(tmpDir, ".claude", "hooks", "only.sh"), "utf-8")).toContain("echo only");
   });
 
@@ -289,7 +289,7 @@ describe("hookConfigUtils", () => {
     }, "test");
 
     expect(fs.existsSync(path.join(tmpDir, ".claude", "settings.json"))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
 
     await writeAgentHookConfigs(tmpDir, { hooksConfig: "{invalid" }, "test");
 
@@ -297,7 +297,7 @@ describe("hookConfigUtils", () => {
       fs.readFileSync(path.join(tmpDir, ".claude", "settings.json"), "utf-8")
     );
     expect(claudeSettings.hooks.Stop).toBeDefined();
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
   });
 
   test("writeAgentHookConfigs clears stale .claude/hooks scripts when hookScripts provided", async () => {
@@ -392,12 +392,12 @@ describe("hookConfigUtils", () => {
     }, "test");
 
     expect(fs.existsSync(path.join(tmpDir, ".claude", "settings.json"))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(true);
 
     await clearAgentHookConfigs(tmpDir);
 
     expect(fs.existsSync(path.join(tmpDir, ".claude", "settings.json"))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, ".codex", "hooks.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, ".nuwax-harness", "hooks.json"))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, ".opencode", "plugins", "opencode-hooks-plugin.js"))).toBe(false);
   });
 });

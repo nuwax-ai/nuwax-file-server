@@ -17,8 +17,8 @@ const OPENCODE_PLATFORM_ENV_PLUGIN_ASSETS = path.join(
   "../../assets/opencode-platform-env-plugin"
 );
 
-/** Codex 官方文档支持的生命周期事件 */
-const CODEX_HOOK_EVENTS = new Set([
+/** nuwax-harness 支持的生命周期事件 */
+const NUWAX_HARNESS_HOOK_EVENTS = new Set([
   "SessionStart",
   "SubagentStart",
   "SubagentStop",
@@ -157,7 +157,7 @@ function toBashEnvExpandable(value) {
   return String(value).replace(/\$([a-zA-Z_][a-zA-Z0-9_]*)/g, "${$1}");
 }
 
-const CODEX_GIT_ROOT_RESOLVER = /git rev-parse --show-toplevel/;
+const NUWAX_HARNESS_GIT_ROOT_RESOLVER = /git rev-parse --show-toplevel/;
 
 /**
  * 判断 command 是否为需基于 git 根目录解析的脚本路径（而非完整 shell 命令）
@@ -166,7 +166,7 @@ const CODEX_GIT_ROOT_RESOLVER = /git rev-parse --show-toplevel/;
 function isLikelyScriptPath(command) {
   const trimmed = command.trim();
   if (!trimmed) return false;
-  if (CODEX_GIT_ROOT_RESOLVER.test(trimmed)) return false;
+  if (NUWAX_HARNESS_GIT_ROOT_RESOLVER.test(trimmed)) return false;
   if (/[|;&`<>$()]/.test(trimmed)) return false;
   if (/^(bash|sh|zsh|dash|python3?|node|npm|npx|curl|wget|echo|env|cd|export|test|\[)\s+/i.test(trimmed)) {
     return false;
@@ -180,10 +180,10 @@ function isLikelyScriptPath(command) {
 }
 
 /**
- * 将相对脚本路径规范为基于 git 根目录的 bash 调用，避免 Codex 从子目录启动时找不到脚本
+ * 将相对脚本路径规范为基于 git 根目录的 bash 调用，避免 nuwax-harness 从子目录启动时找不到脚本
  * @param {string} command
  */
-function normalizeCodexCommand(command) {
+function normalizeNuwaxHarnessCommand(command) {
   const trimmed = command.trim();
   if (!isLikelyScriptPath(trimmed)) {
     return trimmed;
@@ -195,16 +195,16 @@ function normalizeCodexCommand(command) {
   }
 
   const relativePath = trimmed.replace(/^\.\//, "");
-  const codexHooksPrefix = ".codex/hooks/";
-  if (relativePath.startsWith(codexHooksPrefix)) {
-    const scriptName = relativePath.slice(codexHooksPrefix.length);
+  const nuwaxHarnessHooksPrefix = ".nuwax-harness/hooks/";
+  if (relativePath.startsWith(nuwaxHarnessHooksPrefix)) {
+    const scriptName = relativePath.slice(nuwaxHarnessHooksPrefix.length);
     if (scriptName && !scriptName.includes("/")) {
-      return buildCodexHookCommand(scriptName);
+      return buildNuwaxHarnessHookCommand(scriptName);
     }
   }
 
   if (/^[\w.-]+\.sh$/i.test(relativePath)) {
-    return buildCodexHookCommand(relativePath);
+    return buildNuwaxHarnessHookCommand(relativePath);
   }
 
   const escapedRelative = relativePath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -254,11 +254,11 @@ curl -fsS -X POST ${headerArgs} --data-binary @- --max-time ${timeoutSec} ${shel
 }
 
 /**
- * Codex 推荐基于 git 根目录解析 hook 脚本路径
+ * nuwax-harness 推荐基于 git 根目录解析 hook 脚本路径
  * @param {string} scriptName
  */
-function buildCodexHookCommand(scriptName) {
-  return `bash "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.codex/hooks/${scriptName}"`;
+function buildNuwaxHarnessHookCommand(scriptName) {
+  return `bash "$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.nuwax-harness/hooks/${scriptName}"`;
 }
 
 /**
@@ -290,19 +290,19 @@ async function writeJsonFileAtomic(targetPath, data) {
 }
 
 /**
- * 将 Claude 格式 hooks 转为 Codex hooks.json（仅保留 command；http 生成 wrapper 脚本）
+ * 将 Claude 格式 hooks 转为 nuwax-harness hooks.json（仅保留 command；http 生成 wrapper 脚本）
  * @param {Record<string, unknown[]>} hooksMap
- * @param {string} codexHooksDir `.codex/hooks` 绝对路径
+ * @param {string} nuwaxHarnessHooksDir `.nuwax-harness/hooks` 绝对路径
  * @param {string} logId
  * @returns {Promise<Record<string, unknown[]>|null>}
  */
-async function transformHooksForCodex(hooksMap, codexHooksDir, logId) {
-  const codexHooks = {};
+async function transformHooksForNuwaxHarness(hooksMap, nuwaxHarnessHooksDir, logId) {
+  const nuwaxHarnessHooks = {};
   let wrapperIndex = 0;
 
   for (const [eventName, matcherGroups] of Object.entries(hooksMap)) {
-    if (!CODEX_HOOK_EVENTS.has(eventName)) {
-      log(logId, "WARN", "Skipping unsupported Codex hook event", { eventName });
+    if (!NUWAX_HARNESS_HOOK_EVENTS.has(eventName)) {
+      log(logId, "WARN", "Skipping unsupported nuwax-harness hook event", { eventName });
       continue;
     }
 
@@ -321,7 +321,7 @@ async function transformHooksForCodex(hooksMap, codexHooksDir, logId) {
           transformedHandlers.push({
             ...handler,
             type: "command",
-            command: normalizeCodexCommand(handler.command),
+            command: normalizeNuwaxHarnessCommand(handler.command),
           });
           continue;
         }
@@ -329,13 +329,13 @@ async function transformHooksForCodex(hooksMap, codexHooksDir, logId) {
         if (type === "http" && typeof handler.url === "string" && handler.url.trim()) {
           const timeout = parseTimeoutSeconds(handler.timeout, 30);
           const scriptName = `http-hook-${wrapperIndex++}.sh`;
-          const scriptPath = path.join(codexHooksDir, scriptName);
+          const scriptPath = path.join(nuwaxHarnessHooksDir, scriptName);
           const headers =
             handler.headers && typeof handler.headers === "object" && !Array.isArray(handler.headers)
               ? handler.headers
               : undefined;
 
-          await fs.promises.mkdir(codexHooksDir, { recursive: true });
+          await fs.promises.mkdir(nuwaxHarnessHooksDir, { recursive: true });
           await writeFileAtomic(
             scriptPath,
             buildHttpWrapperScript(handler.url.trim(), timeout, headers),
@@ -344,7 +344,7 @@ async function transformHooksForCodex(hooksMap, codexHooksDir, logId) {
 
           transformedHandlers.push({
             type: "command",
-            command: buildCodexHookCommand(scriptName),
+            command: buildNuwaxHarnessHookCommand(scriptName),
             timeout,
             ...(handler.statusMessage ? { statusMessage: handler.statusMessage } : {}),
           });
@@ -352,11 +352,11 @@ async function transformHooksForCodex(hooksMap, codexHooksDir, logId) {
         }
 
         if (type === "prompt" || type === "agent") {
-          log(logId, "WARN", "Codex skips non-command hook handler", { eventName, type });
+          log(logId, "WARN", "nuwax-harness skips non-command hook handler", { eventName, type });
           continue;
         }
 
-        log(logId, "WARN", "Codex skips unknown hook handler", { eventName, type });
+        log(logId, "WARN", "nuwax-harness skips unknown hook handler", { eventName, type });
       }
 
       if (transformedHandlers.length > 0) {
@@ -368,11 +368,11 @@ async function transformHooksForCodex(hooksMap, codexHooksDir, logId) {
     }
 
     if (transformedGroups.length > 0) {
-      codexHooks[eventName] = transformedGroups;
+      nuwaxHarnessHooks[eventName] = transformedGroups;
     }
   }
 
-  return Object.keys(codexHooks).length > 0 ? codexHooks : null;
+  return Object.keys(nuwaxHarnessHooks).length > 0 ? nuwaxHarnessHooks : null;
 }
 
 /**
@@ -507,8 +507,8 @@ async function writeHookScripts(claudeDir, hookScripts, logId) {
  */
 async function clearHookArtifacts(userWorkspaceRoot) {
   const targets = [
-    path.join(userWorkspaceRoot, ".codex", "hooks.json"),
-    path.join(userWorkspaceRoot, ".codex", "hooks"),
+    path.join(userWorkspaceRoot, ".nuwax-harness", "hooks.json"),
+    path.join(userWorkspaceRoot, ".nuwax-harness", "hooks"),
     path.join(userWorkspaceRoot, ".opencode", "plugins", OPENCODE_PLUGIN_ENTRY),
     path.join(userWorkspaceRoot, ".opencode", "plugins", OPENCODE_PLUGIN_DIR),
     path.join(userWorkspaceRoot, ".opencode", "plugins", OPENCODE_PLATFORM_ENV_PLUGIN_ENTRY),
@@ -542,7 +542,7 @@ async function clearAgentHookConfigs(userWorkspaceRoot) {
 }
 
 /**
- * 在 staging 目录预生成 Codex/OpenCode 产物，成功后再替换工作区，减少半更新窗口
+ * 在 staging 目录预生成 nuwax-harness/OpenCode 产物，成功后再替换工作区，减少半更新窗口
  * @param {string} userWorkspaceRoot
  * @param {Record<string, unknown[]>} hooksMap
  * @param {string} logId
@@ -553,13 +553,13 @@ async function stageRuntimeHookArtifacts(userWorkspaceRoot, hooksMap, logId, ins
     ".tmp",
     `hook-staging-${Date.now()}-${process.pid}`
   );
-  const codexStagingRoot = path.join(stagingRoot, "codex");
-  const codexHooksDir = path.join(codexStagingRoot, "hooks");
+  const nuwaxHarnessStagingRoot = path.join(stagingRoot, "nuwax-harness");
+  const nuwaxHarnessHooksDir = path.join(nuwaxHarnessStagingRoot, "hooks");
   const opencodePluginsStaging = path.join(stagingRoot, "opencode", "plugins");
 
-  await fs.promises.mkdir(codexHooksDir, { recursive: true });
+  await fs.promises.mkdir(nuwaxHarnessHooksDir, { recursive: true });
 
-  const codexHooks = await transformHooksForCodex(hooksMap, codexHooksDir, logId);
+  const nuwaxHarnessHooks = await transformHooksForNuwaxHarness(hooksMap, nuwaxHarnessHooksDir, logId);
   const pluginInstalled = await installOpencodeHooksPlugin(opencodePluginsStaging, logId);
   const platformEnvPluginInstalled = installPlatformEnvPlugin
     ? await installOpencodePlatformEnvPlugin(opencodePluginsStaging, logId)
@@ -567,39 +567,39 @@ async function stageRuntimeHookArtifacts(userWorkspaceRoot, hooksMap, logId, ins
 
   return {
     stagingRoot,
-    codexStagingRoot,
-    codexHooks,
+    nuwaxHarnessStagingRoot,
+    nuwaxHarnessHooks,
     pluginInstalled,
     platformEnvPluginInstalled,
   };
 }
 
 /**
- * 将 staging 中的 Codex/OpenCode 产物应用到工作区
+ * 将 staging 中的 nuwax-harness/OpenCode 产物应用到工作区
  * @param {string} userWorkspaceRoot
- * @param {{ stagingRoot: string, codexStagingRoot: string, codexHooks: Record<string, unknown[]>|null, pluginInstalled: boolean, platformEnvPluginInstalled?: boolean }} staged
+ * @param {{ stagingRoot: string, nuwaxHarnessStagingRoot: string, nuwaxHarnessHooks: Record<string, unknown[]>|null, pluginInstalled: boolean, platformEnvPluginInstalled?: boolean }} staged
  * @param {string} logId
  */
 async function applyStagedRuntimeHookArtifacts(userWorkspaceRoot, staged, logId) {
-  const codexRoot = path.join(userWorkspaceRoot, ".codex");
-  const codexHooksTarget = path.join(codexRoot, "hooks");
+  const nuwaxHarnessRoot = path.join(userWorkspaceRoot, ".nuwax-harness");
+  const nuwaxHarnessHooksTarget = path.join(nuwaxHarnessRoot, "hooks");
   const opencodePluginsTarget = path.join(userWorkspaceRoot, ".opencode", "plugins");
 
   await clearHookArtifacts(userWorkspaceRoot);
-  await fs.promises.mkdir(codexRoot, { recursive: true });
+  await fs.promises.mkdir(nuwaxHarnessRoot, { recursive: true });
 
-  const stagedCodexHooksDir = path.join(staged.codexStagingRoot, "hooks");
-  if (fs.existsSync(stagedCodexHooksDir)) {
-    await fs.promises.rename(stagedCodexHooksDir, codexHooksTarget);
+  const stagedNuwaxHarnessHooksDir = path.join(staged.nuwaxHarnessStagingRoot, "hooks");
+  if (fs.existsSync(stagedNuwaxHarnessHooksDir)) {
+    await fs.promises.rename(stagedNuwaxHarnessHooksDir, nuwaxHarnessHooksTarget);
   }
 
-  if (staged.codexHooks) {
+  if (staged.nuwaxHarnessHooks) {
     await writeJsonFileAtomic(
-      path.join(codexRoot, "hooks.json"),
-      { hooks: staged.codexHooks }
+      path.join(nuwaxHarnessRoot, "hooks.json"),
+      { hooks: staged.nuwaxHarnessHooks }
     );
-    log(logId, "INFO", "Written .codex/hooks.json", {
-      events: Object.keys(staged.codexHooks),
+    log(logId, "INFO", "Written .nuwax-harness/hooks.json", {
+      events: Object.keys(staged.nuwaxHarnessHooks),
     });
   }
 
@@ -639,10 +639,10 @@ async function applyStagedRuntimeHookArtifacts(userWorkspaceRoot, staged, logId)
 }
 
 /**
- * 写入 Claude Code / Codex / OpenCode 三套 Hook 相关配置
+ * 写入 Claude Code / nuwax-harness / OpenCode 三套 Hook 相关配置
  *
  * - Claude Code: `.claude/settings.json` + `.mcp.json` + hook scripts
- * - Codex: `.codex/hooks.json`（http 转为 command wrapper）
+ * - nuwax-harness: `.nuwax-harness/hooks.json`（http 转为 command wrapper）
  * - OpenCode: `.claude/settings.json`（桥接插件读取）+ `.opencode/plugins/opencode-hooks-plugin`
  *
  * 仅在对应配置解析成功后才会清除并重写，避免无效 payload 误删旧配置。
@@ -796,10 +796,10 @@ export {
   parseHooksConfigString,
   parseHooksConfigWithStatus,
   normalizeHooksMap,
-  transformHooksForCodex,
+  transformHooksForNuwaxHarness,
   buildHttpWrapperScript,
-  buildCodexHookCommand,
-  normalizeCodexCommand,
+  buildNuwaxHarnessHookCommand,
+  normalizeNuwaxHarnessCommand,
   isLikelyScriptPath,
   toBashEnvExpandable,
   parseTimeoutSeconds,
@@ -811,5 +811,5 @@ export {
   clearAgentHookConfigs,
   clearHookArtifacts,
   writeAgentHookConfigs,
-  CODEX_HOOK_EVENTS,
+  NUWAX_HARNESS_HOOK_EVENTS,
 };

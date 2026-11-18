@@ -6,7 +6,7 @@ const AGENT_ROOT_MAP = {
   agents: ".agents",
   claudecode: ".claude",
   opencode: ".opencode",
-  codex: ".codex",
+  nuwaxHarness: ".nuwax-harness",
 };
 
 const ALL_AGENT_TYPES = Object.keys(AGENT_ROOT_MAP);
@@ -207,7 +207,7 @@ async function materializeAgentStoreByCopy(workspaceRoot, agentSkillsDir, agentA
 }
 
 /**
- * 会话工作区下 .agents/.claude/.opencode/.codex 的 skills、agents
+ * 会话工作区下 .agents/.claude/.opencode/.nuwax-harness 的 skills、agents
  * 链到智能体实体目录；链接失败则回退为从 store 拷贝（老模式），保证功能可用。
  */
 async function linkWorkspaceToAgentStore(workspaceRoot, agentSkillsDir, agentAgentsDir, logId) {
